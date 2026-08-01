@@ -19,6 +19,11 @@ on:
         required: false
         default: false
 
+# 加入并发控制：相同 workflow 多次触发时自动取消旧任务
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -39,34 +44,18 @@ jobs:
 
       - name: JS syntax check
         run: |
-          fail=0
-          for f in $(find "$PKG_DIR/htdocs" -name '*.js'); do
-            if node --check "$f"; then
-              echo "OK   $f"
-            else
-              echo "::error file=$f::JavaScript syntax error"
-              fail=1
-            fi
-          done
-          exit $fail
+          # 使用 xargs 提高效率，且完美处理特殊文件名
+          find "$PKG_DIR/htdocs" -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
       - name: JSON syntax check
         run: |
-          set -e
-          for f in $(find "$PKG_DIR/root" -name '*.json'); do
-            python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))" "$f"
-            echo "OK   $f"
-          done
+          find "$PKG_DIR/root" -name '*.json' -print0 | xargs -0 -r -n1 python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))"
 
       - name: PO sanity check
         run: |
-          set -e
           sudo apt-get update -qq
           sudo apt-get install -y -qq gettext
-          for f in $(find "$PKG_DIR/po" -name '*.po'); do
-            msgfmt --check-format --output-file=/dev/null "$f"
-            echo "OK   $f"
-          done
+          find "$PKG_DIR/po" -name '*.po' -print0 | xargs -0 -r -n1 msgfmt --check-format --output-file=/dev/null
 
       - name: ACL / menu consistency
         run: |
@@ -114,25 +103,42 @@ jobs:
             libncurses-dev libssl-dev python3 python3-setuptools \
             rsync swig unzip zlib1g-dev file wget curl zstd xz-utils
 
-      - name: Download ImmortalWrt SDK
+      # 分解 SDK 解析、缓存和下载步骤，利用 GitHub Cache 大幅加速重复构建
+      - name: Resolve SDK Info
+        id: sdk-info
         run: |
-          set -e
           mkdir -p "$GITHUB_WORKSPACE/sdk"
-          # 从 sha256sums 自动解析 SDK 文件名，避免硬编码 gcc / 点版本号
           curl -fsSL "${{ matrix.sdk_dir }}/sha256sums" -o sha256sums
           SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.(zst|xz)' sha256sums | head -n1)
           if [ -z "$SDK_FILE" ]; then
             echo "::error::未能在 ${{ matrix.sdk_dir }}/sha256sums 中找到 SDK"
             exit 1
           fi
-          echo "SDK = $SDK_FILE"
-          curl -fSL --retry 3 "${{ matrix.sdk_dir }}/$SDK_FILE" -o "$SDK_FILE"
-          grep " \*\?$SDK_FILE\$" sha256sums | sha256sum -c -
-          case "$SDK_FILE" in
-            *.tar.zst) tar -I zstd -xf "$SDK_FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
-            *.tar.xz)  tar -xJf  "$SDK_FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
+          SDK_HASH=$(grep " \*\?$SDK_FILE\$" sha256sums | awk '{print $1}')
+          echo "file=$SDK_FILE" >> $GITHUB_OUTPUT
+          echo "hash=$SDK_HASH" >> $GITHUB_OUTPUT
+
+      - name: Cache SDK Archive
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.sdk-info.outputs.file }}
+          key: sdk-archive-${{ matrix.tag }}-${{ steps.sdk-info.outputs.hash }}
+
+      - name: Download & Verify SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL --retry 3 "${{ matrix.sdk_dir }}/${{ steps.sdk-info.outputs.file }}" -o "${{ steps.sdk-info.outputs.file }}"
+          grep " \*\?${{ steps.sdk-info.outputs.file }}\$" sha256sums | sha256sum -c -
+
+      - name: Extract SDK
+        run: |
+          FILE="${{ steps.sdk-info.outputs.file }}"
+          echo "Extracting $FILE ..."
+          case "$FILE" in
+            *.tar.zst) tar -I zstd -xf "$FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
+            *.tar.xz)  tar -xJf  "$FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
           esac
-          rm -f "$SDK_FILE"
 
       - name: Prepare feeds
         working-directory: sdk
@@ -147,13 +153,11 @@ jobs:
 
       - name: Copy package into SDK
         run: |
-          set -e
           cp -r "$GITHUB_WORKSPACE/$PKG_DIR" "$GITHUB_WORKSPACE/sdk/package/$PKG_DIR"
 
       - name: Configure
         working-directory: sdk
         run: |
-          set -e
           echo "CONFIG_PACKAGE_${PKG_DIR}=m" > .config
           make defconfig
           echo "--- 相关配置 ---"
@@ -162,20 +166,18 @@ jobs:
       - name: Compile
         working-directory: sdk
         run: |
-          set -e
           make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s
 
       - name: Collect artifacts
         run: |
-          set -e
           out="$GITHUB_WORKSPACE/output"
           mkdir -p "$out"
           found=0
           while IFS= read -r f; do
             cp "$f" "$out/${{ matrix.tag }}__$(basename "$f")"
             found=$((found+1))
-          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f \
-                     \( -name '*qmodem-generic*.ipk' -o -name '*qmodem-generic*.apk' \))
+          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f \( -name '*qmodem-generic*.ipk' -o -name '*qmodem-generic*.apk' \))
+          
           echo "共产出 $found 个包"
           ls -lh "$out"
           if [ "$found" -eq 0 ]; then
@@ -209,13 +211,16 @@ jobs:
         id: meta
         run: |
           set -e
-          VER=$(sed -n 's/^PKG_VERSION:=\(.*\)$/\1/p' "$PKG_DIR/Makefile" | tr -d '[:space:]')
-          REL=$(sed -n 's/^PKG_RELEASE:=\(.*\)$/\1/p' "$PKG_DIR/Makefile" | tr -d '[:space:]')
+          # 增强版提取正则：防止 Makefile 中出现 `PKG_VERSION := 1.0.0` 带有空格导致提取失败
+          VER=$(awk -F':=' '/^PKG_VERSION/ {gsub(/[[:space:]]/, "", $2); print $2}' "$PKG_DIR/Makefile")
+          REL=$(awk -F':=' '/^PKG_RELEASE/ {gsub(/[[:space:]]/, "", $2); print $2}' "$PKG_DIR/Makefile")
           TAG="${{ inputs.release_tag }}"
+          
           if [ -z "$TAG" ]; then
             TAG="v${VER}-${REL}-build${{ github.run_number }}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          
           {
             echo "## luci-app-qmodem-generic ${VER}-${REL}"
             echo
