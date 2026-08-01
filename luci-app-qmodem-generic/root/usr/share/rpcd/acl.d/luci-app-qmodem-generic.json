@@ -1,0 +1,23 @@
+{
+	"luci-app-qmodem-generic": {
+		"description": "Grant access to QModem generic modem management UI",
+		"read": {
+			"uci": [ "qmodem" ],
+			"ubus": {
+				"qmodem": [ "*" ],
+				"rc": [ "list" ],
+				"luci": [ "setInitAction" ],
+				"network.device": [ "status" ],
+				"network.interface": [ "status" ]
+			}
+		},
+		"write": {
+			"uci": [ "qmodem" ],
+			"ubus": {
+				"qmodem": [ "*" ],
+				"rc": [ "list" ],
+				"luci": [ "setInitAction" ]
+			}
+		}
+	}
+}

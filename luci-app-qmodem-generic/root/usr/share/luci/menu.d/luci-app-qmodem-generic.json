@@ -1,0 +1,61 @@
+{
+	"admin/modem": {
+		"title": "Mobile Network",
+		"order": 25,
+		"action": {
+			"type": "firstchild"
+		}
+	},
+	"admin/modem/mt5700m": {
+		"title": "Modem Manager",
+		"order": 20,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-qmodem-generic" ]
+		}
+	},
+	"admin/modem/mt5700m/status": {
+		"title": "Overview",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "mt5700m/status"
+		}
+	},
+	"admin/modem/mt5700m/connection": {
+		"title": "Mobile Data",
+		"order": 20,
+		"action": { "type": "view", "path": "mt5700m/connection" }
+	},
+	"admin/modem/mt5700m/network": {
+		"title": "Radio and Cells",
+		"order": 30,
+		"action": { "type": "view", "path": "mt5700m/network" }
+	},
+	"admin/modem/mt5700m/sms": {
+		"title": "Messages",
+		"order": 40,
+		"action": { "type": "view", "path": "mt5700m/sms" }
+	},
+	"admin/modem/mt5700m/system": {
+		"title": "Module and SIM",
+		"order": 50,
+		"action": { "type": "view", "path": "mt5700m/system" }
+	},
+	"admin/modem/mt5700m/terminal": {
+		"action": { "type": "view", "path": "mt5700m/terminal" }
+	},
+	"admin/modem/mt5700m/advanced": {
+		"title": "Advanced",
+		"order": 60,
+		"action": { "type": "view", "path": "mt5700m/advanced" }
+	},
+	"admin/modem/mt5700m/settings": {
+		"action": { "type": "view", "path": "mt5700m/settings" },
+		"depends": {
+			"acl": [ "luci-app-qmodem-generic" ]
+		}
+	}
+}

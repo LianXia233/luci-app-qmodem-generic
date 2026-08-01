@@ -1,0 +1,254 @@
+name: Build IPK & APK
+
+# 手动触发：编译完成后把 IPK / APK 一并上传到 Release
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag（留空则自动使用 v<版本>-build<运行号>）'
+        required: false
+        default: ''
+      publish_release:
+        description: '编译成功后创建/更新 Release'
+        type: boolean
+        required: false
+        default: true
+      prerelease:
+        description: '标记为预发布(pre-release)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  PKG_DIR: luci-app-qmodem-generic
+
+jobs:
+  # ---------------------------------------------------------------- 静态检查
+  lint:
+    name: Static check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: JS syntax check
+        run: |
+          fail=0
+          for f in $(find "$PKG_DIR/htdocs" -name '*.js'); do
+            if node --check "$f"; then
+              echo "OK   $f"
+            else
+              echo "::error file=$f::JavaScript syntax error"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: JSON syntax check
+        run: |
+          set -e
+          for f in $(find "$PKG_DIR/root" -name '*.json'); do
+            python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))" "$f"
+            echo "OK   $f"
+          done
+
+      - name: PO sanity check
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext
+          for f in $(find "$PKG_DIR/po" -name '*.po'); do
+            msgfmt --check-format --output-file=/dev/null "$f"
+            echo "OK   $f"
+          done
+
+      - name: ACL / menu consistency
+        run: |
+          set -e
+          acl="$PKG_DIR/root/usr/share/rpcd/acl.d/luci-app-qmodem-generic.json"
+          menu="$PKG_DIR/root/usr/share/luci/menu.d/luci-app-qmodem-generic.json"
+          key=$(python3 -c "import json,sys; print(list(json.load(open(sys.argv[1], encoding='utf-8')))[0])" "$acl")
+          echo "ACL group: $key"
+          grep -q "\"$key\"" "$menu"
+          echo "menu.d 的 depends.acl 与 acl.d 一致"
+
+  # ---------------------------------------------------------------- 编译矩阵
+  build:
+    name: ${{ matrix.tag }}
+    needs: lint
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ImmortalWrt 23.05 / 24.10 使用 opkg → 产物为 .ipk
+          - tag: immortalwrt-23.05-ipk
+            sdk_dir: https://downloads.immortalwrt.org/releases/23.05.7/targets/x86/64
+            optional: false
+          - tag: immortalwrt-24.10-ipk
+            sdk_dir: https://downloads.immortalwrt.org/releases/24.10.6/targets/x86/64
+            optional: false
+          # ImmortalWrt 25.12 / snapshots 使用 apk → 产物为 .apk
+          - tag: immortalwrt-25.12-apk
+            sdk_dir: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
+            optional: false
+          - tag: immortalwrt-snapshot-apk
+            sdk_dir: https://downloads.immortalwrt.org/snapshots/targets/x86/64
+            optional: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3 python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget curl zstd xz-utils
+
+      - name: Download ImmortalWrt SDK
+        run: |
+          set -e
+          mkdir -p "$GITHUB_WORKSPACE/sdk"
+          # 从 sha256sums 自动解析 SDK 文件名，避免硬编码 gcc / 点版本号
+          curl -fsSL "${{ matrix.sdk_dir }}/sha256sums" -o sha256sums
+          SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.(zst|xz)' sha256sums | head -n1)
+          if [ -z "$SDK_FILE" ]; then
+            echo "::error::未能在 ${{ matrix.sdk_dir }}/sha256sums 中找到 SDK"
+            exit 1
+          fi
+          echo "SDK = $SDK_FILE"
+          curl -fSL --retry 3 "${{ matrix.sdk_dir }}/$SDK_FILE" -o "$SDK_FILE"
+          grep " \*\?$SDK_FILE\$" sha256sums | sha256sum -c -
+          case "$SDK_FILE" in
+            *.tar.zst) tar -I zstd -xf "$SDK_FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
+            *.tar.xz)  tar -xJf  "$SDK_FILE" --strip-components=1 -C "$GITHUB_WORKSPACE/sdk" ;;
+          esac
+          rm -f "$SDK_FILE"
+
+      - name: Prepare feeds
+        working-directory: sdk
+        run: |
+          set -e
+          # QModem 提供本包的运行时依赖 qmodem，加入 feed 后依赖才能被正确解析
+          echo 'src-git qmodem https://github.com/FUjr/QModem.git' >> feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a -p luci
+          ./scripts/feeds install qmodem \
+            || echo "::warning::qmodem 未能从 feed 安装，依赖仅写入控制信息，不影响本包编译"
+
+      - name: Copy package into SDK
+        run: |
+          set -e
+          cp -r "$GITHUB_WORKSPACE/$PKG_DIR" "$GITHUB_WORKSPACE/sdk/package/$PKG_DIR"
+
+      - name: Configure
+        working-directory: sdk
+        run: |
+          set -e
+          echo "CONFIG_PACKAGE_${PKG_DIR}=m" > .config
+          make defconfig
+          echo "--- 相关配置 ---"
+          grep -E "^(CONFIG_PACKAGE_${PKG_DIR}|CONFIG_USE_APK)" .config || true
+
+      - name: Compile
+        working-directory: sdk
+        run: |
+          set -e
+          make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          out="$GITHUB_WORKSPACE/output"
+          mkdir -p "$out"
+          found=0
+          while IFS= read -r f; do
+            cp "$f" "$out/${{ matrix.tag }}__$(basename "$f")"
+            found=$((found+1))
+          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f \
+                     \( -name '*qmodem-generic*.ipk' -o -name '*qmodem-generic*.apk' \))
+          echo "共产出 $found 个包"
+          ls -lh "$out"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::未找到任何 ipk/apk 产物"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.tag }}
+          path: output/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------- 发布
+  release:
+    name: Publish release
+    needs: build
+    if: ${{ inputs.publish_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: packages-*
+          merge-multiple: true
+
+      - name: Resolve tag & notes
+        id: meta
+        run: |
+          set -e
+          VER=$(sed -n 's/^PKG_VERSION:=\(.*\)$/\1/p' "$PKG_DIR/Makefile" | tr -d '[:space:]')
+          REL=$(sed -n 's/^PKG_RELEASE:=\(.*\)$/\1/p' "$PKG_DIR/Makefile" | tr -d '[:space:]')
+          TAG="${{ inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v${VER}-${REL}-build${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "## luci-app-qmodem-generic ${VER}-${REL}"
+            echo
+            echo "QModem 通用美化版 LuCI Web UI，适用于任意被 QModem 识别的模组。"
+            echo
+            echo "### 安装"
+            echo '```sh'
+            echo '# opkg（ImmortalWrt 23.05 / 24.10）'
+            echo 'opkg install luci-app-qmodem-generic_*.ipk'
+            echo
+            echo '# apk（ImmortalWrt 25.12 / snapshot）'
+            echo 'apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
+            echo '```'
+            echo
+            echo '> 运行时依赖 `qmodem`，请先安装 QModem。'
+            echo '> 若此前装过 `luci-app-mt5700m`，请先卸载再安装本包。'
+            echo
+            echo '### 产物'
+            echo '| 文件 | 大小 |'
+            echo '| --- | --- |'
+            for f in dist/*; do
+              [ -f "$f" ] || continue
+              echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
+            done
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body_path: release-notes.md
+          prerelease: ${{ inputs.prerelease }}
+          files: dist/*
+          fail_on_unmatched_files: true

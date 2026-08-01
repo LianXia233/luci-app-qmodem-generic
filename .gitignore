@@ -1,0 +1,16 @@
+# 编译产物
+*.ipk
+*.apk
+*.lmo
+bin/
+output/
+dist/
+sdk/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
