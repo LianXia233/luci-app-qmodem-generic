@@ -72,8 +72,8 @@ make package/luci-app-qmodem-generic/compile V=s
 
 ## 已知事项
 
-- `po/zh_Hans/qmodem-generic.po` 与当前代码尚未完全同步：约 322 条 UI 字符串缺翻译条目，
-  另有约 678 条为旧版本遗留的陈旧条目。不影响编译与运行，但英文界面下部分文案会显示为中文源串。
+- `po/zh_Hans/qmodem-generic.po` 已与当前 JavaScript UI 字符串同步；QModem 动态返回的未知字段会按
+  `full_name` 原样显示，内置字段使用中文标签映射。
 - 内部资源路径 / 菜单路由 / CSS 类名仍沿用 `mt5700m` 前缀，属历史包袱，改动会破坏加载与导航，故保留。
 - `sms.js` 的导入导出文件名与 `localStorage` 键仍含 `mt5700m-` 前缀（为兼容既有备份）。
 
