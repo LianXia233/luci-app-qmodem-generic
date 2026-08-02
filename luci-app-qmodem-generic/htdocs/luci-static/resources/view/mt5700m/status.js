@@ -88,23 +88,32 @@ return view.extend({
 				guard(controls.getInterfaceStatus(ifname), _('Mobile IP'), {}),
 				guard(controls.getNetworkInfo(section), _('Network'), [])
 			]).then(function(r) {
-				// 合并 QModem 返回的全部 modem_info，用于"完整信息"面板（返回什么就显示什么）
-				var allInfo = [].concat(r[0] || [], r[1] || [], r[2] || [], r[8] || []);
-				return {
-					section: section,
-					ifname: ifname,
-					apn: apn,
-					base: r[0],
-					cell: r[1],
-					sim: r[2],
-					conn: r[3],
-					dns: r[4],
-					usage: r[5],
-					currentBand: r[6],
-					iface: r[7],
-					allInfo: allInfo,
-					errors: errors
-				};
+				// 从 network.interface status 中取物理设备名，查询设备速率
+				var iface = r[7] || {};
+				var devName = iface.l3_device || iface.device || '';
+				var devPromise = devName
+					? guard(controls.getDeviceStatus(devName), _('Device rate'), {})
+					: Promise.resolve({});
+				return devPromise.then(function(devStatus) {
+					// 合并 QModem 返回的全部 modem_info，用于"完整信息"面板（返回什么就显示什么）
+					var allInfo = [].concat(r[0] || [], r[1] || [], r[2] || [], r[8] || []);
+					return {
+						section: section,
+						ifname: ifname,
+						apn: apn,
+						base: r[0],
+						cell: r[1],
+						sim: r[2],
+						conn: r[3],
+						dns: r[4],
+						usage: r[5],
+						currentBand: r[6],
+						iface: r[7],
+						devStatus: devStatus,
+						allInfo: allInfo,
+						errors: errors
+					};
+				});
 			});
 		});
 	},
@@ -299,7 +308,7 @@ return view.extend({
 		]);
 	},
 
-	carrierCard: function(info) {
+	carrierCard: function(info, devStatus) {
 		var active = info.active || info.dual;
 		var badge = !info.available ? _('Unavailable') : info.active ? _('Aggregating') : info.dual ? _('Dual connectivity') : _('Single carrier');
 		var headline = !info.available ? '--' : info.active ? info.count + 'CA' : info.dual ? (info.mode || 'EN-DC') : (info.carriers[0] ? info.carriers[0].band : _('Single carrier'));
@@ -340,6 +349,21 @@ return view.extend({
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Downlink bandwidth')), E('strong', {}, mhz(info.dlBandwidth) || '--') ]),
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, mhz(info.ulBandwidth) || '--') ])
 			]),
+			(function() {
+				if (!devStatus || !devStatus.speed) return null;
+				var speedStr = String(devStatus.speed);
+				var m = speedStr.match(/^(\d+)/);
+				var linkSpeed = m ? parseInt(m[1], 10) : 0;
+				var linkLabel = linkSpeed >= 1000
+					? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
+					: linkSpeed + ' Mbps';
+				return E('div', { 'class':'mt5700m-carrier-stats', 'style':'margin-top:7px' }, [
+					E('div', { 'class':'mt5700m-mini', 'style':'grid-column:1/-1' }, [
+						E('span', {}, _('签约速率（USB 链路）')),
+						E('strong', {}, linkLabel)
+					])
+				]);
+			})(),
 			E('a', { 'class':'mt5700m-card-link', 'href':L.url('admin/modem/mt5700m/network') }, _('View radio and cell details'))
 		]);
 	},
@@ -521,7 +545,7 @@ return view.extend({
 					E('button', { 'class':'btn mt5700m-refresh', 'click':function() { window.location.reload(); } }, _('Refresh'))
 				])
 			]),
-			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo), this.addressCard(session) ]),
+			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
 			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
 			this.trafficPanel(res.usage, data.network_interface),
 			E('div', { 'class':'mt5700m-shortcuts' }, [
