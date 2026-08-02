@@ -5,7 +5,6 @@
 
 . /usr/share/libubox/jshn.sh
 
-TTY_DEV="/dev/ttyUSB1"
 TOOL="/usr/bin/tom_modem"
 
 case "$1" in
@@ -16,6 +15,13 @@ case "$1" in
     case "$2" in
       qos_info)
         read input
+        json_load "$input"
+        json_get_var config_section config_section
+        case "$config_section" in
+          ''|*[!a-zA-Z0-9_-]*) config_section='' ;;
+        esac
+        TTY_DEV=$(uci -q get "qmodem.${config_section}.override_at_port")
+        [ -z "$TTY_DEV" ] && TTY_DEV=$(uci -q get "qmodem.${config_section}.at_port")
         json_init
         if [ -x "$TOOL" ] && [ -c "$TTY_DEV" ]; then
           RAW=$("$TOOL" -d "$TTY_DEV" -c "AT+CGEQOSRDP=1" -t 8 2>&1)
