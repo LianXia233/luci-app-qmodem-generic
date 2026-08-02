@@ -49,7 +49,7 @@ var callGetDialStatus = rpc.declare({ object: 'qmodem', method: 'dial_status', p
 var callGetDialLog = rpc.declare({ object: 'qmodem', method: 'get_dial_log', params: ['config_section'], expect: { } });
 var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', params: ['config_section'], expect: { } });
 var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { } });
-var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_usage_stats', params: ['config_section'], expect: { } });
+var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { } });
 
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { } });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { } });
@@ -126,8 +126,22 @@ function getSms(section) { return callGetSms(section); }
 function getDisabledFeatures(section) { return callGetDisabledFeatures(section); }
 function getRebootCaps(section) { return callGetRebootCaps(section); }
 function getCopyright(section) { return callGetCopyright(section); }
-function getCurrentBand(section) { return callGetCurrentBand(section); }
-function getConnectStatus(section) { return callGetConnectStatus(section); }
+function getCurrentBand(section) {
+	return callGetCurrentBand(section).then(function(r) {
+		/* 部分模组返回 { status: "unsupported" }，统一为空载波列表 */
+		if (r && r.status === 'unsupported' && !Array.isArray(r.cells))
+			r = { cells: [], status: 'unsupported' };
+		return r;
+	});
+}
+/* 兼容实机差异：部分 QModem 版本返回 connection_status 而非 connect_status */
+function getConnectStatus(section) {
+	return callGetConnectStatus(section).then(function(r) {
+		if (r && r.connection_status != null && r.connect_status == null)
+			r.connect_status = r.connection_status;
+		return r;
+	});
+}
 function getDialStatus(section) { return callGetDialStatus(section); }
 function getDialLog(section) { return callGetDialLog(section); }
 function getSimSlot(section) { return callGetSimSlot(section); }

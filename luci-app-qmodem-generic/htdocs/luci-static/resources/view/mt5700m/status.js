@@ -137,7 +137,11 @@ return view.extend({
 		data.active_apn = res.apn || '';
 		data.network_interface = res.ifname || '';
 		data.reachable = base.length || cell.length ? '1' : '0';
-		data.connected = /^yes$/i.test(String(find(conn, 'connect_status') || find(base, 'connect_status') || '')) ? '1' : '0';
+		data.connected = /^yes$/i.test(String(
+		(conn.connection_status) || (conn.connect_status) ||
+		find(conn, 'connect_status') || find(conn, 'connection_status') ||
+		find(base, 'connect_status') || ''
+	)) ? '1' : '0';
 		return data;
 	},
 
