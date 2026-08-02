@@ -25,10 +25,20 @@ case "$1" in
         json_init
         if [ -x "$TOOL" ] && [ -c "$TTY_DEV" ]; then
           RAW=$("$TOOL" -d "$TTY_DEV" -c "AT+CGEQOSRDP=1" -t 8 2>&1)
-          # 解析 +CGEQOSRDP: <cid>,<QCI> 格式
-          QCI=$(echo "$RAW" | sed -n 's/.*+CGEQOSRDP:\s*[0-9]\+,\([0-9]\+\).*/\1/p')
-          if [ -n "$QCI" ]; then
-            json_add_int "qci" "$QCI"
+          # 解析 +CGEQOSRDP: <cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR> 格式
+          QOS_LINE=$(printf '%s\n' "$RAW" | sed -n 's/.*+CGEQOSRDP:[[:space:]]*//p' | head -n1)
+          QCI=''
+          DL_AMBR=''
+          UL_AMBR=''
+          if [ -n "$QOS_LINE" ]; then
+            QCI=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')
+            DL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $(NF-1)); print $(NF-1)}')
+            UL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF); print $NF}')
+          fi
+          if [ -n "$QCI" ] || [ -n "$DL_AMBR" ] || [ -n "$UL_AMBR" ]; then
+            [ -n "$QCI" ] && json_add_int "qci" "$QCI"
+            [ -n "$DL_AMBR" ] && json_add_int "downlink_rate_kbps" "$DL_AMBR"
+            [ -n "$UL_AMBR" ] && json_add_int "uplink_rate_kbps" "$UL_AMBR"
             json_add_string "status" "ok"
           else
             json_add_int "qci" 0
