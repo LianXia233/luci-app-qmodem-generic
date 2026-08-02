@@ -376,6 +376,8 @@ var LABEL_ZH = {
 	'Reference Signal Received Power': '参考信号接收功率 (RSRP)',
 	'Reference Signal Received Quality': '参考信号接收质量 (RSRQ)',
 	'Signal to Interference plus Noise Ratio': '信号干扰噪声比 (SINR)',
+	'Signal to Interference plus Noise Ratio Bandwidth': '信号干扰噪声比带宽 (SINR BW)',
+	'MTU': '最大传输单元 (MTU)',
 	'International Mobile Equipment Identity': '国际移动设备识别码 (IMEI)',
 	'International Mobile Subscriber Identity': '国际移动用户识别码 (IMSI)',
 	'Tracking Area Code': '跟踪区码 (TAC)',

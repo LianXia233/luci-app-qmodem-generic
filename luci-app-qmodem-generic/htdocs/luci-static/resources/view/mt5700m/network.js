@@ -512,11 +512,9 @@ return view.extend({
 			E('p', {}, _('限制模组可使用的频段。日常使用建议保持不锁定，锁定后在异地可能无法注册网络。'))
 		]);
 
-		if (isDisabled(disabled, 'lockband'))
-			return E('section', { 'class': 'mt-control-section' }, [
-				head,
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用频段锁定（disabled_features 含 "LockBand"），相关设置已隐藏。'))
-			]);
+		var note = isDisabled(disabled, 'lockband')
+			? E('div', { 'class': 'mt-control-note' }, _('固件报告频段锁定已禁用，但底层 set_lockband 方法仍可调用。尝试提交频段配置可能生效。'))
+			: null;
 
 		var lockband = plainObject(lockRaw, 'lockband');
 		var classes = [ 'GW', 'LTE', 'NRNSA', 'NRSA' ].filter(function(k) {
@@ -527,19 +525,20 @@ return view.extend({
 				classes.push(k);
 		});
 
-		if (!classes.length)
-			return E('section', { 'class': 'mt-control-section' }, [
-				head,
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 暂无可用的锁频段数据。'))
-			]);
+		if (!classes.length) {
+			var children = [head];
+			if (note) children.push(note);
+			children.push(E('div', { 'class': 'mt-control-note', 'style': 'background:#eef2f6;color:#58606a' }, _('本模组经 QModem 暂无可用的锁频段数据（get_lockband 返回为空）。')));
+			return E('section', { 'class': 'mt-control-section' }, children);
+		}
 
 		var self = this;
-		return E('section', { 'class': 'mt-control-section' }, [
-			head,
-			E('div', { 'class': 'mt-freq-grid', 'style': 'margin-top:0' }, classes.map(function(k) {
-				return self.lockBandPanel(section, k, lockband[k]);
-			}))
-		]);
+		var children = [head];
+		if (note) children.push(note);
+		children.push(E('div', { 'class': 'mt-freq-grid', 'style': 'margin-top:0' }, classes.map(function(k) {
+			return self.lockBandPanel(section, k, lockband[k]);
+		})));
+		return E('section', { 'class': 'mt-control-section' }, children);
 	},
 
 	/* ---------------- 当前频段 / 载波聚合 ---------------- */
@@ -582,7 +581,12 @@ return view.extend({
 			E('div', { 'class': 'mt-ssb-serving' }, [
 				E('div', { 'class': 'mt-ssb-serving-head' }, [
 					E('span', { 'class': 'mt-ssb-serving-title' }, shown(pick(current, [ 'network_mode' ]))),
-					E('span', { 'class': 'mt-ssb-serving-meta' }, shown(pick(current, [ 'status' ])))
+					E('span', { 'class': 'mt-ssb-serving-meta' }, (function(st) {
+						var s = String(st || '').toLowerCase();
+						if (s === 'unsupported') return _('不支持');
+						if (s === 'supported') return _('支持');
+						return shown(st);
+					})(pick(current, [ 'status' ])))
 				])
 			]),
 			cells.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
@@ -593,11 +597,11 @@ return view.extend({
 	/* ---------------- 邻区 ---------------- */
 
 	neighborSection: function(neighborRaw, disabled) {
-		if (isDisabled(disabled, 'neighborcell') || isDisabled(disabled, 'neighbourcell'))
-			return E('section', { 'class': 'mt-net-panel mt-ui-card', 'style': 'margin-top:12px' }, [
-				E('h3', {}, _('邻区信息')),
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用邻区查询（disabled_features 含 "NeighborCell"），邻区面板已隐藏。'))
-			]);
+		var head = E('h3', {}, _('邻区信息'));
+
+		var note = (isDisabled(disabled, 'neighborcell') || isDisabled(disabled, 'neighbourcell'))
+			? E('div', { 'class': 'mt-control-note', 'style': 'margin-bottom:12px' }, _('固件报告邻区查询已禁用，但底层 set_neighborcell/get_neighborcell 方法仍可调用。'))
+			: null;
 
 		var list = neighborList(neighborRaw);
 		var cards = list.map(function(item, index) {
@@ -632,10 +636,12 @@ return view.extend({
 		});
 
 		return E('section', { 'class': 'mt-net-panel mt-ui-card', 'style': 'margin-top:12px' }, [
-			E('h3', {}, _('邻区信息（%d）').format(list.length)),
+			head,
+			note,
+			E('div', {}, _('邻区信息（%d）').format(list.length)),
 			cards.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
 				: E('div', { 'class': 'mt-scan-note' }, _('本模组经 QModem 暂无邻区数据。'))
-		]);
+		].filter(Boolean));
 	},
 
 	/* ---------------- 频率扫描（AT^CELLSCAN） ---------------- */
