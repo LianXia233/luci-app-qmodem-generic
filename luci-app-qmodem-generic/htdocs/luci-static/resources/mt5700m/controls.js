@@ -70,6 +70,8 @@ var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], e
 var callInterfaceStatus = rpc.declare({ object: 'network.interface', method: 'status', params: ['name'], expect: { } });
 // 网络设备状态（用于获取网口链路速率，作为签约速率参考）
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
+// QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
+var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', expect: { } });
 
 /* ------------------------------------------------------------------ */
 /* 通用辅助                                                            */
@@ -182,6 +184,7 @@ function modemRedial(section) { return callModemRedial(section); }
 function rcList(name) { return callRcList(name); }
 function getInterfaceStatus(name) { return callInterfaceStatus(name); }
 function getDeviceStatus(name) { return callDeviceStatus(name); }
+function getQosInfo() { return callQosInfo().catch(function() { return { qci: 0, status: 'unavailable' }; }); }
 
 /* ------------------------------------------------------------------ */
 /* 配置节解析                                                          */
@@ -582,6 +585,7 @@ return baseclass.extend({
 	rcList: rcList,
 	getInterfaceStatus: getInterfaceStatus,
 	getDeviceStatus: getDeviceStatus,
+	getQosInfo: getQosInfo,
 
 	getModemSections: getModemSections,
 	resolveSection: resolveSection,

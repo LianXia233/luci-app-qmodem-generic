@@ -5,6 +5,7 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
+				"qos": [ "*" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ],
 				"network.device": [ "status" ],
@@ -15,6 +16,7 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
+				"qos": [ "*" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ]
 			}

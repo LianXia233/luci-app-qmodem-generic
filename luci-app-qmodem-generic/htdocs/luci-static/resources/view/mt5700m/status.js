@@ -86,7 +86,8 @@ return view.extend({
 				guard(controls.getUsageStats(section), _('Traffic Statistics'), { available: 0 }),
 				guard(controls.getCurrentBand(section), _('Carrier status'), {}),
 				guard(controls.getInterfaceStatus(ifname), _('Mobile IP'), {}),
-				guard(controls.getNetworkInfo(section), _('Network'), [])
+				guard(controls.getNetworkInfo(section), _('Network'), []),
+				guard(controls.getQosInfo(), 'QOS', {})
 			]).then(function(r) {
 				// 从 network.interface status 中取物理设备名，查询设备速率
 				var iface = r[7] || {};
@@ -110,6 +111,7 @@ return view.extend({
 						currentBand: r[6],
 						iface: r[7],
 						devStatus: devStatus,
+						qosInfo: r[9] || {},
 						allInfo: allInfo,
 						errors: errors
 					};
@@ -308,7 +310,7 @@ return view.extend({
 		]);
 	},
 
-	carrierCard: function(info, devStatus) {
+	carrierCard: function(info, devStatus, qosInfo) {
 		var active = info.active || info.dual;
 		var badge = !info.available ? _('Unavailable') : info.active ? _('Aggregating') : info.dual ? _('Dual connectivity') : _('Single carrier');
 		var headline = !info.available ? '--' : info.active ? info.count + 'CA' : info.dual ? (info.mode || 'EN-DC') : (info.carriers[0] ? info.carriers[0].band : _('Single carrier'));
@@ -350,19 +352,39 @@ return view.extend({
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, mhz(info.ulBandwidth) || '--') ])
 			]),
 			(function() {
-				if (!devStatus || !devStatus.speed) return null;
-				var speedStr = String(devStatus.speed);
-				var m = speedStr.match(/^(\d+)/);
-				var linkSpeed = m ? parseInt(m[1], 10) : 0;
-				var linkLabel = linkSpeed >= 1000
-					? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
-					: linkSpeed + ' Mbps';
-				return E('div', { 'class':'mt5700m-carrier-stats', 'style':'margin-top:7px' }, [
-					E('div', { 'class':'mt5700m-mini', 'style':'grid-column:1/-1' }, [
+				var items = [];
+				// QCI 信息（通过 ubus qos.qos_info 获取）
+				if (qosInfo && qosInfo.qci && qosInfo.status === 'ok') {
+					var qciLabel = String(qosInfo.qci);
+					var qciDesc = '';
+					if (qosInfo.qci === 8) qciDesc = 'Non-GBR';
+					else if (qosInfo.qci === 9) qciDesc = 'Non-GBR (default)';
+					else if (qosInfo.qci === 1) qciDesc = 'GBR (Conversational Voice)';
+					else if (qosInfo.qci === 2) qciDesc = 'GBR (Conversational Video)';
+					else if (qosInfo.qci === 3) qciDesc = 'GBR (Real Time Gaming)';
+					else if (qosInfo.qci === 4) qciDesc = 'GBR (Buffered Video)';
+					else if (qosInfo.qci === 5) qciDesc = 'Non-GBR (IMS Signalling)';
+					else if (qosInfo.qci === 6) qciDesc = 'Non-GBR (TCP-based)';
+					else if (qosInfo.qci === 7) qciDesc = 'Non-GBR (Voice/Video/Interactive)';
+					items.push(E('div', { 'class':'mt5700m-mini' }, [
+						E('span', {}, _('QCI')),
+						E('strong', {}, qciDesc ? qciLabel + ' (' + qciDesc + ')' : qciLabel)
+					]));
+				}
+				// 签约速率（USB 链路速率，作为参考）
+				if (devStatus && devStatus.speed) {
+					var speedStr = String(devStatus.speed);
+					var m = speedStr.match(/^(\d+)/);
+					var linkSpeed = m ? parseInt(m[1], 10) : 0;
+					var linkLabel = linkSpeed >= 1000
+						? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
+						: linkSpeed + ' Mbps';
+					items.push(E('div', { 'class':'mt5700m-mini', 'style':'grid-column:1/-1' }, [
 						E('span', {}, _('签约速率（USB 链路）')),
 						E('strong', {}, linkLabel)
-					])
-				]);
+					]));
+				}
+				return items.length ? E('div', { 'class':'mt5700m-carrier-stats', 'style':'margin-top:7px' }, items) : null;
 			})(),
 			E('a', { 'class':'mt5700m-card-link', 'href':L.url('admin/modem/mt5700m/network') }, _('View radio and cell details'))
 		]);
@@ -545,7 +567,7 @@ return view.extend({
 					E('button', { 'class':'btn mt5700m-refresh', 'click':function() { window.location.reload(); } }, _('Refresh'))
 				])
 			]),
-			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
+			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus, res.qosInfo), this.addressCard(session) ]),
 			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
 			this.trafficPanel(res.usage, data.network_interface),
 			E('div', { 'class':'mt5700m-shortcuts' }, [

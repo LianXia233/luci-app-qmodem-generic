@@ -1,0 +1,39 @@
+#!/bin/sh
+# QModem QOS ubus service — 提供 QCI / AMBR 查询
+# 供 luci-app-qmodem-generic 前端通过 rpc.declare 调用
+# 部署路径: /usr/libexec/rpcd/qos
+
+. /usr/share/libubox/jshn.sh
+
+TTY_DEV="/dev/ttyUSB1"
+TOOL="/usr/bin/tom_modem"
+
+case "$1" in
+  list)
+    echo '{"qos_info":{}}'
+    ;;
+  call)
+    case "$2" in
+      qos_info)
+        read input
+        json_init
+        if [ -x "$TOOL" ] && [ -c "$TTY_DEV" ]; then
+          RAW=$("$TOOL" -d "$TTY_DEV" -c "AT+CGEQOSRDP=1" -t 8 2>&1)
+          # 解析 +CGEQOSRDP: <cid>,<QCI> 格式
+          QCI=$(echo "$RAW" | sed -n 's/.*+CGEQOSRDP:\s*[0-9]\+,\([0-9]\+\).*/\1/p')
+          if [ -n "$QCI" ]; then
+            json_add_int "qci" "$QCI"
+            json_add_string "status" "ok"
+          else
+            json_add_int "qci" 0
+            json_add_string "status" "no_data"
+          fi
+        else
+          json_add_int "qci" 0
+          json_add_string "status" "unavailable"
+        fi
+        json_dump
+        ;;
+    esac
+    ;;
+esac

@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
-PKG_VERSION:=2.4.4
+PKG_VERSION:=2.4.5
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
@@ -22,5 +22,13 @@ LUCI_DEPENDS:=+luci-base +qmodem
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
+
+# 确保 rpcd 脚本具有执行权限并注册 ubus 服务
+define Package/luci-app-qmodem-generic/postinst
+#!/bin/sh
+[ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
+/etc/init.d/rpcd restart 2>/dev/null || true
+exit 0
+endef
 
 # call BuildPackage - OpenWrt buildroot signature
