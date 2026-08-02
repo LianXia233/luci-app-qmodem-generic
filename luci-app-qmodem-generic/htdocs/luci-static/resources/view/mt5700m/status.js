@@ -147,6 +147,7 @@ return view.extend({
 
 		data.active_apn = res.apn || '';
 		data.network_interface = res.ifname || '';
+		data.qosInfo = res.qosInfo || {};
 		data.reachable = base.length || cell.length ? '1' : '0';
 		data.connected = /^yes$/i.test(String(
 		(conn.connection_status) || (conn.connect_status) ||
@@ -390,6 +391,22 @@ return view.extend({
 		]);
 	},
 
+	subscriptionRate: function(qosInfo) {
+		qosInfo = qosInfo || {};
+		if (qosInfo.status !== 'ok')
+			return '';
+
+		var down = Number(qosInfo.downlink_rate_kbps != null ? qosInfo.downlink_rate_kbps : (qosInfo.downlink_rate != null ? qosInfo.downlink_rate : qosInfo.rx_data_rate_max));
+		var up = Number(qosInfo.uplink_rate_kbps != null ? qosInfo.uplink_rate_kbps : (qosInfo.uplink_rate != null ? qosInfo.uplink_rate : qosInfo.tx_data_rate_max));
+		if (!down && !up)
+			return '';
+
+		return _('Down %s / Up %s').format(
+			down ? controls.formatRate(down * 1000) : '--',
+			up ? controls.formatRate(up * 1000) : '--'
+		);
+	},
+
 	addressCard: function(session) {
 		var active = session.connected || session.ipv4Connected || session.ipv6Connected;
 		return E('section', { 'class':'mt5700m-focus mt5700m-address-card mt-ui-card' }, [
@@ -440,6 +457,7 @@ return view.extend({
 	simCard: function(data) {
 		var simState = data.sim || '';
 		var simOk = /READY|正常|OK/i.test(simState);
+		var subRate = this.subscriptionRate(data.qosInfo);
 		return E('section', { 'class':'mt5700m-info mt-ui-card' }, [
 			E('div', { 'class':'mt5700m-info-head' }, [
 				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('SIM & Subscription')), E('div', { 'class':'mt5700m-info-desc' }, _('Subscriber identity and service plan')) ]),
@@ -449,6 +467,7 @@ return view.extend({
 				this.infoRow(_('Operator'), data.operator),
 				this.infoRow(_('Access technology'), data.sysmode_detail),
 				this.infoRow(_('APN'), data.active_apn),
+				this.infoRow(_('Subscription rate'), subRate || '--'),
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
 				this.infoRow(_('Phone number'), data.phone_number)
