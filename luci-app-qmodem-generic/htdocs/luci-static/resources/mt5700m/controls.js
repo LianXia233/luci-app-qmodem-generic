@@ -44,15 +44,18 @@ var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disab
 var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { } });
 var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { } });
 var callGetCurrentBand = rpc.declare({ object: 'qmodem', method: 'get_current_band', params: ['config_section'], expect: { } });
+var callGetCurrentBandCapabilities = rpc.declare({ object: 'qmodem', method: 'get_current_band_capabilities', params: ['config_section'], expect: { } });
 var callGetConnectStatus = rpc.declare({ object: 'qmodem', method: 'get_connect_status', params: ['config_section'], expect: { } });
 var callGetDialStatus = rpc.declare({ object: 'qmodem', method: 'dial_status', params: ['config_section'], expect: { } });
 var callGetDialLog = rpc.declare({ object: 'qmodem', method: 'get_dial_log', params: ['config_section'], expect: { } });
 var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', params: ['config_section'], expect: { } });
 var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { } });
 var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { } });
+var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_traffic_reset_schedule', params: ['config_section'], expect: { } });
 
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { } });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { } });
+var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { } });
 var callDeleteSms = rpc.declare({ object: 'qmodem', method: 'delete_sms', params: ['config_section', 'index'], expect: { } });
 var callSetMode = rpc.declare({ object: 'qmodem', method: 'set_mode', params: ['config_section', 'mode'], expect: { } });
 var callSetImei = rpc.declare({ object: 'qmodem', method: 'set_imei', params: ['config_section', 'imei'], expect: { } });
@@ -61,6 +64,10 @@ var callSetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'set_network_
 var callSetSimSlot = rpc.declare({ object: 'qmodem', method: 'set_sim_slot', params: ['config_section', 'slot'], expect: { } });
 var callDoReboot = rpc.declare({ object: 'qmodem', method: 'do_reboot', params: ['config_section', 'params'], expect: { } });
 var callClearDialLog = rpc.declare({ object: 'qmodem', method: 'clear_dial_log', params: ['config_section'], expect: { } });
+var callClearStats = rpc.declare({ object: 'qmodem', method: 'clear_stats', params: ['config_section'], expect: { } });
+var callSetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'set_traffic_reset_schedule', params: ['config_section', 'params'], expect: { } });
+var callSetNeighborCell = rpc.declare({ object: 'qmodem', method: 'set_neighborcell', params: ['config_section', 'params'], expect: { } });
+var callSetSmsStorage = rpc.declare({ object: 'qmodem', method: 'set_sms_storage', params: ['config_section', 'storage'], expect: { } });
 var callModemDial = rpc.declare({ object: 'qmodem', method: 'modem_dial', params: ['config_section'], expect: { } });
 var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params: ['config_section'], expect: { } });
 var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { } });
@@ -71,7 +78,7 @@ var callInterfaceStatus = rpc.declare({ object: 'network.interface', method: 'st
 // 网络设备状态（用于获取网口链路速率，作为签约速率参考）
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
 // QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
-var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', expect: { } });
+var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', params: ['config_section'], expect: { } });
 
 /* ------------------------------------------------------------------ */
 /* 通用辅助                                                            */
@@ -138,6 +145,7 @@ function getCurrentBand(section) {
 		return r;
 	});
 }
+function getCurrentBandCapabilities(section) { return callGetCurrentBandCapabilities(section); }
 /* 兼容实机差异：部分 QModem 版本返回 connection_status 而非 connect_status */
 function getConnectStatus(section) {
 	return callGetConnectStatus(section).then(function(r) {
@@ -153,6 +161,7 @@ function getSimSwitchCapabilities(section) { return callGetSimSwitchCapabilities
 function getUsageStats(section) {
 	return callGetUsageStats(section).catch(function() { return { available: 0 }; });
 }
+function getTrafficResetSchedule(section) { return callGetTrafficResetSchedule(section); }
 
 /* ------------------------------------------------------------------ */
 /* 控制动作封装（写操作，返回 Promise）                                */
@@ -168,6 +177,7 @@ function sendAt(section, atPort, command, useUbus) {
 function sendSms(section, phoneNumber, content) {
 	return callSendSms(section, { phone_number: phoneNumber, message_content: content });
 }
+function sendRawPdu(section, command) { return callSendRawPdu(section, command); }
 function deleteSms(section, index) { return callDeleteSms(section, index); }
 function setMode(section, mode) { return callSetMode(section, mode); }
 function setImei(section, imei) { return callSetImei(section, imei); }
@@ -178,13 +188,17 @@ function doReboot(section, method) {
 	return callDoReboot(section, { method: method || 'soft' });
 }
 function clearDialLog(section) { return callClearDialLog(section); }
+function clearStats(section) { return callClearStats(section); }
+function setTrafficResetSchedule(section, params) { return callSetTrafficResetSchedule(section, params); }
+function setNeighborCell(section, params) { return callSetNeighborCell(section, params); }
+function setSmsStorage(section, storage) { return callSetSmsStorage(section, storage); }
 function modemDial(section) { return callModemDial(section); }
 function modemHang(section) { return callModemHang(section); }
 function modemRedial(section) { return callModemRedial(section); }
 function rcList(name) { return callRcList(name); }
 function getInterfaceStatus(name) { return callInterfaceStatus(name); }
 function getDeviceStatus(name) { return callDeviceStatus(name); }
-function getQosInfo() { return callQosInfo().catch(function() { return { qci: 0, status: 'unavailable' }; }); }
+function getQosInfo(section) { return callQosInfo(section).catch(function() { return { qci: 0, status: 'unavailable' }; }); }
 
 /* ------------------------------------------------------------------ */
 /* 配置节解析                                                          */
@@ -404,7 +418,7 @@ function renderInfoGrouped(entries) {
 	Object.keys(grouped).forEach(function(cls) {
 		var rows = grouped[cls].map(function(item) {
 			var rawName = item.full_name || item.key || '';
-			var name = LABEL_ZH[rawName] || rawName;
+			var name = LABEL_ZH[rawName] || _(rawName);
 			var display = item.extra_info ? (name + ' (' + item.extra_info + ')') : name;
 			var val = (item.value == null || item.value === '') ? '--' : String(item.value);
 			return E('div', { 'class': 'mt-info-row' }, [
@@ -413,7 +427,7 @@ function renderInfoGrouped(entries) {
 			]);
 		});
 		cards.push(E('section', { 'class': 'mt-info-card mt-ui-card' }, [
-			E('h3', {}, cls),
+			E('h3', {}, _(cls)),
 			E('div', { 'class': 'mt-info-body' }, rows)
 		]));
 	});
@@ -562,15 +576,18 @@ return baseclass.extend({
 	getRebootCaps: getRebootCaps,
 	getCopyright: getCopyright,
 	getCurrentBand: getCurrentBand,
+	getCurrentBandCapabilities: getCurrentBandCapabilities,
 	getConnectStatus: getConnectStatus,
 	getDialStatus: getDialStatus,
 	getDialLog: getDialLog,
 	getSimSlot: getSimSlot,
 	getSimSwitchCapabilities: getSimSwitchCapabilities,
 	getUsageStats: getUsageStats,
+	getTrafficResetSchedule: getTrafficResetSchedule,
 
 	sendAt: sendAt,
 	sendSms: sendSms,
+	sendRawPdu: sendRawPdu,
 	deleteSms: deleteSms,
 	setMode: setMode,
 	setImei: setImei,
@@ -579,6 +596,10 @@ return baseclass.extend({
 	setSimSlot: setSimSlot,
 	doReboot: doReboot,
 	clearDialLog: clearDialLog,
+	clearStats: clearStats,
+	setTrafficResetSchedule: setTrafficResetSchedule,
+	setNeighborCell: setNeighborCell,
+	setSmsStorage: setSmsStorage,
 	modemDial: modemDial,
 	modemHang: modemHang,
 	modemRedial: modemRedial,

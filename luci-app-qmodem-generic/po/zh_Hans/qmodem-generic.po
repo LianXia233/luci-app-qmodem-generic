@@ -2677,3 +2677,981 @@ msgstr "未收到扫描数据。"
 
 msgid "Modem Manager"
 msgstr "模组管理"
+
+msgid "2G / 3G（GSM / WCDMA）"
+msgstr "2G / 3G（GSM / WCDMA）"
+
+msgid "4G LTE"
+msgstr "4G LTE"
+
+msgid "5G NR（NSA 非独立组网）"
+msgstr "5G NR（NSA 非独立组网）"
+
+msgid "5G NR（SA 独立组网）"
+msgstr "5G NR（SA 独立组网）"
+
+msgid "APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。"
+msgstr "APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。"
+
+msgid "AT 命令"
+msgstr "AT 命令"
+
+msgid "AT 控制台"
+msgstr "AT 控制台"
+
+msgid "AT 端口"
+msgstr "AT 端口"
+
+msgid "AT 端口：%s　供应商：%s"
+msgstr "AT 端口：%s　供应商：%s"
+
+msgid "AT 透传"
+msgstr "AT 透传"
+
+msgid "Airplane mode failed: %s"
+msgstr "飞行模式失败：%s"
+
+msgid "All fields reported by QModem for this module, grouped by category."
+msgstr "QModem 上报的该模组全部字段，按类别分组显示。"
+
+msgid "Configured thresholds"
+msgstr "已配置的阈值"
+
+msgid "Connection status"
+msgstr "连接状态"
+
+msgid "Conversations using the SIM installed in the module."
+msgstr "使用模组中 SIM 卡的会话。"
+
+msgid "Current IMEI"
+msgstr "当前 IMEI"
+
+msgid "Current SIM state"
+msgstr "当前 SIM 状态"
+
+msgid "Current temperature"
+msgstr "当前温度"
+
+msgid "DNS 读取"
+msgstr "DNS 读取"
+
+msgid "Daily SIM and radio controls, executed through the QModem ubus interface."
+msgstr "通过 QModem ubus 接口执行日常 SIM 与无线控制。"
+
+msgid "Device rate"
+msgstr "设备速率"
+
+msgid "Diagnostic console for advanced users. Commands are sent directly to the module and are not automatically validated."
+msgstr "供高级用户使用的诊断控制台。命令将直接发送到模组，不会自动校验。"
+
+msgid "Factory reset failed: %s"
+msgstr "恢复出厂设置失败：%s"
+
+msgid "Firmware download request accepted."
+msgstr "固件下载请求已接受。"
+
+msgid "Full module information"
+msgstr "模组完整信息"
+
+msgid "ICCID is not exposed by QModem for this module. Device and SIM identifiers are displayed only in this local management page."
+msgstr "QModem 未向该模组提供 ICCID。设备与 SIM 标识仅在本地管理页面显示。"
+
+msgid "IMEI write failed: %s"
+msgstr "写入 IMEI 失败：%s"
+
+msgid "IMEI writing may be restricted by local law or the mobile operator. This control is provided only for restoring the original device identity."
+msgstr "写入 IMEI 可能受当地法律或运营商限制，此控件仅用于恢复设备原始标识。"
+
+msgid "IMEI 写入"
+msgstr "IMEI 写入"
+
+msgid "IMEI 读取"
+msgstr "IMEI 读取"
+
+msgid "IP 协议"
+msgstr "IP 协议"
+
+msgid "IP 透传"
+msgstr "IP 透传"
+
+msgid "IP 透传 / Post-Route / DMZ"
+msgstr "IP 透传 / Post-Route / DMZ"
+
+msgid "IP 透传、Post-Route、DMZ 等模组侧转发设置。"
+msgstr "IP 透传、Post-Route、DMZ 等模组侧转发设置。"
+
+msgid "IPv4 地址"
+msgstr "IPv4 地址"
+
+msgid "IPv6 地址"
+msgstr "IPv6 地址"
+
+msgid "LED setting accepted."
+msgstr "LED 设置已接受。"
+
+msgid "MODULE SYSTEM"
+msgstr "模组系统"
+
+msgid "Mobile Module"
+msgstr "移动模组"
+
+msgid "Modem"
+msgstr "模组"
+
+msgid "Modem not detected (make sure QModem has recognised the device)."
+msgstr "未检测到模组（请确认 QModem 已识别该设备）。"
+
+msgid "Module restart failed: %s"
+msgstr "重启模组失败：%s"
+
+msgid "Module temperature"
+msgstr "模组温度"
+
+msgid "Network"
+msgstr "网络"
+
+msgid "No SIM detected"
+msgstr "未检测到 SIM 卡"
+
+msgid "No modem detected (make sure QModem has recognised the device)."
+msgstr "未检测到模组（请确认 QModem 已识别该设备）。"
+
+msgid "Not supported"
+msgstr "不支持"
+
+msgid "PCIe 以太网 PHY 档位"
+msgstr "PCIe 以太网 PHY 档位"
+
+msgid "PCIe 以太网控制器"
+msgstr "PCIe 以太网控制器"
+
+msgid "PCIe 控制器"
+msgstr "PCIe 控制器"
+
+msgid "PCIe 控制器命令已被接受。"
+msgstr "PCIe 控制器命令已被接受。"
+
+msgid "PDP 上下文索引"
+msgstr "PDP 上下文索引"
+
+msgid "PHY 档位"
+msgstr "PHY 档位"
+
+msgid "PHY 档位命令已被接受。"
+msgstr "PHY 档位命令已被接受。"
+
+msgid "PIN operations are sent to the module as AT commands through QModem."
+msgstr "PIN 操作将通过 QModem 以 AT 命令发送到模组。"
+
+msgid "PIN required"
+msgstr "需要 PIN"
+
+msgid "PIN2 required"
+msgstr "需要 PIN2"
+
+msgid "PUK required"
+msgstr "需要 PUK"
+
+msgid "PUK2 required"
+msgstr "需要 PUK2"
+
+msgid "Poor"
+msgstr "较弱"
+
+msgid "QModem configuration"
+msgstr "QModem 配置"
+
+msgid "QModem dial_status 原始上报。"
+msgstr "QModem dial_status 原始上报。"
+
+msgid "QModem does not expose FOTA status for this module; the download request is sent as an AT passthrough command. Do not interrupt power during installation."
+msgstr "QModem 未提供该模组的 FOTA 状态；下载请求将作为 AT 透传命令发送。安装期间请勿断电。"
+
+msgid "QModem has no generic LED method; the setting is sent as a module-specific AT command and takes effect after restart."
+msgstr "QModem 没有通用 LED 方法；设置将作为模组专用 AT 命令发送，重启后生效。"
+
+msgid "QModem only reports the module temperature (currently %s). Threshold writing has no generic QModem method and is sent as an AT passthrough command; the module may reject it."
+msgstr "QModem 仅报告模组温度（当前为 %s）。阈值写入没有通用 QModem 方法，将通过 AT 透传发送，模组可能拒绝。"
+
+msgid "QModem only reports the module temperature; thermal thresholds cannot be read back. Writing them uses an AT passthrough command."
+msgstr "QModem 仅报告模组温度，无法回读热保护阈值；写入将通过 AT 透传命令完成。"
+
+msgid "QModem 上报的特性支持情况与重启能力。"
+msgstr "QModem 上报的特性支持情况与重启能力。"
+
+msgid "QModem 下发 AT 命令使用的端口设备节点。留空则由 QModem 自动选择。"
+msgstr "QModem 下发 AT 命令使用的端口设备节点。留空则由 QModem 自动选择。"
+
+msgid "QModem 允许该模组使用的拨号模式列表，按模组实际能力显示。"
+msgstr "QModem 允许该模组使用的拨号模式列表，按模组实际能力显示。"
+
+msgid "QModem 未报告任何被禁用的特性"
+msgstr "QModem 未报告任何被禁用的特性"
+
+msgid "QModem 用于该模组数据接口与配置节的名称。"
+msgstr "QModem 用于该模组数据接口与配置节的名称。"
+
+msgid "Resuming the radio failed: %s"
+msgstr "恢复无线功能失败：%s"
+
+msgid "SIM PIN command accepted."
+msgstr "SIM PIN 命令已接受。"
+
+msgid "SIM activation command accepted."
+msgstr "SIM 激活命令已接受。"
+
+msgid "SIM information"
+msgstr "SIM 信息"
+
+msgid "SIM not ready"
+msgstr "SIM 未就绪"
+
+msgid "SIM slot %s"
+msgstr "SIM 卡槽 %s"
+
+msgid "SIM slot switch failed: %s"
+msgstr "切换 SIM 卡槽失败：%s"
+
+msgid "SIM slot switching"
+msgstr "SIM 卡槽切换"
+
+msgid "SIM 卡槽切换"
+msgstr "SIM 卡槽切换"
+
+msgid "SIM 热插拔"
+msgstr "SIM 热插拔"
+
+msgid "SIM 热插拔命令已被接受。"
+msgstr "SIM 热插拔命令已被接受。"
+
+msgid "Supported"
+msgstr "支持"
+
+msgid "The module rejected the AT passthrough command %s: %s"
+msgstr "模组拒绝了 AT 透传命令 %s：%s"
+
+msgid "The module will detach from the network while changing the physical SIM path."
+msgstr "更换物理 SIM 通路时，模组将暂时脱离网络。"
+
+msgid "The module will reset its own configuration and restart."
+msgstr "模组将重置自身配置并重启。"
+
+msgid "The selected file is not a valid sent-history backup."
+msgstr "所选文件不是有效的已发送记录备份。"
+
+msgid "Thermal logging updated."
+msgstr "热保护日志已更新。"
+
+msgid "This erases module-side APN, radio, SIM, interface and thermal settings, then restarts the module. OpenWrt settings are not erased."
+msgstr "这将清除模组侧 APN、无线、SIM、接口和热保护设置，然后重启模组；不会清除 OpenWrt 设置。"
+
+msgid "This module does not report SIM slot switching support through QModem."
+msgstr "QModem 未报告该模组支持切换 SIM 卡槽。"
+
+msgid "This module does not support the AT passthrough command %s via QModem: %s"
+msgstr "QModem 不支持通过透传执行命令 %s：%s"
+
+msgid "This module reports no traffic statistics via QModem (some vendor drivers do not implement usage_stats)."
+msgstr "QModem 未报告该模组的流量统计（部分厂商驱动未实现 usage_stats）。"
+
+msgid "This operation can prevent network registration. Continue only when restoring the identity printed on the module label."
+msgstr "此操作可能导致无法驻网。仅在恢复模组标签上的原始标识时继续。"
+
+msgid "This will restart the module and temporarily interrupt mobile connectivity."
+msgstr "这将重启模组并暂时中断移动网络连接。"
+
+msgid "USB 数据模式"
+msgstr "USB 数据模式"
+
+msgid "USB 模式"
+msgstr "USB 模式"
+
+msgid "USB 模式命令已被接受。"
+msgstr "USB 模式命令已被接受。"
+
+msgid "Usage counters reported by QModem for %s"
+msgstr "QModem 报告的 %s 流量计数器"
+
+msgid "Use the buttons below"
+msgstr "请使用下方按钮"
+
+msgid "一般"
+msgstr "一般"
+
+msgid "上行带宽"
+msgstr "上行带宽"
+
+msgid "下发命令"
+msgstr "下发命令"
+
+msgid "下发失败：%s"
+msgstr "下发失败：%s"
+
+msgid "下行带宽"
+msgstr "下行带宽"
+
+msgid "不支持"
+msgstr "不支持"
+
+msgid "与「移动数据」页共用同一份 QModem 配置。"
+msgstr "与「移动数据」页共用同一份 QModem 配置。"
+
+msgid "以下能力在 QModem 中没有通用方法，只能经 send_at 以模块私有 AT 命令下发；QModem 也无法回读，故默认显示「保持不变」，可点击「读取当前值」向模组查询。"
+msgstr "以下能力在 QModem 中没有通用方法，只能经 send_at 以模块私有 AT 命令下发；QModem 也无法回读，故默认显示「保持不变」，可点击「读取当前值」向模组查询。"
+
+msgid "优秀"
+msgstr "优秀"
+
+msgid "使 PHY 档位与以太网控制器匹配。"
+msgstr "使 PHY 档位与以太网控制器匹配。"
+
+msgid "保存 APN 设置"
+msgstr "保存 APN 设置"
+
+msgid "保存后写入 /etc/config/qmodem 的当前模组配置节，再点击「重拨」使其生效。"
+msgstr "保存后写入 /etc/config/qmodem 的当前模组配置节，再点击「重拨」使其生效。"
+
+msgid "保存设备参数"
+msgstr "保存设备参数"
+
+msgid "保持不变"
+msgstr "保持不变"
+
+msgid "修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。"
+msgstr "修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。"
+
+msgid "修改网络优选"
+msgstr "修改网络优选"
+
+msgid "入站路由与数据通路"
+msgstr "入站路由与数据通路"
+
+msgid "全选"
+msgstr "全选"
+
+msgid "关闭后 QModem 将不再管理此模组。"
+msgstr "关闭后 QModem 将不再管理此模组。"
+
+msgid "切换为 %s"
+msgstr "切换为 %s"
+
+msgid "切换后 USB 网络接口会重新枚举，管理通道可能短暂中断。若已使用 QModem 的拨号模式（ECM/NCM），请优先使用上方「网络模式」。"
+msgstr "切换后 USB 网络接口会重新枚举，管理通道可能短暂中断。若已使用 QModem 的拨号模式（ECM/NCM），请优先使用上方「网络模式」。"
+
+msgid "切换网络模式"
+msgstr "切换网络模式"
+
+msgid "切换网络模式失败：%s"
+msgstr "切换网络模式失败：%s"
+
+msgid "制式"
+msgstr "制式"
+
+msgid "刷新状态"
+msgstr "刷新状态"
+
+msgid "取消"
+msgstr "取消"
+
+msgid "可用拨号模式"
+msgstr "可用拨号模式"
+
+msgid "启用"
+msgstr "启用"
+
+msgid "启用该模组"
+msgstr "启用该模组"
+
+msgid "固件报告邻区查询已禁用，但底层 set_neighborcell/get_neighborcell 方法仍可调用。"
+msgstr "固件报告邻区查询已禁用，但底层 set_neighborcell/get_neighborcell 方法仍可调用。"
+
+msgid "固件报告频段锁定已禁用，但底层 set_lockband 方法仍可调用。尝试提交频段配置可能生效。"
+msgstr "固件报告频段锁定已禁用，但底层 set_lockband 方法仍可调用。尝试提交频段配置可能生效。"
+
+msgid "地址与 DNS"
+msgstr "地址与 DNS"
+
+msgid "子载波间隔"
+msgstr "子载波间隔"
+
+msgid "密码"
+msgstr "密码"
+
+msgid "将 %s 锁定到频段 %s？移动数据会短暂中断。"
+msgstr "将 %s 锁定到频段 %s？移动数据会短暂中断。"
+
+msgid "将允许驻网的制式设置为 %s？移动数据会短暂中断。"
+msgstr "将允许驻网的制式设置为 %s？移动数据会短暂中断。"
+
+msgid "将模组拨号模式切换为 %s？切换过程中移动数据会短暂中断。"
+msgstr "将模组拨号模式切换为 %s？切换过程中移动数据会短暂中断。"
+
+msgid "小区 ID"
+msgstr "小区 ID"
+
+msgid "尚未下发命令。"
+msgstr "尚未下发命令。"
+
+msgid "展开以读取拨号日志。"
+msgstr "展开以读取拨号日志。"
+
+msgid "已启动"
+msgstr "已启动"
+
+msgid "已开始拨号。"
+msgstr "已开始拨号。"
+
+msgid "已读取当前值：%s"
+msgstr "已读取当前值：%s"
+
+msgid "已连接"
+msgstr "已连接"
+
+msgid "已连接时长"
+msgstr "已连接时长"
+
+msgid "已锁定 %d 个频段，共 %d 个可用频段。不勾选任何频段表示解除锁定。"
+msgstr "已锁定 %d 个频段，共 %d 个可用频段。不勾选任何频段表示解除锁定。"
+
+msgid "已驻网"
+msgstr "已驻网"
+
+msgid "应用"
+msgstr "应用"
+
+msgid "应用 PCIe 控制器"
+msgstr "应用 PCIe 控制器"
+
+msgid "应用 PHY 档位"
+msgstr "应用 PHY 档位"
+
+msgid "应用 SIM 热插拔"
+msgstr "应用 SIM 热插拔"
+
+msgid "应用 USB 模式"
+msgstr "应用 USB 模式"
+
+msgid "应用热保护设置"
+msgstr "应用热保护设置"
+
+msgid "应用网络优选"
+msgstr "应用网络优选"
+
+msgid "应用锁定"
+msgstr "应用锁定"
+
+msgid "应用频段锁定"
+msgstr "应用频段锁定"
+
+msgid "开始扫描"
+msgstr "开始扫描"
+
+msgid "当前模式"
+msgstr "当前模式"
+
+msgid "当前频段"
+msgstr "当前频段"
+
+msgid "当前频段/载波聚合"
+msgstr "当前频段/载波聚合"
+
+msgid "当前频段与载波聚合（%d 个载波）"
+msgstr "当前频段与载波聚合（%d 个载波）"
+
+msgid "当前：%s"
+msgstr "当前：%s"
+
+msgid "扫描会占用模组资源并可能持续较长时间，期间移动数据可能受影响。"
+msgstr "扫描会占用模组资源并可能持续较长时间，期间移动数据可能受影响。"
+
+msgid "扫描失败：%s"
+msgstr "扫描失败：%s"
+
+msgid "技术细节（QModem 原始数据）"
+msgstr "技术细节（QModem 原始数据）"
+
+msgid "拨号"
+msgstr "拨号"
+
+msgid "拨号使用的 PDP 上下文序号（AT+CGDCONT 的 cid）。"
+msgstr "拨号使用的 PDP 上下文序号（AT+CGDCONT 的 cid）。"
+
+msgid "拨号模式"
+msgstr "拨号模式"
+
+msgid "拨号模式与驻网制式，使用 QModem 的专用方法下发。"
+msgstr "拨号模式与驻网制式，使用 QModem 的专用方法下发。"
+
+msgid "拨号模式切换"
+msgstr "拨号模式切换"
+
+msgid "拨号模式读取"
+msgstr "拨号模式读取"
+
+msgid "拨号状态"
+msgstr "拨号状态"
+
+msgid "拨号设置（APN）"
+msgstr "拨号设置（APN）"
+
+msgid "挂断"
+msgstr "挂断"
+
+msgid "挂断移动数据"
+msgstr "挂断移动数据"
+
+msgid "接口协议"
+msgstr "接口协议"
+
+msgid "接口状态"
+msgstr "接口状态"
+
+msgid "支持"
+msgstr "支持"
+
+msgid "数据通路"
+msgstr "数据通路"
+
+msgid "数据通路与入站转发的只读展示（经 QModem）。"
+msgstr "数据通路与入站转发的只读展示（经 QModem）。"
+
+msgid "无"
+msgstr "无"
+
+msgid "无响应。"
+msgstr "无响应。"
+
+msgid "无数据"
+msgstr "无数据"
+
+msgid "无法序列化 QModem 返回数据。"
+msgstr "无法序列化 QModem 返回数据。"
+
+msgid "无线状态"
+msgstr "无线状态"
+
+msgid "无线策略"
+msgstr "无线策略"
+
+msgid "日常使用请保持热保护开启。当前模组温度：%s"
+msgstr "日常使用请保持热保护开启。当前模组温度：%s"
+
+msgid "最近的拨号日志"
+msgstr "最近的拨号日志"
+
+msgid "服务小区"
+msgstr "服务小区"
+
+msgid "未启动"
+msgstr "未启动"
+
+msgid "未检测到模组（请确认 QModem 已识别该设备）。"
+msgstr "未检测到模组（请确认 QModem 已识别该设备）。"
+
+msgid "未连接"
+msgstr "未连接"
+
+msgid "未锁定"
+msgstr "未锁定"
+
+msgid "未驻网"
+msgstr "未驻网"
+
+msgid "本模组经 QModem 不支持 AT 透传命令 %s：%s"
+msgstr "本模组经 QModem 不支持 AT 透传命令 %s：%s"
+
+msgid "本模组经 QModem 不支持该重启方式。"
+msgstr "本模组经 QModem 不支持该重启方式。"
+
+msgid "本模组经 QModem 已禁用拨号模式切换（disabled_features 含 \"SetMode\"）。"
+msgstr "本模组经 QModem 已禁用拨号模式切换（disabled_features 含 \"SetMode\"）。"
+
+msgid "本模组经 QModem 已禁用网络优选（disabled_features 含 \"NetworkPrefer\"）。"
+msgstr "本模组经 QModem 已禁用网络优选（disabled_features 含 \"NetworkPrefer\"）。"
+
+msgid "本模组经 QModem 已禁用频段锁定（disabled_features 含 \"LockBand\"），相关设置已隐藏。"
+msgstr "本模组经 QModem 已禁用频段锁定（disabled_features 含 \"LockBand\"），相关设置已隐藏。"
+
+msgid "本模组经 QModem 暂以 QModem 网络配置为准。"
+msgstr "本模组经 QModem 暂以 QModem 网络配置为准。"
+
+msgid "本模组经 QModem 暂以 QModem 网络配置为准：QModem 未导出这些模组私有设置，此处仅作只读展示，请在「网络」中配置转发与 DMZ。"
+msgstr "本模组经 QModem 暂以 QModem 网络配置为准：QModem 未导出这些模组私有设置，此处仅作只读展示，请在「网络」中配置转发与 DMZ。"
+
+msgid "本模组经 QModem 暂无可用的锁频段数据。"
+msgstr "本模组经 QModem 暂无可用的锁频段数据。"
+
+msgid "本模组经 QModem 暂无可用的锁频段数据（get_lockband 返回为空）。"
+msgstr "本模组经 QModem 暂无可用的锁频段数据（get_lockband 返回为空）。"
+
+msgid "本模组经 QModem 暂无拨号日志。"
+msgstr "本模组经 QModem 暂无拨号日志。"
+
+msgid "本模组经 QModem 暂无拨号状态数据。"
+msgstr "本模组经 QModem 暂无拨号状态数据。"
+
+msgid "本模组经 QModem 暂无载波聚合数据。"
+msgstr "本模组经 QModem 暂无载波聚合数据。"
+
+msgid "本模组经 QModem 暂无邻区数据。"
+msgstr "本模组经 QModem 暂无邻区数据。"
+
+msgid "本模组经 QModem 未上报任何可用的重启方式（reboot_caps 全为 0）。"
+msgstr "本模组经 QModem 未上报任何可用的重启方式（reboot_caps 全为 0）。"
+
+msgid "本模组经 QModem 未上报可用的网络模式。"
+msgstr "本模组经 QModem 未上报可用的网络模式。"
+
+msgid "本模组经 QModem 未上报该类别的可用频段。"
+msgstr "本模组经 QModem 未上报该类别的可用频段。"
+
+msgid "本页数据全部来自 QModem。"
+msgstr "本页数据全部来自 QModem。"
+
+msgid "查看模组设备参数，或直接向模组发送 AT 命令。"
+msgstr "查看模组设备参数，或直接向模组发送 AT 命令。"
+
+msgid "模块专有硬件设置（AT 透传）"
+msgstr "模块专有硬件设置（AT 透传）"
+
+msgid "模组侧 PCIe 以太网数据通路开关。"
+msgstr "模组侧 PCIe 以太网数据通路开关。"
+
+msgid "模组侧入站转发。"
+msgstr "模组侧入站转发。"
+
+msgid "模组内置温度保护的轮询开关与周期。QModem 仅能读取温度，写入只能走 AT 透传。"
+msgstr "模组内置温度保护的轮询开关与周期。QModem 仅能读取温度，写入只能走 AT 透传。"
+
+msgid "模组名称 / 网络接口"
+msgstr "模组名称 / 网络接口"
+
+msgid "模组对主机呈现的 USB 网络驱动档位。"
+msgstr "模组对主机呈现的 USB 网络驱动档位。"
+
+msgid "模组对外呈现的拨号模式。"
+msgstr "模组对外呈现的拨号模式。"
+
+msgid "模组对外呈现的拨号模式（由 QModem get_mode / set_mode 提供）。"
+msgstr "模组对外呈现的拨号模式（由 QModem get_mode / set_mode 提供）。"
+
+msgid "模组将执行软复位并重新注册网络，移动数据会中断约 30 秒。"
+msgstr "模组将执行软复位并重新注册网络，移动数据会中断约 30 秒。"
+
+msgid "模组将断电复位。若模组供电受主板控制，可能同时影响 PCIe/USB 链路。"
+msgstr "模组将断电复位。若模组供电受主板控制，可能同时影响 PCIe/USB 链路。"
+
+msgid "模组已接受该命令。"
+msgstr "模组已接受该命令。"
+
+msgid "模组拒绝了 AT 透传命令 %s：%s"
+msgstr "模组拒绝了 AT 透传命令 %s：%s"
+
+msgid "模组拒绝了本次扫描（通常因为已驻留在小区上）。"
+msgstr "模组拒绝了本次扫描（通常因为已驻留在小区上）。"
+
+msgid "模组未返回内容。"
+msgstr "模组未返回内容。"
+
+msgid "模组未返回可识别的当前值（%s）：%s"
+msgstr "模组未返回可识别的当前值（%s）：%s"
+
+msgid "模组未返回扫描数据。"
+msgstr "模组未返回扫描数据。"
+
+msgid "模组能力"
+msgstr "模组能力"
+
+msgid "模组能力、重启、无线策略与 AT 透传，供有经验的用户使用。日常使用无需修改本页设置。"
+msgstr "模组能力、重启、无线策略与 AT 透传，供有经验的用户使用。日常使用无需修改本页设置。"
+
+msgid "模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。"
+msgstr "模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。"
+
+msgid "模组能力与维护"
+msgstr "模组能力与维护"
+
+msgid "模组设备配置"
+msgstr "模组设备配置"
+
+msgid "模组重启"
+msgstr "模组重启"
+
+msgid "正在下发连接操作…"
+msgstr "正在下发连接操作…"
+
+msgid "正在下发，请稍候…"
+msgstr "正在下发，请稍候…"
+
+msgid "正在扫描，请稍候…"
+msgstr "正在扫描，请稍候…"
+
+msgid "正在读取拨号日志…"
+msgstr "正在读取拨号日志…"
+
+msgid "此处选择的是硬件 PHY 档位，不会强制以太网链路协商速率。"
+msgstr "此处选择的是硬件 PHY 档位，不会强制以太网链路协商速率。"
+
+msgid "流量统计"
+msgstr "流量统计"
+
+msgid "清空"
+msgstr "清空"
+
+msgid "温度读取"
+msgstr "温度读取"
+
+msgid "热保护命令已被接受。"
+msgstr "热保护命令已被接受。"
+
+msgid "热保护轮询"
+msgstr "热保护轮询"
+
+msgid "物理 SIM 卡插拔检测行为。"
+msgstr "物理 SIM 卡插拔检测行为。"
+
+msgid "现在断开移动数据连接？"
+msgstr "现在断开移动数据连接？"
+
+msgid "用户名"
+msgstr "用户名"
+
+msgid "由 QModem 上报的接口地址、MTU 与模组下发的 DNS。"
+msgstr "由 QModem 上报的接口地址、MTU 与模组下发的 DNS。"
+
+msgid "由 QModem 上报的服务小区、频段与驻网信息。"
+msgstr "由 QModem 上报的服务小区、频段与驻网信息。"
+
+msgid "由 QModem 上报的模组数据通路信息。"
+msgstr "由 QModem 上报的模组数据通路信息。"
+
+msgid "由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性在本插件中已隐藏或降级为只读。"
+msgstr "由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性在本插件中已隐藏或降级为只读。"
+
+msgid "由 QModem 管理"
+msgstr "由 QModem 管理"
+
+msgid "留空使用运营商默认值"
+msgstr "留空使用运营商默认值"
+
+msgid "留空则使用移动网络下发的 DNS。"
+msgstr "留空则使用移动网络下发的 DNS。"
+
+msgid "短信"
+msgstr "短信"
+
+msgid "短信发送"
+msgstr "短信发送"
+
+msgid "短信读取"
+msgstr "短信读取"
+
+msgid "硬重启模组"
+msgstr "硬重启模组"
+
+msgid "硬重启（断电复位）"
+msgstr "硬重启（断电复位）"
+
+msgid "确认执行频率扫描"
+msgstr "确认执行频率扫描"
+
+msgid "禁用"
+msgstr "禁用"
+
+msgid "移动数据"
+msgstr "移动数据"
+
+msgid "签约速率（USB 链路）"
+msgstr "签约速率（USB 链路）"
+
+msgid "经 QModem 下发 AT^CELLSCAN 并原样展示模组返回的文本。模组已驻网时可能返回错误。"
+msgstr "经 QModem 下发 AT^CELLSCAN 并原样展示模组返回的文本。模组已驻网时可能返回错误。"
+
+msgid "经 QModem 向模组下发 AT 透传命令 %s？该能力没有通用的 QModem 方法，模组可能拒绝执行。"
+msgstr "经 QModem 向模组下发 AT 透传命令 %s？该能力没有通用的 QModem 方法，模组可能拒绝执行。"
+
+msgid "经 QModem 的 do_reboot 重启模组。重启期间移动数据会中断，请勿断电。"
+msgstr "经 QModem 的 do_reboot 重启模组。重启期间移动数据会中断，请勿断电。"
+
+msgid "经 QModem 的 send_at 向模组下发任意 AT 命令，用于本页未覆盖的模块私有设置。"
+msgstr "经 QModem 的 send_at 向模组下发任意 AT 命令，用于本页未覆盖的模块私有设置。"
+
+msgid "继续"
+msgstr "继续"
+
+msgid "编辑 QModem 配置中当前模组的设备参数（配置节：%s）。"
+msgstr "编辑 QModem 配置中当前模组的设备参数（配置节：%s）。"
+
+msgid "编辑 QModem 配置（/etc/config/qmodem）中当前模组的设备参数。"
+msgstr "编辑 QModem 配置（/etc/config/qmodem）中当前模组的设备参数。"
+
+msgid "网络与小区"
+msgstr "网络与小区"
+
+msgid "网络优选"
+msgstr "网络优选"
+
+msgid "网络优选设置"
+msgstr "网络优选设置"
+
+msgid "网络信息"
+msgstr "网络信息"
+
+msgid "网络接口"
+msgstr "网络接口"
+
+msgid "网络模式"
+msgstr "网络模式"
+
+msgid "网络模式、驻网制式与频率扫描，全部经 QModem 的 qmodem ubus 下发。"
+msgstr "网络模式、驻网制式与频率扫描，全部经 QModem 的 qmodem ubus 下发。"
+
+msgid "自动"
+msgstr "自动"
+
+msgid "自定义 DNS"
+msgstr "自定义 DNS"
+
+msgid "良好"
+msgstr "良好"
+
+msgid "解除 %s 的频段锁定？"
+msgstr "解除 %s 的频段锁定？"
+
+msgid "认证方式"
+msgstr "认证方式"
+
+msgid "设备参数"
+msgstr "设备参数"
+
+msgid "设备参数已保存到 QModem 配置（/etc/config/qmodem），请重拨或重启模组使其生效。"
+msgstr "设备参数已保存到 QModem 配置（/etc/config/qmodem），请重拨或重启模组使其生效。"
+
+msgid "设备参数设置"
+msgstr "设备参数设置"
+
+msgid "设置网络优选失败：%s"
+msgstr "设置网络优选失败：%s"
+
+msgid "设置频段锁定失败：%s"
+msgstr "设置频段锁定失败：%s"
+
+msgid "诊断与开发者工具"
+msgstr "诊断与开发者工具"
+
+msgid "请先选择一个值。"
+msgstr "请先选择一个值。"
+
+msgid "请稍候…"
+msgstr "请稍候…"
+
+msgid "请至少选择一种网络制式。"
+msgstr "请至少选择一种网络制式。"
+
+msgid "请输入 AT 命令。"
+msgstr "请输入 AT 命令。"
+
+msgid "读取失败（%s）：%s"
+msgstr "读取失败（%s）：%s"
+
+msgid "读取当前值"
+msgstr "读取当前值"
+
+msgid "轮询周期"
+msgstr "轮询周期"
+
+msgid "软重启模组"
+msgstr "软重启模组"
+
+msgid "软重启（AT 复位）"
+msgstr "软重启（AT 复位）"
+
+msgid "载波"
+msgstr "载波"
+
+msgid "较弱"
+msgstr "较弱"
+
+msgid "运营商"
+msgstr "运营商"
+
+msgid "返回模组与 SIM"
+msgstr "返回模组与 SIM"
+
+msgid "返回高级设置"
+msgstr "返回高级设置"
+
+msgid "这些选项写入 /etc/config/qmodem 的 modem-device 配置节。除非自动识别有误，否则无需修改 AT 端口与拨号模式。"
+msgstr "这些选项写入 /etc/config/qmodem 的 modem-device 配置节。除非自动识别有误，否则无需修改 AT 端口与拨号模式。"
+
+msgid "选择模组允许驻网的制式。"
+msgstr "选择模组允许驻网的制式。"
+
+msgid "选择模组允许驻网的制式。至少保留一项，取消全部选择会导致无法注册网络。"
+msgstr "选择模组允许驻网的制式。至少保留一项，取消全部选择会导致无法注册网络。"
+
+msgid "选择模组允许驻网的制式（由 QModem get_network_prefer / set_network_prefer 提供）。至少保留一项。"
+msgstr "选择模组允许驻网的制式（由 QModem get_network_prefer / set_network_prefer 提供）。至少保留一项。"
+
+msgid "邻区 %d"
+msgstr "邻区 %d"
+
+msgid "邻区信息"
+msgstr "邻区信息"
+
+msgid "邻区信息（%d）"
+msgstr "邻区信息（%d）"
+
+msgid "邻区查询"
+msgstr "邻区查询"
+
+msgid "部分数据读取失败："
+msgstr "部分数据读取失败："
+
+msgid "配置模组如何经 QModem 接入移动网络。"
+msgstr "配置模组如何经 QModem 接入移动网络。"
+
+msgid "配置节"
+msgstr "配置节"
+
+msgid "重启模组失败：%s"
+msgstr "重启模组失败：%s"
+
+msgid "重拨"
+msgstr "重拨"
+
+msgid "重拨期间移动数据会短暂中断。"
+msgstr "重拨期间移动数据会短暂中断。"
+
+msgid "重新拨号"
+msgstr "重新拨号"
+
+msgid "限制模组可使用的频段。日常使用建议保持不锁定，锁定后在异地可能无法注册网络。"
+msgstr "限制模组可使用的频段。日常使用建议保持不锁定，锁定后在异地可能无法注册网络。"
+
+msgid "限制模组可使用的频段（由 QModem get_lockband / set_lockband 提供）。日常使用建议保持不锁定。"
+msgstr "限制模组可使用的频段（由 QModem get_lockband / set_lockband 提供）。日常使用建议保持不锁定。"
+
+msgid "页面渲染失败："
+msgstr "页面渲染失败："
+
+msgid "频段"
+msgstr "频段"
+
+msgid "频段锁定"
+msgstr "频段锁定"
+
+msgid "频点"
+msgstr "频点"
+
+msgid "频率扫描"
+msgstr "频率扫描"
+
+msgid "频率扫描结果（%d 行）"
+msgstr "频率扫描结果（%d 行）"
+
+msgid "高级设置"
+msgstr "高级设置"
+
+msgid "高级连接信息"
+msgstr "高级连接信息"

@@ -24,6 +24,7 @@
 - `getNetworkPrefer(section)` → `{ network_prefer: { '3G':'1'/'0', '4G':'1'/'0', '5G':'1'/'0' } }`
 - `getNeighborCell(section)` → 邻区数据（huawei 部分特性被禁用，见 getDisabledFeatures）
 - `getCurrentBand(section)` → `{ current_band: { status, network_mode, cells:[{role,rat,band,band_name,channel,channel_type,pci,ul_bandwidth,dl_bandwidth,scs}] } }`
+- `getCurrentBandCapabilities(section)` → `{ current_band_capabilities: { supported, vendor, method, schema } }`
 - `getConnectStatus(section)` → 数组，含 `connect_status`（`Yes`/`No`）
 - `getDialStatus(section)` → 拨号状态对象
 - `getDialLog(section)` → 拨号日志对象
@@ -36,6 +37,7 @@
 - `getSimSwitchCapabilities(section)` → `{ supportSwitch:'1'/'0', simSlots:['0','1'], ExtraInfo:'...' }`
 - `getSms(section)` → `{ sms: [ { index, status, sender, content, time, ... } ] }`
 - `getUsageStats(section)` → `{ available:0/1, updated_at, total_rx_bytes, total_tx_bytes }`（**部分模组返回 available:0**）
+- `getTrafficResetSchedule(section)` → QModem 流量统计自动清零计划
 - `getInterfaceStatus(name)` → 网络接口状态（`ipv4-address`,`ipv6-address`,`up`,`mtu`,`proto` 等；name 为接口名）
 - `getModemSections()` → `[{id,name,model,manufacturer,at_port,enabled}]`
 - `resolveSection()` → 返回当前模组配置节 id（优先采用用户上次在模组选择器中的选择，否则第一个启用模组）；无模组返回 null。通用辅助新增：`getModemSectionsSync()`（同步读列表）、`getModemList()`、`getStoredSection()/setStoredSection()`、`renderModemBar(sections,currentId,onSwitch)`（模组选择器）、`groupByClass(entries)`、`renderInfoGrouped(entries)`（按 class 渲染 QModem 返回的全部字段）、`formatSignal(value,type)`（信号分级文案）。
@@ -43,6 +45,7 @@
 ### 控制动作（写）
 - `sendAt(section, atPort, command, useUbus)` → 经 QModem 发 AT 命令（atPort 可空，由 QModem 选默认端口）
 - `sendSms(section, phoneNumber, content)`
+- `sendRawPdu(section, command)`
 - `deleteSms(section, index)`
 - `setMode(section, mode)`（mode 按 `getMode` 实际返回的模式列表决定，如 'ecm'/'ncm'/'rndis'/...，不写死）
 - `setImei(section, imei)`
@@ -51,6 +54,8 @@
 - `setSimSlot(section, slot)`（slot: '0'/'1'）
 - `doReboot(section, method)`（method: 'soft'/'hard'）
 - `clearDialLog(section)`
+- `clearStats(section)` / `setTrafficResetSchedule(section, params)`
+- `setNeighborCell(section, params)` / `setSmsStorage(section, storage)`
 - `modemDial(section)` / `modemHang(section)` / `modemRedial(section)`
 
 ### 辅助

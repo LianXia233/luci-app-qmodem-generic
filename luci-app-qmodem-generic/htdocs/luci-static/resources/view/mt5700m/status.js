@@ -87,7 +87,7 @@ return view.extend({
 				guard(controls.getCurrentBand(section), _('Carrier status'), {}),
 				guard(controls.getInterfaceStatus(ifname), _('Mobile IP'), {}),
 				guard(controls.getNetworkInfo(section), _('Network'), []),
-				guard(controls.getQosInfo(), 'QOS', {})
+				guard(controls.getQosInfo(section), 'QOS', {})
 			]).then(function(r) {
 				// 从 network.interface status 中取物理设备名，查询设备速率
 				var iface = r[7] || {};

@@ -260,6 +260,7 @@ return view.extend({
 				guard(controls.getLockBand(section), '锁频段', errors),
 				guard(controls.getNeighborCell(section), '邻区信息', errors),
 				guard(controls.getCurrentBand(section), '当前频段', errors),
+				guard(controls.getCurrentBandCapabilities(section), '当前频段能力', errors),
 				guard(controls.getCellInfo(section), '小区信息', errors),
 				guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
 				guard(controls.getAtCfg(section), 'AT 端口配置', errors)
@@ -271,9 +272,10 @@ return view.extend({
 					lockband: r[2],
 					neighbor: r[3],
 					currentBand: r[4],
-					cell: r[5],
-					disabled: r[6],
-					atCfg: r[7],
+					currentBandCapabilities: r[5],
+					cell: r[6],
+					disabled: r[7],
+					atCfg: r[8],
 					errors: errors
 				};
 			});
