@@ -327,6 +327,67 @@ function formatSignal(value, type) {
 	}
 }
 
+// 设备信息参数中文标签映射表
+var LABEL_ZH = {
+	'Name': '型号名称',
+	'Manufacturer': '制造商',
+	'Revision': '固件版本',
+	'AT Port': 'AT 端口',
+	'Connect Status': '连接状态',
+	'Temperature': '温度',
+	'Network Mode': '网络模式',
+	'MCC': '移动国家码 (MCC)',
+	'MNC': '移动网络码 (MNC)',
+	'Cell ID': '小区 ID',
+	'PCI': '物理小区 ID (PCI)',
+	'TAC': '跟踪区码 (TAC)',
+	'ARFCN': '绝对频点号 (ARFCN)',
+	'EARFCN': '下行频点号 (EARFCN)',
+	'NR-ARFCN': 'NR 频点号 (NR-ARFCN)',
+	'RSRP': '参考信号接收功率 (RSRP)',
+	'RSRQ': '参考信号接收质量 (RSRQ)',
+	'SINR': '信号干扰噪声比 (SINR)',
+	'SCS': '子载波间隔 (SCS)',
+	'SIM Status': 'SIM 状态',
+	'SIM Slot': 'SIM 卡槽',
+	'IMEI': '国际移动设备识别码 (IMEI)',
+	'IMSI': '国际移动用户识别码 (IMSI)',
+	'ICCID': '集成电路卡识别码 (ICCID)',
+	'Band': '频段',
+	'Bandwidth': '带宽',
+	'DL Bandwidth': '下行带宽',
+	'UL Bandwidth': '上行带宽',
+	'RSSI': '接收信号强度指示 (RSSI)',
+	'CQI': '信道质量指示 (CQI)',
+	'Serving Cell': '服务小区',
+	'Neighbor Cell': '邻区',
+	'Network Type': '网络类型',
+	'LAC': '位置区码 (LAC)',
+	'RAC': '路由区码 (RAC)',
+	'eNodeB ID': 'eNodeB ID',
+	'gNodeB ID': 'gNodeB ID',
+	'Sector ID': '扇区 ID',
+	'UTRAN Cell ID': 'UTRAN 小区 ID',
+	'NR Cell ID': 'NR 小区 ID',
+	'Physical Cell ID': '物理小区 ID (PCI)',
+	'Mobile Country Code': '移动国家码 (MCC)',
+	'Mobile Network Code': '移动网络码 (MNC)',
+	'Absolute Radio-Frequency Channel Number': '绝对频点号 (ARFCN)',
+	'Reference Signal Received Power': '参考信号接收功率 (RSRP)',
+	'Reference Signal Received Quality': '参考信号接收质量 (RSRQ)',
+	'Signal to Interference plus Noise Ratio': '信号干扰噪声比 (SINR)',
+	'International Mobile Equipment Identity': '国际移动设备识别码 (IMEI)',
+	'International Mobile Subscriber Identity': '国际移动用户识别码 (IMSI)',
+	'Tracking Area Code': '跟踪区码 (TAC)',
+	'Tracking area code of cell served by neighbor Enb': '跟踪区码 (TAC)',
+	'Subcarrier Spacing': '子载波间隔 (SCS)',
+	'APN': '接入点名称 (APN)',
+	'PLMN': '公共陆地移动网 (PLMN)',
+	'MSISDN': '电话号码 (MSISDN)',
+	'Radio Access Technology': '无线接入技术',
+	'Registration Status': '注册状态'
+};
+
 // 把 QModem 的 modem_info 渲染为分组卡片（每 class 一张 mt-ui-card），
 // 用于"完整信息"面板——QModem 返回什么就显示什么。
 function renderInfoGrouped(entries) {
@@ -334,7 +395,8 @@ function renderInfoGrouped(entries) {
 	var cards = [];
 	Object.keys(grouped).forEach(function(cls) {
 		var rows = grouped[cls].map(function(item) {
-			var name = item.full_name || item.key;
+			var rawName = item.full_name || item.key || '';
+			var name = LABEL_ZH[rawName] || rawName;
 			var display = item.extra_info ? (name + ' (' + item.extra_info + ')') : name;
 			var val = (item.value == null || item.value === '') ? '--' : String(item.value);
 			return E('div', { 'class': 'mt-info-row' }, [
