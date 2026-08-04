@@ -2,10 +2,12 @@
 
 [![Build IPK & APK](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml)
 
+> **本项目基于 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m) 修改而来。**
+
 QModem 的**通用美化版 LuCI Web UI**。所有界面数据都通过 QModem 的 `qmodem` ubus 对象读取，
 不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
 
-> 本项目由 `luci-app-mt5700m`（鼎桥 MT5700M 专用界面）重构而来，已完全去除私有文本后端
+> 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已完全去除私有文本后端
 > `/usr/sbin/mt5700m-at`，改为纯 `qmodem` ubus 链路。
 
 ## 功能
