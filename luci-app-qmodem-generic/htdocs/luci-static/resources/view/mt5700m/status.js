@@ -74,7 +74,11 @@ return view.extend({
 				return { section: null, errors: errors };
 
 			// resolveSection 内部已 uci.load('qmodem')
-			var ifname = uci.get('qmodem', section, 'name') || 'wwan0';
+			// 使用 network 字段（设备名，如 eth2）而非 name 字段（模组型号名，如 fm350-gl）
+			// 作为 network.interface status 的查询键；同时保留 name 作为回退
+			var qNetDev = uci.get('qmodem', section, 'network') || '';
+			var qName = uci.get('qmodem', section, 'name') || 'wwan0';
+			var ifname = qNetDev || qName;
 			var apn = uci.get('qmodem', section, 'apn') || '';
 
 			return Promise.all([
@@ -142,7 +146,8 @@ return view.extend({
 		data.sim = find(sim, 'SIM Status') || '';
 		data.imei = find(sim, 'IMEI') || find(base, 'IMEI') || '';
 		data.imsi = find(sim, 'IMSI') || '';
-		data.iccid = '--';	// 部分模组经 QModem 不返回 ICCID
+		var rawIccid = find(sim, 'ICCID') || '';
+		data.iccid = rawIccid ? String(rawIccid).replace(/[\n\r]/g, '') : '--';
 		data.phone_number = find(sim, 'SIM Number') || '';
 
 		data.active_apn = res.apn || '';
@@ -157,24 +162,40 @@ return view.extend({
 		return data;
 	},
 
+	// 清洗 QModem get_dns 可能含有的控制字符 / 换行 / 空白后缀
+	cleanDns: function(raw) {
+		if (!raw) return '';
+		return String(raw).replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
+	},
+
 	// 由 network.interface status + get_dns + connect_status 组装地址卡片数据
 	parseSession: function(res, connected) {
+		var self = this;
 		var iface = res.iface || {}, dns = (res.dns && res.dns.dns) || {};
 		var v4 = firstAddress(iface['ipv4-address']);
 		var v6 = firstAddress(iface['ipv6-address']);
 		if (!v6 && Array.isArray(iface['ipv6-prefix']) && iface['ipv6-prefix'][0])
 			v6 = iface['ipv6-prefix'][0].address ? iface['ipv6-prefix'][0].address + '/' + iface['ipv6-prefix'][0].mask : '';
+		// 若 network.interface status 没取到 IP（如设备刚上线、DHCP 未完成），
+		// 尝试从 network.device status 读取链路层状态作为辅助信息
+		var devIPs = {};
+		if (!v4 && !v6 && res.devStatus) {
+			var ds = res.devStatus;
+			// 部分 dongle 设备会在 devStatus 中携带 IP 信息
+			if (ds && typeof ds === 'object' && ds.ipv4) devIPs.v4 = String(ds.ipv4).trim();
+			if (ds && typeof ds === 'object' && ds.ipv6) devIPs.v6 = String(ds.ipv6).trim();
+		}
 		return {
-			ipv4Address: v4,
-			ipv6Address: v6,
-			ipv4Connected: !!v4,
-			ipv6Connected: !!v6,
-			dns4: joinValues(dns.ipv4_dns1, dns.ipv4_dns2),
-			dns6: joinValues(dns.ipv6_dns1, dns.ipv6_dns2),
-			mtu: iface.mtu || '',
+			ipv4Address: v4 || devIPs.v4 || '',
+			ipv6Address: v6 || devIPs.v6 || '',
+			ipv4Connected: !!v4 || !!devIPs.v4,
+			ipv6Connected: !!v6 || !!devIPs.v6,
+			dns4: joinValues(self.cleanDns(dns.ipv4_dns1), self.cleanDns(dns.ipv4_dns2)),
+			dns6: joinValues(self.cleanDns(dns.ipv6_dns1), self.cleanDns(dns.ipv6_dns2)),
+			mtu: iface.mtu || (res.devStatus && res.devStatus.mtu) || '',
 			proto: iface.proto || '',
-			device: iface.device || res.ifname || '',
-			up: iface.up === true,
+			device: iface.device || res.ifname || (res.devStatus && res.devStatus.device) || '',
+			up: iface.up === true || (res.devStatus && res.devStatus.up === true),
 			connected: connected
 		};
 	},
