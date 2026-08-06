@@ -453,7 +453,10 @@ return view.extend({
 			E('div', { 'class':'mt5700m-ip-list' }, [
 				E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv4'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv4Connected ? ' on' : '') }, session.ipv4Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv4Address || '--') ]),
 				E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv6'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv6Connected ? ' on' : '') }, session.ipv6Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv6Address || '--') ]),
-				E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS') ]), E('div', { 'class':'mt5700m-ip-value' }, joinValues(session.dns4, session.dns6) || '--') ])
+				(session.dns4 || session.dns6) ? [
+					session.dns4 ? E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv4)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns4) ]) : null,
+					session.dns6 ? E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv6)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns6) ]) : null
+				] : E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS') ]), E('div', { 'class':'mt5700m-ip-value' }, '--') ])
 			]),
 			E('div', { 'class':'mt5700m-ip-meta' }, [ E('span', {}, joinValues(session.device, session.proto) || '--'), E('span', {}, 'MTU ' + (session.mtu || '--')) ]),
 			E('a', { 'class':'mt5700m-card-link', 'href':L.url('admin/modem/mt5700m/connection') }, _('View connection details'))
@@ -506,10 +509,10 @@ return view.extend({
 				this.infoRow(_('APN'), data.active_apn),
 				this.infoRow(_('Subscription rate'), subRate || '--'),
 				qciInfo.label ? E('div', { 'class':'mt5700m-info-row' }, [
-					E('span', { 'class':'mt5700m-info-label' }, _('QoS Level')),
-					E('span', { 'class':'mt5700m-info-value' }, [
-						E('strong', { 'style':'font-weight:700;margin-right:8px' }, qciInfo.label),
-						E('span', { 'style':'color:#6b7280' }, qciInfo.desc)
+					E('span', {}, _('QoS Level')),
+					E('div', {}, [
+						E('strong', {}, qciInfo.label),
+						E('span', { 'style':'font-weight:400;margin-left:6px' }, qciInfo.desc)
 					])
 				]) : null,
 				this.infoRow('ICCID', data.iccid),
