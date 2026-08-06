@@ -505,7 +505,13 @@ return view.extend({
 				this.infoRow(_('Access technology'), data.sysmode_detail),
 				this.infoRow(_('APN'), data.active_apn),
 				this.infoRow(_('Subscription rate'), subRate || '--'),
-				qciInfo.label ? this.infoRow(_('QoS Level') + ' (' + qciInfo.label + ')', qciInfo.desc) : null,
+				qciInfo.label ? E('div', { 'class':'mt5700m-info-row' }, [
+					E('span', { 'class':'mt5700m-info-label' }, _('QoS Level')),
+					E('span', { 'class':'mt5700m-info-value' }, [
+						E('strong', { 'style':'font-weight:700;margin-right:8px' }, qciInfo.label),
+						E('span', { 'style':'color:#6b7280' }, qciInfo.desc)
+					])
+				]) : null,
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
 				this.infoRow(_('Phone number'), data.phone_number)
