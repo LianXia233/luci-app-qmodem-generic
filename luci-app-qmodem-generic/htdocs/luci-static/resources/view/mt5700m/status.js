@@ -505,7 +505,7 @@ return view.extend({
 				this.infoRow(_('Access technology'), data.sysmode_detail),
 				this.infoRow(_('APN'), data.active_apn),
 				this.infoRow(_('Subscription rate'), subRate || '--'),
-				qciInfo.label ? this.infoRow(_('QoS Level (QCI)'), qciInfo.desc) : null,
+				qciInfo.label ? this.infoRow(_('QoS Level') + ' (' + qciInfo.label + ')', qciInfo.desc) : null,
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
 				this.infoRow(_('Phone number'), data.phone_number)
