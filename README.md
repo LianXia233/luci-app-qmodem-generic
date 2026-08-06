@@ -47,9 +47,10 @@ apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk
 MT5700M-CN 等海思平台模组上电后 SIM 卡槽处于未初始化状态，QModem 拨号流程不会主动
 发送 `AT^SCICHG=0,1`，导致 `AT+CPIN?` 返回 `+CME ERROR: 10`（SIM 未识别）。
 
-本包通过 OpenWrt 的 `uci-defaults` 机制，在首次安装时自动遍历 `/etc/config/qmodem`
-中的 `modem-device` 配置节：凡 `model` / `name` / `manufacturer` 字段匹配 `MT5700`
-（不区分大小写）的模组，自动向其 `pre_dial_at_cmds` 列表追加 `AT^SCICHG=0,1` 并提交：
+本包通过 OpenWrt 的 `init.d` 服务（`/etc/init.d/qmodem-mt5700-fix`，`START=99`）在
+**每次开机**自动遍历 `/etc/config/qmodem` 中的 `modem-device` 配置节：凡 `model` /
+`name` / `manufacturer` 字段匹配 `MT5700`（不区分大小写）的模组，自动向其
+`pre_dial_at_cmds` 列表追加 `AT^SCICHG=0,1` 并提交：
 
 ```sh
 uci add_list qmodem.<section>.pre_dial_at_cmds='AT^SCICHG=0,1'
@@ -58,11 +59,15 @@ uci commit qmodem
 
 QModem 在拨号前会逐条执行 `pre_dial_at_cmds`，从而在上电后正确初始化 SIM 卡槽。
 
-- 脚本位置：`/etc/uci-defaults/99_luci-app-qmodem-generic`（随本包安装）
+- 修复逻辑：`/usr/sbin/qmodem-mt5700-fix`（被开机服务与首次安装脚本共同调用）
+- 开机服务：`/etc/init.d/qmodem-mt5700-fix`，并监听 `qmodem` 配置变更后自动重跑，
+  以应对模组在更晚阶段才被识别的情况
+- 首次安装：`/etc/uci-defaults/99_luci-app-qmodem-generic` 会立即执行一次修复并
+  `enable` 上述开机服务
 - 幂等：重复运行不会重复添加同一命令
-- 若安装时模组尚未被 QModem 识别（配置节为空），可手动重跑脚本后再让 QModem 重新识别：
+- 手动触发（无需重启）：
   ```sh
-  /etc/uci-defaults/99_luci-app-qmodem-generic
+  /usr/sbin/qmodem-mt5700-fix
   ```
 
 ## 自行编译
