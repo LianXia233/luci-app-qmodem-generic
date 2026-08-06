@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
-PKG_VERSION:=2.4.6
+PKG_VERSION:=2.4.7
 PKG_RELEASE:=1
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233

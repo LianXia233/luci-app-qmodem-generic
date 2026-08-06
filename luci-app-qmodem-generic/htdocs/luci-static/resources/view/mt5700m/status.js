@@ -161,10 +161,17 @@ return view.extend({
 		return data;
 	},
 
-	// 清洗 QModem get_dns 可能含有的控制字符 / 换行 / 空白后缀
+	// 清洗 QModem get_dns 返回值：部分模组驱动会在 DNS IP 后追加换行+二进制垃圾，
+	// 仅取第一个控制字符前的有效 IP 段（split 按控制字符切分，取首个非空 token）。
 	cleanDns: function(raw) {
 		if (!raw) return '';
-		return String(raw).replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
+		var str = String(raw);
+		var parts = str.split(/[\x00-\x1f\x7f]+/);
+		for (var i = 0; i < parts.length; i++) {
+			var p = parts[i].trim();
+			if (p) return p;
+		}
+		return '';
 	},
 
 	// 由 network.interface status + get_dns + connect_status 组装地址卡片数据

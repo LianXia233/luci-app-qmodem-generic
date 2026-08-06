@@ -74,7 +74,7 @@ var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', pa
 
 var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], expect: { } });
 // 网络接口状态（用于获取模组数据接口的 IP 地址等；huawei 的 network_info 为空，IP 由此取得）
-var callInterfaceStatus = rpc.declare({ object: 'network.interface', method: 'status', params: ['name'], expect: { } });
+var callInterfaceStatus = rpc.declare({ object: 'network.interface', method: 'status', params: ['interface'], expect: { } });
 // 网络设备状态（用于获取网口链路速率，作为签约速率参考）
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
 // QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
