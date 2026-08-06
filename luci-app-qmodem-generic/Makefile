@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.4.11
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -23,10 +23,11 @@ LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
-# 确保 rpcd 脚本具有执行权限并注册 ubus 服务
+# 确保 rpcd 脚本、uci-defaults 钩子具有执行权限并注册 ubus 服务
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
 [ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
+[ -f /etc/uci-defaults/99_luci-app-qmodem-generic ] && chmod 755 /etc/uci-defaults/99_luci-app-qmodem-generic
 /etc/init.d/rpcd restart 2>/dev/null || true
 exit 0
 endef

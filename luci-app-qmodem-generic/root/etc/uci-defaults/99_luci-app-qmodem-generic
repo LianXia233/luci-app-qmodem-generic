@@ -1,0 +1,44 @@
+#!/bin/sh
+# 自动为 MT5700M / MT5700M-CN 等海思平台模组配置 QModem 拨号前 SIM 初始化命令。
+# 问题背景：MT5700M-CN 上电后 SIM 卡槽处于未初始化状态，QModem 拨号流程不会主动
+# 调用 huawei.sh 里的 set_sim_slot 函数发送 AT^SCICHG=0,1，导致 SIM 识别失败。
+# 本脚本通过 QModem 的 pre_dial_at_cmds 钩子，在拨号前自动注入该 AT 命令。
+
+. /lib/functions.sh
+
+SIM_INIT_CMD='AT^SCICHG=0,1'
+
+# 检查指定配置节是否已包含 SIM 初始化命令
+__has_sim_init_cmd() {
+	local cfg="$1"
+	uci show "qmodem.${cfg}" 2>/dev/null | grep -qE "pre_dial_at_cmds.*=.*${SIM_INIT_CMD}$"
+}
+
+# 为 MT5700 系列模组注入拨号前 AT 命令
+__fix_mt5700_sim_init() {
+	local cfg="$1"
+	local model name manufacturer
+
+	config_get model "$cfg" model ''
+	config_get name "$cfg" name ''
+	config_get manufacturer "$cfg" manufacturer ''
+
+	local ident="${model} ${name} ${manufacturer}"
+	case "$ident" in
+		*[Mm][Tt]5700*)
+			if __has_sim_init_cmd "$cfg"; then
+				logger -t luci-app-qmodem-generic "qmodem.${cfg} 已配置 ${SIM_INIT_CMD}，跳过"
+				return 0
+			fi
+
+			uci add_list "qmodem.${cfg}.pre_dial_at_cmds=${SIM_INIT_CMD}"
+			uci commit qmodem
+			logger -t luci-app-qmodem-generic "已为 qmodem.${cfg} (${model}) 注入 ${SIM_INIT_CMD} SIM 初始化命令"
+			;;
+	esac
+}
+
+config_load qmodem
+config_foreach __fix_mt5700_sim_init modem-device
+
+exit 0
