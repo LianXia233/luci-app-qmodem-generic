@@ -74,11 +74,10 @@ return view.extend({
 				return { section: null, errors: errors };
 
 			// resolveSection 内部已 uci.load('qmodem')
-			// 使用 network 字段（设备名，如 eth2）而非 name 字段（模组型号名，如 fm350-gl）
-			// 作为 network.interface status 的查询键；同时保留 name 作为回退
-			var qNetDev = uci.get('qmodem', section, 'network') || '';
-			var qName = uci.get('qmodem', section, 'name') || 'wwan0';
-			var ifname = qNetDev || qName;
+			// QModem dial 脚本会以 section.name 为名创建 network interface；
+			// 但 uci section 名不允许 '-'，需转下划线（如 fm350-gl → fm350_gl）
+			var rawName = uci.get('qmodem', section, 'name') || 'wwan0';
+			var ifname = String(rawName).replace(/-/g, '_');
 			var apn = uci.get('qmodem', section, 'apn') || '';
 
 			return Promise.all([
