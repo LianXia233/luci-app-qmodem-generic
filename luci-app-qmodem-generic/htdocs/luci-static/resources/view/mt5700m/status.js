@@ -450,14 +450,16 @@ return view.extend({
 				E('div', {}, [ E('div', { 'class':'mt5700m-focus-title' }, _('Mobile IP')), E('div', { 'class':'mt5700m-focus-desc' }, _('Addresses assigned by the mobile network')) ]),
 				E('span', { 'class':'mt5700m-badge' + (active ? ' active' : '') }, active ? _('Active') : _('Disconnected'))
 			]),
-			E('div', { 'class':'mt5700m-ip-list' }, [
-				E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv4'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv4Connected ? ' on' : '') }, session.ipv4Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv4Address || '--') ]),
-				E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv6'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv6Connected ? ' on' : '') }, session.ipv6Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv6Address || '--') ]),
-				(session.dns4 || session.dns6) ? [
-					session.dns4 ? E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv4)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns4) ]) : null,
-					session.dns6 ? E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv6)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns6) ]) : null
-				] : E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS') ]), E('div', { 'class':'mt5700m-ip-value' }, '--') ])
-			]),
+			E('div', { 'class':'mt5700m-ip-list' }, function() {
+					var rows = [
+						E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv4'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv4Connected ? ' on' : '') }, session.ipv4Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv4Address || '--') ]),
+						E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'IPv6'), E('span', { 'class':'mt5700m-ip-state' + (session.ipv6Connected ? ' on' : '') }, session.ipv6Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'mt5700m-ip-value' }, session.ipv6Address || '--') ])
+					];
+					if (session.dns4) rows.push(E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv4)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns4) ]));
+					if (session.dns6) rows.push(E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS (IPv6)') ]), E('div', { 'class':'mt5700m-ip-value' }, session.dns6) ]));
+					if (!session.dns4 && !session.dns6) rows.push(E('div', { 'class':'mt5700m-ip-row' }, [ E('div', { 'class':'mt5700m-ip-head' }, [ E('span', {}, 'DNS') ]), E('div', { 'class':'mt5700m-ip-value' }, '--') ]));
+					return rows;
+				}()),
 			E('div', { 'class':'mt5700m-ip-meta' }, [ E('span', {}, joinValues(session.device, session.proto) || '--'), E('span', {}, 'MTU ' + (session.mtu || '--')) ]),
 			E('a', { 'class':'mt5700m-card-link', 'href':L.url('admin/modem/mt5700m/connection') }, _('View connection details'))
 		]);
