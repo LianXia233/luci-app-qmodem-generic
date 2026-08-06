@@ -338,7 +338,7 @@ return view.extend({
 		]);
 	},
 
-	carrierCard: function(info, devStatus, qosInfo) {
+	carrierCard: function(info, devStatus) {
 		var active = info.active || info.dual;
 		var badge = !info.available ? _('Unavailable') : info.active ? _('Aggregating') : info.dual ? _('Dual connectivity') : _('Single carrier');
 		var headline = !info.available ? '--' : info.active ? info.count + 'CA' : info.dual ? (info.mode || 'EN-DC') : (info.carriers[0] ? info.carriers[0].band : _('Single carrier'));
@@ -381,25 +381,7 @@ return view.extend({
 			]),
 			(function() {
 				var items = [];
-				// QCI 信息（通过 ubus qos.qos_info 获取）
-				if (qosInfo && qosInfo.qci && qosInfo.status === 'ok') {
-					var qciLabel = String(qosInfo.qci);
-					var qciDesc = '';
-					if (qosInfo.qci === 8) qciDesc = 'Non-GBR';
-					else if (qosInfo.qci === 9) qciDesc = 'Non-GBR (default)';
-					else if (qosInfo.qci === 1) qciDesc = 'GBR (Conversational Voice)';
-					else if (qosInfo.qci === 2) qciDesc = 'GBR (Conversational Video)';
-					else if (qosInfo.qci === 3) qciDesc = 'GBR (Real Time Gaming)';
-					else if (qosInfo.qci === 4) qciDesc = 'GBR (Buffered Video)';
-					else if (qosInfo.qci === 5) qciDesc = 'Non-GBR (IMS Signalling)';
-					else if (qosInfo.qci === 6) qciDesc = 'Non-GBR (TCP-based)';
-					else if (qosInfo.qci === 7) qciDesc = 'Non-GBR (Voice/Video/Interactive)';
-					items.push(E('div', { 'class':'mt5700m-mini' }, [
-						E('span', {}, _('QCI')),
-						E('strong', {}, qciDesc ? qciLabel + ' (' + qciDesc + ')' : qciLabel)
-					]));
-				}
-				// 签约速率（USB 链路速率，作为参考）
+				// 签约速率（USB 链路速率参考）
 				if (devStatus && devStatus.speed) {
 					var speedStr = String(devStatus.speed);
 					var m = speedStr.match(/^(\d+)/);
@@ -408,7 +390,7 @@ return view.extend({
 						? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
 						: linkSpeed + ' Mbps';
 					items.push(E('div', { 'class':'mt5700m-mini', 'style':'grid-column:1/-1' }, [
-						E('span', {}, _('签约速率（USB 链路）')),
+						E('span', {}, _('USB 链路速率')),
 						E('strong', {}, linkLabel)
 					]));
 				}
@@ -432,6 +414,33 @@ return view.extend({
 			down ? controls.formatRate(down * 1000) : '--',
 			up ? controls.formatRate(up * 1000) : '--'
 		);
+	},
+
+	// QCI (QoS Class Identifier) — 3GPP 定义的承载 QoS 等级，决定网络资源优先级
+	// GBR = 保证比特率（语音 / 视频等实时业务），Non-GBR = 非保证比特率（互联网数据）
+	qciExplain: function(qosInfo) {
+		if (!qosInfo || qosInfo.status !== 'ok' || qosInfo.qci == null)
+			return { label: '', desc: '' };
+		var qci = parseInt(qosInfo.qci, 10);
+		var map = {
+			1:  { label: 'QCI 1', desc: _('GBR · 实时语音 (VoLTE)') },
+			2:  { label: 'QCI 2', desc: _('GBR · 实时视频通话') },
+			3:  { label: 'QCI 3', desc: _('GBR · 实时游戏 / 低延迟交互') },
+			4:  { label: 'QCI 4', desc: _('GBR · 缓冲流视频') },
+			5:  { label: 'QCI 5', desc: _('Non-GBR · IMS 信令 (语音/视频控制)') },
+			6:  { label: 'QCI 6', desc: _('Non-GBR · TCP 优先 (网页/邮件/文件传输)') },
+			7:  { label: 'QCI 7', desc: _('Non-GBR · 交互业务 (VoIP / 在线游戏)') },
+			8:  { label: 'QCI 8', desc: _('Non-GBR · 通用数据 (默认上网)') },
+			9:  { label: 'QCI 9', desc: _('Non-GBR · 后台数据 (最低优先级)') },
+			65: { label: 'QCI 65', desc: _('GBR · 关键任务语音') },
+			66: { label: 'QCI 66', desc: _('GBR · 关键任务 PTT') },
+			69: { label: 'QCI 69', desc: _('Non-GBR · 关键任务信令') },
+			70: { label: 'QCI 70', desc: _('GBR · 关键任务数据') },
+			79: { label: 'QCI 79', desc: _('GBR · 车联网 V2X 消息') },
+			80: { label: 'QCI 80', desc: _('Non-GBR · 车联网 V2X 数据') }
+		};
+		var info = map[qci];
+		return info ? info : { label: 'QCI ' + qci, desc: _('自定义承载') };
 	},
 
 	addressCard: function(session) {
@@ -485,6 +494,7 @@ return view.extend({
 		var simState = data.sim || '';
 		var simOk = /READY|正常|OK/i.test(simState);
 		var subRate = this.subscriptionRate(data.qosInfo);
+		var qciInfo = this.qciExplain(data.qosInfo);
 		return E('section', { 'class':'mt5700m-info mt-ui-card' }, [
 			E('div', { 'class':'mt5700m-info-head' }, [
 				E('div', {}, [ E('div', { 'class':'mt5700m-info-title' }, _('SIM & Subscription')), E('div', { 'class':'mt5700m-info-desc' }, _('Subscriber identity and service plan')) ]),
@@ -495,6 +505,7 @@ return view.extend({
 				this.infoRow(_('Access technology'), data.sysmode_detail),
 				this.infoRow(_('APN'), data.active_apn),
 				this.infoRow(_('Subscription rate'), subRate || '--'),
+				qciInfo.label ? this.infoRow(_('QoS Level (QCI)'), qciInfo.desc) : null,
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
 				this.infoRow(_('Phone number'), data.phone_number)
@@ -613,7 +624,7 @@ return view.extend({
 					E('button', { 'class':'btn mt5700m-refresh', 'click':function() { window.location.reload(); } }, _('Refresh'))
 				])
 			]),
-			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus, res.qosInfo), this.addressCard(session) ]),
+			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
 			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
 			this.trafficPanel(res.usage, data.network_interface),
 			E('div', { 'class':'mt5700m-shortcuts' }, [
