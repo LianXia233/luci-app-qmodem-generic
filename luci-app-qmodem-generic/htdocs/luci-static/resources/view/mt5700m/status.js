@@ -30,6 +30,13 @@ function mhz(value) {
 	return /[a-zA-Z]/.test(text) ? text : text + ' MHz';
 }
 
+// 流量统计可用性判定：rpcd 文档返回布尔 true，重构契约与本地兜底返回 0/1，
+// 个别环境还会回传字符串 '1'/'true'。四种情况统一视为"已提供流量统计"。
+function isTrafficAvailable(usage) {
+	var a = usage && usage.available;
+	return a === true || a === 1 || a === '1' || a === 'true';
+}
+
 function sumBandwidth(carriers, key) {
 	var total = 0, found = false;
 	(carriers || []).forEach(function(item) {
@@ -90,7 +97,8 @@ return view.extend({
 				guard(controls.getCurrentBand(section), _('Carrier status'), {}),
 				guard(controls.getInterfaceStatus(ifname), _('Mobile IP'), {}),
 				guard(controls.getNetworkInfo(section), _('Network'), []),
-				guard(controls.getQosInfo(section), 'QOS', {})
+				guard(controls.getQosInfo(section), 'QOS', {}),
+				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {})
 			]).then(function(r) {
 				// 从 network.interface status 中取物理设备名，查询设备速率
 				var iface = r[7] || {};
@@ -110,8 +118,9 @@ return view.extend({
 						sim: r[2],
 						conn: r[3],
 						dns: r[4],
-						usage: r[5],
-						currentBand: r[6],
+					usage: r[5],
+					trafficResetSchedule: r[10],
+					currentBand: r[6],
 						iface: r[7],
 						devStatus: devStatus,
 						qosInfo: r[9] || {},
@@ -539,7 +548,7 @@ return view.extend({
 			])
 		]);
 
-		if (String(usage.available) !== '1') {
+		if (!isTrafficAvailable(usage)) {
 			return E('section', { 'class':'mt5700m-traffic mt-ui-card' }, [
 				head,
 				E('div', { 'class':'mt5700m-focus-desc' }, _('This module reports no traffic statistics via QModem (some vendor drivers do not implement usage_stats).'))
@@ -573,6 +582,68 @@ return view.extend({
 				E('div', { 'class':'mt5700m-days' }, [ bar(_('Download'), rx), bar(_('Upload'), tx, 'tx') ])
 			])
 		]);
+	},
+
+	// 流量统计自动清零计划：数据源为 QModem get_traffic_reset_schedule /
+	// set_traffic_reset_schedule，仅在模组支持流量统计时展示。同时提供"立即清零"动作
+	// （clearStats，仅部分模组如 Quectel 可用）。
+	trafficScheduleCard: function(schedule, section) {
+		schedule = schedule || {};
+		function pad2(n) { return (n < 10 ? '0' : '') + n; }
+		function enabledFlag(v) { return v === true || v === 1 || v === '1' || v === 'true'; }
+
+		var enabledBox = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+		enabledBox.checked = enabledFlag(schedule.enabled);
+
+		var typeSelect = controls.select([
+			[ 'monthly', _('每月（按日期）') ],
+			[ 'daily', _('每日') ]
+		], schedule.reset_type || 'monthly');
+
+		var dayInput = E('input', { 'type': 'number', 'min': '1', 'max': '31', 'class': 'cbi-input-text', 'style': 'width:90px' });
+		dayInput.value = Number(schedule.day) || 1;
+
+		var hourOptions = [];
+		for (var h = 0; h < 24; h++) hourOptions.push([ String(h), pad2(h) + ':00' ]);
+		var minuteOptions = [];
+		for (var m = 0; m < 60; m++) minuteOptions.push([ String(m), pad2(m) ]);
+		var hourSelect = controls.select(hourOptions, schedule.hour != null ? schedule.hour : 0);
+		var minuteSelect = controls.select(minuteOptions, schedule.minute != null ? schedule.minute : 0);
+
+		var dayRow = controls.row(_('清零日（每月）'), dayInput);
+		function syncType() {
+			dayRow.style.display = typeSelect.value === 'monthly' ? '' : 'none';
+		}
+		typeSelect.addEventListener('change', syncType);
+		syncType();
+
+		var body = [
+			controls.row(_('启用自动清零'), enabledBox),
+			controls.row(_('清零频率'), typeSelect),
+			dayRow,
+			controls.row(_('小时'), hourSelect),
+			controls.row(_('分钟'), minuteSelect),
+			controls.action(_('保存计划'), function() {
+				syncType();
+				var params = {
+					enabled: enabledBox.checked,
+					reset_type: typeSelect.value,
+					hour: Number(hourSelect.value) || 0,
+					minute: Number(minuteSelect.value) || 0
+				};
+				if (typeSelect.value === 'monthly')
+					params.day = Number(dayInput.value) || 1;
+				controls.confirmModal(_('保存流量清零计划'),
+					_('QModem 将更新定时任务，使流量统计按设定时间自动清零。是否继续？'),
+					function() { return controls.setTrafficResetSchedule(section, params); });
+			}),
+			controls.action(_('立即清零流量统计'), function() {
+				controls.confirmModal(_('立即清零流量统计'),
+					_('此操作会立即清零该模组的流量计数。是否继续？'),
+					function() { return controls.clearStats(section); });
+			})
+		];
+		return controls.card(_('流量自动清零'), _('设置定时自动清零流量统计，或手动立即清零。'), body, true);
 	},
 
 	shortcut: function(title, description, path) {
@@ -638,6 +709,7 @@ return view.extend({
 			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
 			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
 			this.trafficPanel(res.usage, data.network_interface),
+		isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
 			E('div', { 'class':'mt5700m-shortcuts' }, [
 				this.shortcut(_('Mobile data'), _('APN, dialing, IP details and session counters'), 'admin/modem/mt5700m/connection'),
 				this.shortcut(_('Radio and Cells'), _('Bands, cells, radio policy and diagnostics'), 'admin/modem/mt5700m/network'),

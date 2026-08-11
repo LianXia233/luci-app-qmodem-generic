@@ -3,6 +3,22 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-4] - 2026-08-11
+
+### 修复
+- **流量统计可用性判定 bug**：概览页（`status.js`）原以 `String(usage.available) !== '1'`
+  判定，但 QModem rpcd 文档中 `get_stats` 的 `available` 为布尔 `true`，导致布尔 `true`
+  被误判为"本模组未提供流量统计"而不显示计数。现统一支持 `true` / `1` / `'1'` / `'true'`
+  四种取值（`isTrafficAvailable()`），与 rpcd 文档、重构契约及本地兜底保持一致。
+
+### 新增
+- **流量自动清零计划 UI**：在概览页"流量统计"面板下方新增"流量自动清零"卡片，
+  对接 QModem rpcd 的 `get_traffic_reset_schedule` / `set_traffic_reset_schedule`，
+  支持启用开关、按月/按日、小时/分钟（每月模式含清零日）的定时自动清零配置。
+- 同一卡片提供"立即清零流量统计"动作，对接 `clear_stats`（仅部分模组如 Quectel 可用）。
+- 上述控件仅在模组确实支持流量统计（`available` 为真）时展示，对非支持的模组自动隐藏，
+  符合防御式渲染规范。
+
 ## [2.4.11-3] - 2026-08-06
 
 ### 修复
