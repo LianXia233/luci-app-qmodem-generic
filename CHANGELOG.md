@@ -3,6 +3,22 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-7] - 2026-08-25
+
+### 新增
+- **载波状态卡片新增上下行调制显示**：rpcd 插件 `qos` 新增 `radio_info` 方法——
+  解析 Fibocom 系 `AT+GTCAINFO?` 的 PCC 行（band 编码 `50x`=NR x / `101+N`=LTE N、
+  MIMO 层数、调制枚举 0=BPSK…4=256QAM）与 Quectel 系 `AT+QNWCFG="nr5g_csi"`
+  （下行 PDSCH MCS）。前端以「NR · MCS 20 · 64QAM」样式渲染上/下行调制磁贴，
+  MCS 与调制任一缺失自动省略对应段。实测 FM350-GL：下行 NR · QPSK、
+  上行 NR · 64QAM（DL MIMO 3 层 / UL MIMO 2 层）。
+
+### 变更
+- **QoS Level 与签约速率数据源优先级**：优先读取 QModem `network_info` 上报的
+  `AMBR UL` / `AMBR DL`（vendor 脚本口径，单位 Mbps，前端 ×1000 换算 kbps）
+  与 `QCI` / `5QI` 键（Quectel / Meig / Neoway 等已导出）；缺失时回退 AT 探测
+  插件（rpcd `qos qos_info`），仍无则显示 `--`。
+
 ## [2.4.11-6] - 2026-08-25
 
 ### 修复

@@ -97,7 +97,8 @@ return view.extend({
 				guard(controls.getInterfaceStatus(section), _('Mobile IP'), {}),
 				guard(controls.getNetworkInfo(section), _('Network'), []),
 				guard(controls.getQosInfo(section), 'QOS', {}),
-				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {})
+				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {}),
+				guard(controls.getRadioInfo(section), _('Modulation'), {})
 			]).then(function(r) {
 				// 从合并后的接口视图中取物理设备名，查询设备速率
 				var iface = r[7] || {};
@@ -123,8 +124,9 @@ return view.extend({
 						currentBand: r[6],
 						iface: r[7],
 						net: r[8],
-						devStatus: devStatus,
 						qosInfo: r[9] || {},
+						radioInfo: r[11] || {},
+						devStatus: devStatus,
 						allInfo: allInfo,
 						errors: errors
 					};
@@ -139,7 +141,26 @@ return view.extend({
 		var find = controls.findEntry;
 		var base = res.base || [], cell = res.cell || [], sim = res.sim || [],
 		    conn = res.conn || [], net = res.net || [];
-		var qosInfo = res.qosInfo || {};
+
+		/* QoS Level 与签约速率：优先使用 QModem network_info 上报的数据
+		 * （vendor 脚本导出的 'AMBR UL'/'AMBR DL'，单位 Mbps；'QCI'/'5QI'），
+		 * 缺失时回退 AT 探测插件（rpcd qos qos_info）的结果 */
+		var atQos = res.qosInfo || {};
+		function mbpsToKbps(v) {
+			var n = parseFloat(v);
+			return isNaN(n) || n <= 0 ? 0 : Math.round(n * 1000);
+		}
+		var qmUl = mbpsToKbps(find(net, 'AMBR UL'));
+		var qmDl = mbpsToKbps(find(net, 'AMBR DL'));
+		var qmQci = parseInt(find(net, 'QCI'), 10) || parseInt(find(net, '5QI'), 10) || 0;
+		var qosInfo = {
+			qci: qmQci || Number(atQos.qci) || 0,
+			uplink_rate_kbps: qmUl || Number(atQos.uplink_rate_kbps) || 0,
+			downlink_rate_kbps: qmDl || Number(atQos.downlink_rate_kbps) || 0,
+			apn: atQos.apn || '',
+			status: (qmUl || qmDl || qmQci || atQos.status === 'ok') ? 'ok' : String(atQos.status || 'no_data')
+		};
+
 		var data = {};
 
 		data.model = find(base, 'name') || find(base, 'model') || _('Modem');
@@ -296,6 +317,25 @@ return view.extend({
 		var mode = raw.network_mode || find(cell, 'network_mode') || '';
 		var cells = Array.isArray(raw.cells) ? raw.cells : [];
 
+		/* 上下行调制：来自 rpcd radio_info（Fibocom AT+GTCAINFO? 的 PCC 行 /
+		 * Quectel AT+QNWCFG="nr5g_csi"），RAT 缺失时按网络模式推断，
+		 * 组合为 "NR · MCS 20 · 64QAM" 形式的展示文案 */
+		var ri = res.radioInfo || {};
+		var stripCtl = function(v) { return v == null ? '' : String(v).replace(/[\x00-\x1f\x7f]+/g, '').trim(); };
+		var rat = stripCtl(ri.rat);
+		if (!rat)
+			rat = /NR/i.test(mode) ? 'NR' : (/LTE/i.test(mode) || /LTE/i.test(stripCtl(find(cell, 'Network Type')) || stripCtl(find(res.net || [], 'Network Type'))) ? 'LTE' : '');
+		function modLine(mcs, mod) {
+			if ((mcs == null || mcs === '') && (!mod || /^unknown$/i.test(mod)))
+				return '';
+			var parts = [ rat ];
+			if (mcs != null && mcs !== '')
+				parts.push('MCS ' + mcs);
+			if (mod && !/^unknown$/i.test(mod))
+				parts.push(mod);
+			return parts.filter(Boolean).join(' · ');
+		}
+
 		var carriers = cells.map(function(item) {
 			return {
 				role: item.role || '',
@@ -336,6 +376,8 @@ return view.extend({
 			band: find(cell, 'Band') || (carriers[0] ? carriers[0].band : ''),
 			dlBandwidth: find(cell, 'DL Bandwidth') || sumBandwidth(carriers, 'dlBandwidth'),
 			ulBandwidth: find(cell, 'UL Bandwidth') || sumBandwidth(carriers, 'ulBandwidth'),
+			dlModulation: modLine(ri.dl_mcs, ri.dl_modulation),
+			ulModulation: modLine(ri.ul_mcs, ri.ul_modulation),
 			carriers: carriers
 		};
 	},
@@ -417,7 +459,9 @@ return view.extend({
 			ccList,
 			E('div', { 'class':'mt5700m-carrier-stats' }, [
 				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Downlink bandwidth')), E('strong', {}, mhz(info.dlBandwidth) || '--') ]),
-				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, mhz(info.ulBandwidth) || '--') ])
+				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, mhz(info.ulBandwidth) || '--') ]),
+				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Downlink modulation')), E('strong', {}, info.dlModulation || '--') ]),
+				E('div', { 'class':'mt5700m-mini' }, [ E('span', {}, _('Uplink modulation')), E('strong', {}, info.ulModulation || '--') ])
 			]),
 			(function() {
 				var items = [];

@@ -55,6 +55,18 @@
 - **签约速率 / QCI**：修复 rpcd 插件 `/usr/libexec/rpcd/qos` 权限为不可执行导致 ubus 对象从未加载的问题（git 索引改为 100755，uci-defaults/postinst 双保险 chmod）；脚本重写为通用探测链 `AT+CGEQOSRDP=<cid>` → `AT+CGCONTRDP`（解析 APN 与引号内 `"UL,DL"` 形式 AMBR），模组不支持时返回 `no_data`、UI 显示 `--`，绝不伪造数值。
 - ACL 增加 `network.interface dump` 权限。
 
+### 6. QoS/签约速率优先走 QModem + 载波调制显示（2026-08-25 第二轮）
+
+- **QoS Level 与签约速率数据源优先级调整**：优先读取 QModem `network_info` 上报的
+  `AMBR UL` / `AMBR DL`（vendor 脚本口径，单位 Mbps，前端换算 kbps）与 `QCI` / `5QI`
+  键（Quectel / Meig / Neoway 等已导出）；仅当缺失时回退 AT 探测插件，仍无则显示 `--`。
+- **载波卡片新增上下行调制显示**：rpcd 插件 `qos` 新增 `radio_info` 方法——
+  解析 Fibocom `AT+GTCAINFO?` 的 PCC 行（band 编码 `50x`=NR x、`101+N`=LTE N；
+  MIMO 层数；调制枚举 0=BPSK…4=256QAM）与 Quectel `AT+QNWCFG="nr5g_csi"`
+  （下行 PDSCH MCS），前端在载波状态卡片渲染
+  「上行调制 NR · MCS 20 · 64QAM / 下行调制 NR · MCS 0 · QPSK」样式的磁贴，
+  MCS 与调制任一缺失自动省略对应段。实测 FM350-GL（n41/100MHz）：下行 QPSK、上行 64QAM、DL MIMO 3 层 / UL MIMO 2 层。
+
 ## 分析与综合（Analysis / Synthesis）
 
 本轮重构的本质是把「型号特例」下沉为「数据驱动」。QModem 的契约是：信息方法统一返回 `{ modem_info: [{ key, value, full_name, type, class, extra_info }] }`。只要 UI 不复读具体 key、不假设型号，而是 (a) 通用解析配置节、(b) 按 `class` 分组渲染全部字段、(c) 按 `getDisabledFeatures` / `get_mode` / `get_lockband` 的实际返回做能力门控，就能天然适配 QModem 管理的任意模组——这正是 QModem-next 的做法，本包沿用了同一模式并叠加了更精致的卡片视觉。

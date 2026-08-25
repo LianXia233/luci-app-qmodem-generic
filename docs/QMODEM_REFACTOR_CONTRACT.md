@@ -98,9 +98,13 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
 - 运营商（全模组通用解析链）：① 小区 MCC/MNC（`operatorInfo(name, mcc, mnc)` 映射中国运营商）→ ② SIM/网络信息上报的运营商名称（`ISP`/`operator`/`Operator` 键，经 `cleanText()` 清洗后传入 `operatorInfo()` 第一参数做关键字映射）→ ③ 均无时 SIM 卡片显示 `--`
 - 接入技术（通用解析链）：小区 `network_mode` → 各信息源 `Network Type` → `Radio Access Technology`
 - APN（通用解析链）：UCI 配置值 → QoS 上报（rpcd `qos qos_info` 的 `apn` 字段，来自 AT+CGCONTRDP）→ 网络信息的 `APN` 键
-- 签约速率 / QCI：rpcd 插件 `/usr/libexec/rpcd/qos`（**必须可执行**，安装脚本会 chmod 755）依次探测
-  `AT+CGEQOSRDP=<cid>`（直接返回 QCI 与 kbps 计 AMBR）与 `AT+CGCONTRDP`（兜底解析 APN 与引号内 `"UL,DL"` 形式 AMBR），
-  不被模组支持时返回 `status=no_data`，UI 显示 `--`，绝不伪造数值
+- QoS Level 与签约速率（两级数据源，**优先 QModem 上报**）：
+  1) QModem `network_info` 的 `AMBR UL` / `AMBR DL` 键（vendor 脚本口径，单位 Mbps，前端 ×1000 换算 kbps）与 `QCI` / `5QI` 键（Quectel / Meig / Neoway 等已导出）；
+  2) 缺失时回退 rpcd 插件 `/usr/libexec/rpcd/qos` 的 AT 探测（`AT+CGEQOSRDP=<cid>` → `AT+CGCONTRDP` 兜底），模组不支持则显示 `--`。
+- 调制信息（rpcd 插件同一对象的 `radio_info` 方法）：返回 `{ rat, band, dl_modulation, ul_modulation, dl_mimo, ul_mimo, dl_mcs?, ul_mcs?, status }`；
+  探测链：Fibocom 系 `AT+GTCAINFO?`（PCC 行含 band 编码 50x=NR x / 101+N=LTE N、MIMO 层数、调制枚举 0=BPSK…4=256QAM）
+  → Quectel 系 `AT+QNWCFG="nr5g_csi"`（下行 PDSCH MCS）。前端载波卡片渲染为 `NR · MCS 20 · 64QAM`
+  形式（MCS 与调制任一缺失时自动省略对应段，均缺失显示 `--`）。
 
 ## 4. 旧动作 → QModem 方法 映射表
 | 旧 mt5700m-at 动作 | 新实现 |

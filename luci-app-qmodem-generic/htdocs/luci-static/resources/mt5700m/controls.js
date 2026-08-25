@@ -80,6 +80,8 @@ var callInterfaceDump = rpc.declare({ object: 'network.interface', method: 'dump
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
 // QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
 var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', params: ['config_section'], expect: { } });
+// 无线电调制信息（上下行调制 / MCS / MIMO 层数），同一 rpcd 插件提供
+var callRadioInfo = rpc.declare({ object: 'qos', method: 'radio_info', params: ['config_section'], expect: { } });
 
 /* ------------------------------------------------------------------ */
 /* 通用辅助                                                            */
@@ -199,6 +201,7 @@ function modemRedial(section) { return callModemRedial(section); }
 function rcList(name) { return callRcList(name); }
 function getDeviceStatus(name) { return callDeviceStatus(name); }
 function getQosInfo(section) { return callQosInfo(section).catch(function() { return { qci: 0, status: 'unavailable' }; }); }
+function getRadioInfo(section) { return callRadioInfo(section).catch(function() { return { status: 'unavailable' }; }); }
 
 /*
  * 解析某个模组配置节对应的 netifd 逻辑接口。
@@ -681,6 +684,7 @@ return baseclass.extend({
 	getInterfaceStatus: getInterfaceStatus,
 	getDeviceStatus: getDeviceStatus,
 	getQosInfo: getQosInfo,
+	getRadioInfo: getRadioInfo,
 
 	getModemSections: getModemSections,
 	resolveSection: resolveSection,

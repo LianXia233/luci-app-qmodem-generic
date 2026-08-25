@@ -1,13 +1,19 @@
 #!/bin/sh
-# QModem QOS ubus service — 提供 QCI / AMBR（签约速率）/ APN 查询
+# QModem QOS/Radio ubus service — 提供 QCI / AMBR（签约速率）/ APN / 调制信息查询
 # 部署路径: /usr/libexec/rpcd/qos （必须可执行，rpcd 才会加载）
 #
-# 全模组通用策略：按序探测以下标准 3GPP AT 命令，取到数据即返回：
+# qos_info — 全模组通用策略：按序探测以下标准 3GPP AT 命令，取到数据即返回：
 #   1) AT+CGEQOSRDP=<cid> — TS 27.007 EPS QoS 动态参数，
 #      返回 +CGEQOSRDP: <cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR>（kbps），Quectel 等多数模组支持
 #   2) AT+CGCONTRDP       — TS 27.007 PDP 上下文动态参数兜底：
 #      解析 APN 与引号包裹的 "UL,DL" 形式 AMBR 字段（部分 MTK/Fibocom 固件）
 # 任一命令不被模组支持（ERROR/超时）时自动尝试下一条；全部失败返回 status=no_data。
+# 注意：前端优先使用 QModem network_info 上报的 AMBR/QCI 键，本插件仅作兜底。
+#
+# radio_info — 服务小区调制信息（上行/下行调制、MCS、MIMO 层数）：
+#   1) AT+GTCAINFO?       — Fibocom 系：PCC 行含 band/MIMO 层数/上下行调制
+#   2) AT+QNWCFG="nr5g_csi" — Quectel 系：返回下行 PDSCH MCS
+# 支持哪个取决于模组，均不支持时返回 status=unavailable。
 
 . /usr/share/libubox/jshn.sh
 
@@ -16,11 +22,13 @@ CID_DEFAULT=1
 
 case "$1" in
   list)
-    echo '{"qos_info":{}}'
+    echo '{"qos_info":{},"radio_info":{}}'
     ;;
   call)
+    TTY_DEV=""
+    config_section=""
     case "$2" in
-      qos_info)
+      qos_info|radio_info)
         read input
         json_load "$input"
         json_get_var config_section config_section
@@ -29,27 +37,54 @@ case "$1" in
         esac
         TTY_DEV=$(uci -q get "qmodem.${config_section}.override_at_port")
         [ -z "$TTY_DEV" ] && TTY_DEV=$(uci -q get "qmodem.${config_section}.at_port")
+        ;;
+    esac
 
-        json_init
-        if [ ! -x "$TOOL" ] || [ -z "$TTY_DEV" ] || [ ! -c "$TTY_DEV" ]; then
+    if [ ! -x "$TOOL" ] || [ -z "$TTY_DEV" ] || [ ! -c "$TTY_DEV" ]; then
+      json_init
+      case "$2" in
+        qos_info)
           json_add_int "qci" 0
           json_add_string "status" "unavailable"
-          json_dump
-          exit 0
-        fi
+          ;;
+        radio_info)
+          json_add_string "status" "unavailable"
+          ;;
+        *)
+          json_add_string "status" "unavailable"
+          ;;
+      esac
+      json_dump
+      exit 0
+    fi
 
-        at_cmd() {
-          "$TOOL" -d "$TTY_DEV" -c "$1" -t 8 2>&1
-        }
+    at_cmd() {
+      "$TOOL" -d "$TTY_DEV" -c "$1" -t 8 2>&1 | tr -d '\r'
+    }
 
-        # 数字校验（正整数）
-        is_num() {
-          case "$1" in
-            ''|*[!0-9]*) return 1 ;;
-            *) return 0 ;;
-          esac
-        }
+    # 数字校验（正整数）
+    is_num() {
+      case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+      esac
+    }
 
+    # 调制枚举 → 文案（3GPP TS 36/38 常见表述；GTCAINFO 定义 0-6）
+    mod_name() {
+      case "$1" in
+        0) echo "BPSK" ;;
+        1) echo "QPSK" ;;
+        2) echo "16QAM" ;;
+        3) echo "64QAM" ;;
+        4) echo "256QAM" ;;
+        5) echo "1024QAM" ;;
+        *) echo "" ;;
+      esac
+    }
+
+    case "$2" in
+      qos_info)
         # ---- 1) CGEQOSRDP：<cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR> ----
         QOS_LINE=$(at_cmd "AT+CGEQOSRDP=${CID_DEFAULT}" | sed -n 's/.*+CGEQOSRDP:[[:space:]]*//p' | head -n1)
         if [ -n "$QOS_LINE" ]; then
@@ -57,6 +92,7 @@ case "$1" in
           DL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $(NF-1)); print $(NF-1)}')
           UL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF); print $NF}')
           if [ -n "$QCI" ] || { is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ]; } || { is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ]; }; then
+            json_init
             [ -n "$QCI" ] && json_add_int "qci" "$QCI" || json_add_int "qci" 0
             is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ] && json_add_int "downlink_rate_kbps" "$DL_AMBR"
             is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ] && json_add_int "uplink_rate_kbps" "$UL_AMBR"
@@ -72,7 +108,6 @@ case "$1" in
         if [ -n "$CONTRDP_LINE" ]; then
           APN=$(printf '%s\n' "$CONTRDP_LINE" | awk -F',' '{gsub(/"/, "", $3); print $3}')
           AMBR_PAIR=$(printf '%s\n' "$CONTRDP_LINE" | sed -n 's/.*"\([0-9]\{1,\},[0-9]\{1,\}\)".*/\1/p')
-          QCI_CAND=""
           if [ -n "$AMBR_PAIR" ] || [ -n "$APN" ]; then
             UL_VAL=${AMBR_PAIR%%,*}
             DL_VAL=${AMBR_PAIR##*,}
@@ -90,6 +125,7 @@ case "$1" in
                 UL_KBPS=$UL_VAL
               fi
             fi
+            json_init
             json_add_int "qci" 0
             [ -n "$APN" ] && json_add_string "apn" "$APN"
             [ -n "$DL_KBPS" ] && json_add_int "downlink_rate_kbps" "$DL_KBPS"
@@ -99,12 +135,78 @@ case "$1" in
               json_dump
               exit 0
             fi
-            json_init
           fi
         fi
 
         json_add_int "qci" 0
         json_add_string "status" "no_data"
+        json_dump
+        ;;
+
+      radio_info)
+        # ---- 1) GTCAINFO（Fibocom 系）：PCC 行携带 band/MIMO 层数/上下行调制 ----
+        # LTE: PCC:<band>,<pci>,<earfcn>,<dl_bw>,<dl_mimo>,<ul_mimo>,<dl_mod>,<ul_mod>,<rsrp>
+        # NR : PCC:<band>,<pci>,<narfcn>,<dl_bw>[,<ul_bw>],<dl_mimo>,<ul_mimo>,<dl_mod>,<ul_mod>,<rsrp>
+        # band 编码：101+BAND_LTE_N（如 141=B41）；"50"+BAND_NR_N（如 5041=n41）
+        # 调制：0=BPSK 1=QPSK 2=16QAM 3=64QAM 4=256QAM 5=1024QAM 6=UNKNOWN
+        PCC_LINE=$(at_cmd 'AT+GTCAINFO?' | grep '^PCC:' | sed 's/^PCC://' | head -n1)
+        if [ -n "$PCC_LINE" ]; then
+          FOUND=$(printf '%s' "$PCC_LINE" | awk -F',' '
+            function trim(s) { gsub(/[ \t]/, "", s); return s }
+            {
+              for (i = 1; i <= NF; i++) $i = trim($i);
+              f1 = $1 + 0;
+              rat = ""; band = "";
+              if (f1 >= 101 && f1 <= 171) { rat = "LTE"; band = f1 - 100 }
+              else if (f1 >= 501 && f1 <= 50512) {
+                rat = "NR"; band = $1; sub(/^50/, "", band)
+              } else next;
+              if (rat == "LTE") {
+                if (NF < 9) next;
+                dm = $7; um = $8; dim = $5; uim = $6
+              } else {
+                if (NF >= 10) { dm = $8; um = $9; dim = $6; uim = $7 }
+                else if (NF == 9) { dm = $7; um = $8; dim = $5; uim = $6 }
+                else next
+              }
+              printf "RAT=%s\nBAND=%s\nDL_MIMO=%s\nUL_MIMO=%s\nDM=%s\nUM=%s\n", rat, band, dim, uim, dm, um
+              exit
+            }')
+          if [ -n "$FOUND" ]; then
+            eval "$FOUND"
+            json_init
+            json_add_string "rat" "$RAT"
+            [ -n "$BAND" ] && json_add_string "band" "$BAND"
+            DM_TXT=$(mod_name "$DM")
+            UM_TXT=$(mod_name "$UM")
+            [ -n "$DM_TXT" ] && json_add_string "dl_modulation" "$DM_TXT"
+            [ -n "$UM_TXT" ] && json_add_string "ul_modulation" "$UM_TXT"
+            is_num "$DL_MIMO" && [ "$DL_MIMO" -ge 1 ] && json_add_int "dl_mimo" "$DL_MIMO"
+            is_num "$UL_MIMO" && [ "$UL_MIMO" -ge 1 ] && json_add_int "ul_mimo" "$UL_MIMO"
+            json_add_string "status" "ok"
+            json_dump
+            exit 0
+          fi
+        fi
+
+        # ---- 2) Quectel 系：AT+QNWCFG="nr5g_csi" 返回下行 PDSCH MCS ----
+        # +QNWCFG: "nr5g_csi",<MCS 0-31>,<layers>,<CQI>,<PMI>
+        CSI_LINE=$(at_cmd 'AT+QNWCFG="nr5g_csi"' | grep '+QNWCFG:' | head -n1)
+        if [ -n "$CSI_LINE" ]; then
+          DL_MCS=$(printf '%s\n' "$CSI_LINE" | awk -F',' '{gsub(/[ \t"]/, "", $1); v=$2+0; if ($2 != "" && v >= 0 && v <= 31) print v}')
+          RAT_HINT="NR"
+          printf '%s\n' "$CSI_LINE" | grep -q lte_csi && RAT_HINT="LTE"
+          if [ -n "$DL_MCS" ]; then
+            json_init
+            json_add_string "rat" "$RAT_HINT"
+            json_add_int "dl_mcs" "$DL_MCS"
+            json_add_string "status" "ok"
+            json_dump
+            exit 0
+          fi
+        fi
+
+        json_add_string "status" "unavailable"
         json_dump
         ;;
     esac
