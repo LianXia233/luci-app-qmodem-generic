@@ -246,6 +246,18 @@ jobs:
               echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
             done
           } > release-notes.md
+
+          # 追加更新日志：提取 CHANGELOG.md 第一个版本段落（到下一个 ## 标题为止）
+          {
+            echo
+            echo '---'
+            echo
+            if [ -f CHANGELOG.md ]; then
+              awk '/^## \[/{n++; if (n == 2) exit} n == 1' CHANGELOG.md
+            else
+              echo '_（未找到 CHANGELOG.md）_'
+            fi
+          } >> release-notes.md
           cat release-notes.md
 
       - name: Create / update release
