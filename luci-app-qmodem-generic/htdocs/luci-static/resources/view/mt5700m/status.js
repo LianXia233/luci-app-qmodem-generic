@@ -81,10 +81,9 @@ return view.extend({
 				return { section: null, errors: errors };
 
 			// resolveSection 内部已 uci.load('qmodem')
-			// QModem dial 脚本会以 section.name 为名创建 network interface；
-			// 但 uci section 名不允许 '-'，需转下划线（如 fm350-gl → fm350_gl）
-			var rawName = uci.get('qmodem', section, 'name') || 'wwan0';
-			var ifname = String(rawName).replace(/-/g, '_');
+			// 接口状态由 controls.getInterfaceStatus(section) 自动解析：按
+			// /etc/config/network 的 modem_config 关联找到 QModem 为本模组
+			// 生成的 IPv4/IPv6 逻辑接口（与模组型号无关，适配所有模组）
 			var apn = uci.get('qmodem', section, 'apn') || '';
 
 			return Promise.all([
@@ -95,13 +94,14 @@ return view.extend({
 				guard(controls.getDns(section), 'DNS', {}),
 				guard(controls.getUsageStats(section), _('Traffic Statistics'), { available: 0 }),
 				guard(controls.getCurrentBand(section), _('Carrier status'), {}),
-				guard(controls.getInterfaceStatus(ifname), _('Mobile IP'), {}),
+				guard(controls.getInterfaceStatus(section), _('Mobile IP'), {}),
 				guard(controls.getNetworkInfo(section), _('Network'), []),
 				guard(controls.getQosInfo(section), 'QOS', {}),
 				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {})
 			]).then(function(r) {
-				// 从 network.interface status 中取物理设备名，查询设备速率
+				// 从合并后的接口视图中取物理设备名，查询设备速率
 				var iface = r[7] || {};
+				var ifname = iface.interface || '';
 				var devName = iface.l3_device || iface.device || '';
 				var devPromise = devName
 					? guard(controls.getDeviceStatus(devName), _('Device rate'), {})
@@ -118,9 +118,9 @@ return view.extend({
 						sim: r[2],
 						conn: r[3],
 						dns: r[4],
-					usage: r[5],
-					trafficResetSchedule: r[10],
-					currentBand: r[6],
+						usage: r[5],
+						trafficResetSchedule: r[10],
+						currentBand: r[6],
 						iface: r[7],
 						devStatus: devStatus,
 						qosInfo: r[9] || {},

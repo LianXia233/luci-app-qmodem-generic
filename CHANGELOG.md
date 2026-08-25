@@ -3,6 +3,35 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-5] - 2026-08-25
+
+### 修复
+- **连接页/概览页 IPv4 与 IPv6 地址不显示**：前端原先调用
+  `network.interface status {interface: ...}`，但 netifd 的裸 `network.interface`
+  ubus 对象只提供 `dump` 方法（`status` 属于具体的 `network.interface.<name>`
+  对象），该调用恒定返回 ubus 错误码 4（方法不存在），导致地址、MTU、协议、
+  接口状态全部显示为 `--`。
+- **接口名解析错误**：原先以 qmodem 配置节的 `name` 选项（模组型号，如
+  `fm350-gl`）推导 netifd 接口名，与 QModem 实际创建的逻辑接口
+  （以配置节命名的 `<section>` / `<section>v6`）不匹配。
+
+### 变更
+- `controls.js`：改用 `network.interface dump` 批量获取接口状态；新增
+  `getModemInterfaces(section)` 按三级策略自动解析任意模组对应的逻辑接口——
+  ① `/etc/config/network` 中 `modem_config` 指向该配置节的接口（QModem 标准
+  关联方式）；② 回退同名及 `<section>v6` 后缀接口；③ 回退物理网口
+  （qmodem `network` 选项）匹配。`getInterfaceStatus()` 现返回 IPv4/IPv6
+  双接口合并后的状态视图（地址/前缀/DNS 合并、uptime 取最大、up 取或），
+  不绑定任何模组型号。
+- `connection.js`：IPv4 取自合并视图的 `ipv4-address`；IPv6 依次回退
+  `ipv6-address` → `ipv6-prefix-assignment` → `ipv6-prefix`；MTU 由
+  `network.device status` 补齐；QModem DNS 字段的杂散换行数据做清洗，
+  缺失时回退接口上报的 `dns-server`。
+- `status.js`：概览页"Mobile IP"同样改走配置节自动解析，不再用型号名
+  推导接口名。
+- ACL（`acl.d/luci-app-qmodem-generic.json`）：`network.interface` 增加
+  `dump` 权限。
+
 ## [2.4.11-4] - 2026-08-11
 
 ### 修复

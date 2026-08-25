@@ -73,8 +73,9 @@ var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params
 var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { } });
 
 var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], expect: { } });
-// 网络接口状态（用于获取模组数据接口的 IP 地址等；huawei 的 network_info 为空，IP 由此取得）
-var callInterfaceStatus = rpc.declare({ object: 'network.interface', method: 'status', params: ['interface'], expect: { } });
+// 网络接口批量状态：netifd 的裸 network.interface 对象只提供 dump（status 需要具体的
+// network.interface.<name> 对象），因此这里统一用 dump 一次取回全部接口再按名匹配。
+var callInterfaceDump = rpc.declare({ object: 'network.interface', method: 'dump', expect: { 'interface': [] } });
 // 网络设备状态（用于获取网口链路速率，作为签约速率参考）
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
 // QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
@@ -196,9 +197,81 @@ function modemDial(section) { return callModemDial(section); }
 function modemHang(section) { return callModemHang(section); }
 function modemRedial(section) { return callModemRedial(section); }
 function rcList(name) { return callRcList(name); }
-function getInterfaceStatus(name) { return callInterfaceStatus(name); }
 function getDeviceStatus(name) { return callDeviceStatus(name); }
 function getQosInfo(section) { return callQosInfo(section).catch(function() { return { qci: 0, status: 'unavailable' }; }); }
+
+/*
+ * 解析某个模组配置节对应的 netifd 逻辑接口。
+ * QModem 会为每个模组自动创建 IPv4 / IPv6 两个逻辑接口（命名由配置节派生，与模组
+ * 型号无关），因此这里不写死任何型号，按以下顺序自动推导、适配所有模组：
+ *   1) /etc/config/network 中 modem_config 指向该配置节的接口（QModem 的标准关联方式）
+ *   2) 回退：与配置节同名及 <section>v6 后缀的接口（兼容旧命名规则）
+ *   3) 回退：三层设备等于 qmodem 配置中物理网口（network 选项）的接口
+ * 返回 { names: [接口名...], entries: [各接口的 status 对象...] }
+ */
+function getModemInterfaces(section) {
+	return Promise.all([
+		uci.load('network').catch(function() { return null; }),
+		callInterfaceDump().catch(function() { return []; })
+	]).then(function(res) {
+		var dump = Array.isArray(res[1]) ? res[1] : [];
+		var byName = {};
+		dump.forEach(function(e) { if (e && e.interface) byName[e.interface] = e; });
+
+		var names = [];
+		uci.sections('network', 'interface', function(s) {
+			if (s && s['.name'] && s.modem_config === section && byName[s['.name']])
+				names.push(s['.name']);
+		});
+
+		if (!names.length)
+			[section, section + 'v6'].forEach(function(n) { if (byName[n]) names.push(n); });
+
+		if (!names.length) {
+			var dev = uci.get('qmodem', section, 'network') || '';
+			if (dev)
+				dump.forEach(function(e) {
+					if ((e.l3_device === dev || e.device === dev) && names.indexOf(e.interface) === -1)
+						names.push(e.interface);
+				});
+		}
+
+		return { names: names, entries: names.map(function(n) { return byName[n]; }) };
+	});
+}
+
+/*
+ * 取模组数据接口的合并状态。QModem 为同一模组生成的 IPv4 与 IPv6 地址分布在两个
+ * 逻辑接口上，这里把地址/前缀/DNS 等合并为一个视图，UI 直接取字段展示即可。
+ */
+function getInterfaceStatus(section) {
+	return getModemInterfaces(section).then(function(r) {
+		var merged = {};
+		r.entries.forEach(function(e) {
+			Object.keys(e || {}).forEach(function(k) {
+				switch (k) {
+					case 'ipv4-address':
+					case 'ipv6-address':
+					case 'ipv6-prefix':
+					case 'ipv6-prefix-assignment':
+					case 'dns-server':
+						merged[k] = (merged[k] || []).concat(Array.isArray(e[k]) ? e[k] : []);
+						break;
+					case 'uptime':
+						merged[k] = Math.max(merged[k] || 0, e[k] || 0);
+						break;
+					case 'up':
+						merged[k] = (merged[k] === true) || e[k] === true;
+						break;
+					default:
+						if (merged[k] == null && e[k] != null)
+							merged[k] = e[k];
+				}
+			});
+		});
+		return merged;
+	});
+}
 
 /* ------------------------------------------------------------------ */
 /* 配置节解析                                                          */
@@ -604,6 +677,7 @@ return baseclass.extend({
 	modemHang: modemHang,
 	modemRedial: modemRedial,
 	rcList: rcList,
+	getModemInterfaces: getModemInterfaces,
 	getInterfaceStatus: getInterfaceStatus,
 	getDeviceStatus: getDeviceStatus,
 	getQosInfo: getQosInfo,

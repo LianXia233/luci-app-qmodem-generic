@@ -9,7 +9,7 @@
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ],
 				"network.device": [ "status" ],
-				"network.interface": [ "status" ]
+				"network.interface": [ "status", "dump" ]
 			}
 		},
 		"write": {

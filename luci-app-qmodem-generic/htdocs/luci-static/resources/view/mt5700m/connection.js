@@ -59,6 +59,11 @@ function joinAddresses(list) {
 	}).filter(Boolean).join(', ');
 }
 
+/* QModem 部分版本的 DNS 字段会带回车换行的杂散数据，仅保留首个有效地址 */
+function cleanDns(v) {
+	return String(v == null ? '' : v).split(/\s+/)[0] || '';
+}
+
 return view.extend({
 	load: function() {
 		var self = this;
@@ -74,26 +79,37 @@ return view.extend({
 				errors.push('读取 qmodem 配置失败：' + ((err && err.message) || String(err)));
 				return null;
 			}).then(function() {
-				var iface = uci.get('qmodem', section, 'name') || 'wwan0';
-				self.iface = iface;
-
+				/* 接口状态：由 controls 按 modem_config / 命名规则自动解析出
+				 * QModem 为本模组生成的 IPv4/IPv6 逻辑接口并合并地址视图 */
 				return Promise.all([
 					guard(controls.getConnectStatus(section), '连接状态', errors),
 					guard(controls.getDns(section), 'DNS', errors),
 					guard(controls.getMode(section), '拨号模式', errors),
 					guard(controls.getDialStatus(section), '拨号状态', errors),
-					guard(controls.getInterfaceStatus(iface), '接口 ' + iface, errors)
+					guard(controls.getInterfaceStatus(section), '接口状态', errors)
 				]).then(function(results) {
-					return {
-						section: section,
-						iface: iface,
-						conn: results[0],
-						dns: results[1],
-						mode: results[2],
-						dial: results[3],
-						ifstat: results[4],
-						errors: errors
-					};
+					var ifstat = results[4] || {};
+					var devName = ifstat.l3_device || ifstat.device || '';
+
+					/* MTU 不在接口 dump 里，从物理设备状态补齐 */
+					return guard(
+						devName ? controls.getDeviceStatus(devName) : Promise.resolve({}),
+						'设备状态', errors
+					).then(function(devstat) {
+						self.iface = ifstat.interface || uci.get('qmodem', section, 'network') || '--';
+
+						return {
+							section: section,
+							iface: self.iface,
+							conn: results[0],
+							dns: results[1],
+							mode: results[2],
+							dial: results[3],
+							ifstat: ifstat,
+							devstat: devstat || {},
+							errors: errors
+						};
+					});
 				});
 			});
 		}).catch(function(err) {
@@ -141,20 +157,25 @@ return view.extend({
 		return E('div', { 'class': 'mtconn-session-row' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
 	},
 
-	/* 地址卡片：IPv4/IPv6/MTU 取自 network.interface status，DNS 取自 QModem get_dns */
+	/* 地址卡片：IPv4/IPv6/MTU 取自 netifd 接口合并视图（QModem 生成的 v4/v6 接口），
+	 * DNS 优先取 QModem get_dns，缺失时回退接口上报的 dns-server */
 	addressPanel: function(res) {
 		var self = this;
 		var ifstat = res.ifstat || {};
+		var devstat = res.devstat || {};
 		var dns = plainObject(res.dns, 'dns');
 		var connected = res.connected;
 
 		var ipv4 = joinAddresses(ifstat['ipv4-address']);
-		var ipv6 = joinAddresses(ifstat['ipv6-address']) || joinAddresses(ifstat['ipv6-prefix-assignment']);
-		var mtu = ifstat.mtu != null ? String(ifstat.mtu) : '';
-		var dns4 = [ dns.ipv4_dns1, dns.ipv4_dns2 ].filter(Boolean).join(', ');
-		var dns6 = [ dns.ipv6_dns1, dns.ipv6_dns2 ].filter(Boolean).join(', ');
+		var ipv6 = joinAddresses(ifstat['ipv6-address']) ||
+		           joinAddresses(ifstat['ipv6-prefix-assignment']) ||
+		           joinAddresses(ifstat['ipv6-prefix']);
+		var mtu = ifstat.mtu != null ? String(ifstat.mtu) :
+		          (devstat.mtu != null ? String(devstat.mtu) : '');
+		var dns4 = [ cleanDns(dns.ipv4_dns1), cleanDns(dns.ipv4_dns2) ].filter(Boolean).join(', ');
+		var dns6 = [ cleanDns(dns.ipv6_dns1), cleanDns(dns.ipv6_dns2) ].filter(Boolean).join(', ');
 		if (!dns4 && !dns6 && Array.isArray(ifstat['dns-server']))
-			dns4 = ifstat['dns-server'].join(', ');
+			dns4 = ifstat['dns-server'].map(cleanDns).filter(Boolean).join(', ');
 
 		var dialStatus = plainObject(res.dial, 'dial_status');
 		var dialRows = Object.keys(dialStatus || {}).filter(function(k) {
