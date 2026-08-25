@@ -8,7 +8,7 @@
 
 ## 背景（Background）
 
-原仓库 `luci-app-mt5700m` 是兆能 MT5700M 的专用管理界面，依赖私有文本后端 `/usr/sbin/mt5700m-at`。上一轮重构已把所有数据来源与动作链路切到 QModem 的 `qmodem` ubus 对象，但 `resolveSection()` 仍写死了「优先选 model 含 `mt5700m` 的配置节」，且部分文案、标题、空状态提示仍写死「MT5700M」。用户指出：本包应作为 QModem 的**美化版 UI**，对任意 QModem 管理的模组生效，按 QModem 实际返回的型号与信息显示，不限于 5700。
+原仓库 `luci-app-mt5700m` 是鼎桥 MT5700M 的专用管理界面，依赖私有文本后端 `/usr/sbin/mt5700m-at`。上一轮重构已把所有数据来源与动作链路切到 QModem 的 `qmodem` ubus 对象，但 `resolveSection()` 仍写死了「优先选 model 含 `mt5700m` 的配置节」，且部分文案、标题、空状态提示仍写死「MT5700M」。用户指出：本包应作为 QModem 的**美化版 UI**，对任意 QModem 管理的模组生效，按 QModem 实际返回的型号与信息显示，不限于 5700。
 
 参考实现为 QModem 官方 `luci-app-qmodem-next`：其 `overview.js` 从 UCI `modem-device` 配置节读取模组列表渲染下拉选择器，并把 `base_info / sim_info / network_info / cell_info` 的 `modem_info` 数组合并按 `class` 分组、逐类渲染（不写死字段）。本重构沿用这一权威模式。
 
