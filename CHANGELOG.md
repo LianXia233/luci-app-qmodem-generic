@@ -3,6 +3,36 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-6] - 2026-08-25
+
+### 修复
+- **SIM 与签约卡片全模组通用**（概览页 `status.js`）：
+  - 运营商：原先仅依赖小区 MCC/MNC，现增加模组上报的运营商名称回退链
+    （sim_info/network_info 的 `ISP` / `operator` / `Operator` 键），经新增
+    `cleanText()` 清洗换行与控制字符（实测 FM350-GL 的 ISP 值为 `"\nCHINA MOBILE"`）
+    后由 `operatorInfo()` 关键字映射，无 MCC/MNC 也能显示真实运营商。
+  - 接入技术：`network_mode` 之外回退各信息源的 `Network Type` /
+    `Radio Access Technology` 键（不同模组上报字段名不一）。
+  - APN：UCI 配置值之外回退 QoS 上报（AT+CGCONTRDP 解析结果）与网络信息的 `APN` 键。
+  - 电话号码：多键探测（`SIM Number`/`MSISDN`/`Phone Number`），SIM 未存储号码时
+    显示 `--`，不再依赖单一字段名。
+- **签约速率 / QCI 无数据**：rpcd 插件 `/usr/libexec/rpcd/qos` 在 git 索引中为
+  644（不可执行），rpcd 从未加载该插件、`qos` ubus 对象不存在。现索引权限改为
+  100755，并在 uci-defaults 与 postinst 双保险 chmod 755。
+
+### 变更
+- **qos rpcd 插件重写为通用探测链**：依次探测标准 3GPP AT 命令
+  `AT+CGEQOSRDP=<cid>`（直接返回 QCI 与 kbps 计 AMBR，Quectel 等多数模组支持）
+  → `AT+CGCONTRDP`（兜底解析 APN 与引号内 `"UL,DL"` 形式 AMBR，适配部分
+  MTK/Fibocom 固件）；均不支持时返回 `status=no_data`，UI 显示 `--`，绝不伪造数值。
+  实测 FM350-GL 经 CGCONTRDP 兜底成功取得签约速率（DL≈262 Mbps / UL≈64 Mbps）。
+- 概览页 `load()` 额外下发 `net`（getNetworkInfo）供各通用回退链使用；
+  QCI 为 0 时不再显示"QCI 0 自定义承载"占位。
+
+### 文档
+- `docs/QMODEM_REFACTOR_CONTRACT.md` §3 补充运营商/接入技术/APN/签约速率的
+  通用解析链说明；`docs/QMODEM_GENERIC_UI_REPORT.md` 新增本轮改动记录。
+
 ## [2.4.11-5] - 2026-08-25
 
 ### 修复

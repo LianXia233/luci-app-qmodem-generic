@@ -43,6 +43,18 @@
 - `Makefile`：`LUCI_TITLE` 由「MT5700M module management (QModem compatible)」改为「Modem management (QModem beautified UI)」，注释改为「对任意 QModem 支持的模组生效」。
 - `QMODEM_REFACTOR_CONTRACT.md`：标题、§0、§1、§2、§3、§5 全部改为通用表述，并补充新通用辅助 API。
 
+### 5. SIM 与签约信息全模组通用化 + 接口地址修复（2026-08-25）
+
+实测 FM350-GL（Fibocom/MTK 平台）时发现概览页「SIM 与签约」卡片多处空值、连接页 IP 不显示，根因均为**数据源解析与模组型号耦合**。本轮全部下沉为通用数据链：
+
+- **IPv4/IPv6 地址不显示**：前端原调用 `network.interface status {interface:...}`——netifd 的裸 `network.interface` 对象只有 `dump` 方法，该调用恒定失败；接口名又误用 qmodem 配置的 `name`（模组型号）。现改用 `network.interface dump` 批量获取，新增 `controls.getModemInterfaces(section)` 按 ① `/etc/config/network` 的 `modem_config` 关联 → ② 同名/`v6` 后缀 → ③ 物理网口 三级策略自动解析任意模组的 v4/v6 逻辑接口并合并地址视图。
+- **运营商**：原先仅依赖小区 MCC/MNC；现增加 SIM/网络信息上报的运营商名称（`ISP` 等键）回退链，经新增 `cleanText()` 清洗换行/控制字符（如 `"\nCHINA MOBILE"`）后由 `operatorInfo()` 关键字映射，无 MCC/MNC 也能显示真实运营商。
+- **接入技术**：`network_mode` 之外回退各信息源的 `Network Type` / `Radio Access Technology` 键。
+- **APN**：UCI 配置值之外回退 QoS 上报与网络信息的 `APN` 键。
+- **电话号码**：多键探测（`SIM Number`/`MSISDN`/`Phone Number`），SIM 未存储号码时诚实显示 `--`。
+- **签约速率 / QCI**：修复 rpcd 插件 `/usr/libexec/rpcd/qos` 权限为不可执行导致 ubus 对象从未加载的问题（git 索引改为 100755，uci-defaults/postinst 双保险 chmod）；脚本重写为通用探测链 `AT+CGEQOSRDP=<cid>` → `AT+CGCONTRDP`（解析 APN 与引号内 `"UL,DL"` 形式 AMBR），模组不支持时返回 `no_data`、UI 显示 `--`，绝不伪造数值。
+- ACL 增加 `network.interface dump` 权限。
+
 ## 分析与综合（Analysis / Synthesis）
 
 本轮重构的本质是把「型号特例」下沉为「数据驱动」。QModem 的契约是：信息方法统一返回 `{ modem_info: [{ key, value, full_name, type, class, extra_info }] }`。只要 UI 不复读具体 key、不假设型号，而是 (a) 通用解析配置节、(b) 按 `class` 分组渲染全部字段、(c) 按 `getDisabledFeatures` / `get_mode` / `get_lockband` 的实际返回做能力门控，就能天然适配 QModem 管理的任意模组——这正是 QModem-next 的做法，本包沿用了同一模式并叠加了更精致的卡片视觉。

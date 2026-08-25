@@ -87,14 +87,20 @@ load: function() {
 ```
 render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 QModem 已识别该设备）"提示。
 
-## 3. 字段映射（通用；示例取自 huawei / MT5700M 实测）
+## 3. 字段映射（通用；示例取自 huawei / MT5700M / FM350-GL 实测）
 - 基本信息（getBaseInfo 数组）：`name`(型号), `manufacturer`(制造商), `revision`(固件), `at_port`(AT 端口), `connect_status`, `temperature`(如 `42 °C`)
-- SIM（getSimInfo 数组）：`SIM Status`, `SIM Slot`, `SIM Number`(手机号), `IMEI`, `IMSI`（**部分模组不返回 ICCID**，显示 `--`）
+- SIM（getSimInfo 数组）：`SIM Status`, `SIM Slot`, `SIM Number`(手机号), `ISP`(运营商), `IMEI`, `IMSI`，`ICCID`（**部分模组不返回 ICCID/手机号**，显示 `--`；ICCID/ISP 值中的换行与控制字符由 `cleanText()` 清洗）
 - 小区/信号（getCellInfo 数组）：`network_mode`(如 `LTE Mode`/`NR5G-SA Mode`/`EN-DC Mode`), `RSRP`(进度条值,`'-95'`), `RSRQ`, `SINR`, `Physical Cell ID`, `TAC`, `EARFCN`(LTE)或`ARFCN`(NR), `Band`, `DL Bandwidth`, `UL Bandwidth`, `MCC`, `MNC`, `SCS`
+- 网络（getNetworkInfo 数组）：`Network Type` 等；作为接入技术/运营商/APN 的回退数据源
 - 连接（getConnectStatus 数组）：`connect_status`(`Yes`/`No`)
-- DNS（getDns）：`dns.ipv4_dns1` 等
+- DNS（getDns）：`dns.ipv4_dns1` 等（值中可能带换行+杂散数据，用 `cleanDns()` 取首个有效地址）
 - 模式（getMode）：`mode.ecm`/`mode.ncm` 为 `'1'` 表示当前模式
-- 运营商：用 `controls.operatorInfo(null, mcc, mnc)`（mcc/mnc 取自 getCellInfo 数组键 `MCC`/`MNC`）；取不到则显示 `--`
+- 运营商（全模组通用解析链）：① 小区 MCC/MNC（`operatorInfo(name, mcc, mnc)` 映射中国运营商）→ ② SIM/网络信息上报的运营商名称（`ISP`/`operator`/`Operator` 键，经 `cleanText()` 清洗后传入 `operatorInfo()` 第一参数做关键字映射）→ ③ 均无时 SIM 卡片显示 `--`
+- 接入技术（通用解析链）：小区 `network_mode` → 各信息源 `Network Type` → `Radio Access Technology`
+- APN（通用解析链）：UCI 配置值 → QoS 上报（rpcd `qos qos_info` 的 `apn` 字段，来自 AT+CGCONTRDP）→ 网络信息的 `APN` 键
+- 签约速率 / QCI：rpcd 插件 `/usr/libexec/rpcd/qos`（**必须可执行**，安装脚本会 chmod 755）依次探测
+  `AT+CGEQOSRDP=<cid>`（直接返回 QCI 与 kbps 计 AMBR）与 `AT+CGCONTRDP`（兜底解析 APN 与引号内 `"UL,DL"` 形式 AMBR），
+  不被模组支持时返回 `status=no_data`，UI 显示 `--`，绝不伪造数值
 
 ## 4. 旧动作 → QModem 方法 映射表
 | 旧 mt5700m-at 动作 | 新实现 |

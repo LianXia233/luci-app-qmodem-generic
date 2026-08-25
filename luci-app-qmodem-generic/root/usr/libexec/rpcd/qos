@@ -1,11 +1,18 @@
 #!/bin/sh
-# QModem QOS ubus service — 提供 QCI / AMBR 查询
-# 供 luci-app-qmodem-generic 前端通过 rpc.declare 调用
-# 部署路径: /usr/libexec/rpcd/qos
+# QModem QOS ubus service — 提供 QCI / AMBR（签约速率）/ APN 查询
+# 部署路径: /usr/libexec/rpcd/qos （必须可执行，rpcd 才会加载）
+#
+# 全模组通用策略：按序探测以下标准 3GPP AT 命令，取到数据即返回：
+#   1) AT+CGEQOSRDP=<cid> — TS 27.007 EPS QoS 动态参数，
+#      返回 +CGEQOSRDP: <cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR>（kbps），Quectel 等多数模组支持
+#   2) AT+CGCONTRDP       — TS 27.007 PDP 上下文动态参数兜底：
+#      解析 APN 与引号包裹的 "UL,DL" 形式 AMBR 字段（部分 MTK/Fibocom 固件）
+# 任一命令不被模组支持（ERROR/超时）时自动尝试下一条；全部失败返回 status=no_data。
 
 . /usr/share/libubox/jshn.sh
 
 TOOL="/usr/bin/tom_modem"
+CID_DEFAULT=1
 
 case "$1" in
   list)
@@ -22,32 +29,82 @@ case "$1" in
         esac
         TTY_DEV=$(uci -q get "qmodem.${config_section}.override_at_port")
         [ -z "$TTY_DEV" ] && TTY_DEV=$(uci -q get "qmodem.${config_section}.at_port")
+
         json_init
-        if [ -x "$TOOL" ] && [ -c "$TTY_DEV" ]; then
-          RAW=$("$TOOL" -d "$TTY_DEV" -c "AT+CGEQOSRDP=1" -t 8 2>&1)
-          # 解析 +CGEQOSRDP: <cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR> 格式
-          QOS_LINE=$(printf '%s\n' "$RAW" | sed -n 's/.*+CGEQOSRDP:[[:space:]]*//p' | head -n1)
-          QCI=''
-          DL_AMBR=''
-          UL_AMBR=''
-          if [ -n "$QOS_LINE" ]; then
-            QCI=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')
-            DL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $(NF-1)); print $(NF-1)}')
-            UL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF); print $NF}')
-          fi
-          if [ -n "$QCI" ] || [ -n "$DL_AMBR" ] || [ -n "$UL_AMBR" ]; then
-            [ -n "$QCI" ] && json_add_int "qci" "$QCI"
-            [ -n "$DL_AMBR" ] && json_add_int "downlink_rate_kbps" "$DL_AMBR"
-            [ -n "$UL_AMBR" ] && json_add_int "uplink_rate_kbps" "$UL_AMBR"
-            json_add_string "status" "ok"
-          else
-            json_add_int "qci" 0
-            json_add_string "status" "no_data"
-          fi
-        else
+        if [ ! -x "$TOOL" ] || [ -z "$TTY_DEV" ] || [ ! -c "$TTY_DEV" ]; then
           json_add_int "qci" 0
           json_add_string "status" "unavailable"
+          json_dump
+          exit 0
         fi
+
+        at_cmd() {
+          "$TOOL" -d "$TTY_DEV" -c "$1" -t 8 2>&1
+        }
+
+        # 数字校验（正整数）
+        is_num() {
+          case "$1" in
+            ''|*[!0-9]*) return 1 ;;
+            *) return 0 ;;
+          esac
+        }
+
+        # ---- 1) CGEQOSRDP：<cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR> ----
+        QOS_LINE=$(at_cmd "AT+CGEQOSRDP=${CID_DEFAULT}" | sed -n 's/.*+CGEQOSRDP:[[:space:]]*//p' | head -n1)
+        if [ -n "$QOS_LINE" ]; then
+          QCI=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')
+          DL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $(NF-1)); print $(NF-1)}')
+          UL_AMBR=$(printf '%s\n' "$QOS_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF); print $NF}')
+          if [ -n "$QCI" ] || { is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ]; } || { is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ]; }; then
+            [ -n "$QCI" ] && json_add_int "qci" "$QCI" || json_add_int "qci" 0
+            is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ] && json_add_int "downlink_rate_kbps" "$DL_AMBR"
+            is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ] && json_add_int "uplink_rate_kbps" "$UL_AMBR"
+            json_add_string "status" "ok"
+            json_dump
+            exit 0
+          fi
+        fi
+
+        # ---- 2) CGCONTRDP 兜底：APN + 引号内 "UL,DL" 形式的 AMBR ----
+        # 行示例： +CGCONTRDP: 1,,"cmiot5g","","",...,"128,262143",0,65535
+        CONTRDP_LINE=$(at_cmd 'AT+CGCONTRDP' | sed -n 's/.*+CGCONTRDP:[[:space:]]*//p' | head -n1)
+        if [ -n "$CONTRDP_LINE" ]; then
+          APN=$(printf '%s\n' "$CONTRDP_LINE" | awk -F',' '{gsub(/"/, "", $3); print $3}')
+          AMBR_PAIR=$(printf '%s\n' "$CONTRDP_LINE" | sed -n 's/.*"\([0-9]\{1,\},[0-9]\{1,\}\)".*/\1/p')
+          QCI_CAND=""
+          if [ -n "$AMBR_PAIR" ] || [ -n "$APN" ]; then
+            UL_VAL=${AMBR_PAIR%%,*}
+            DL_VAL=${AMBR_PAIR##*,}
+            # 解码启发式：较大值视为下行 kbps（MTK 固件常见直接 kbps 取值）；
+            # 较小值 ≤512 视为以 512kbps 为单位的上行，否则同样按 kbps。
+            DL_KBPS=""
+            UL_KBPS=""
+            if is_num "$DL_VAL" && [ "$DL_VAL" -ge 1000 ] && [ "$DL_VAL" -le 100000000 ]; then
+              DL_KBPS=$DL_VAL
+            fi
+            if is_num "$UL_VAL" && [ "$UL_VAL" -ge 1 ] && [ "$UL_VAL" -le 100000000 ]; then
+              if [ "$UL_VAL" -le 512 ]; then
+                UL_KBPS=$((UL_VAL * 512))
+              elif [ "$UL_VAL" -ge 1000 ]; then
+                UL_KBPS=$UL_VAL
+              fi
+            fi
+            json_add_int "qci" 0
+            [ -n "$APN" ] && json_add_string "apn" "$APN"
+            [ -n "$DL_KBPS" ] && json_add_int "downlink_rate_kbps" "$DL_KBPS"
+            [ -n "$UL_KBPS" ] && json_add_int "uplink_rate_kbps" "$UL_KBPS"
+            if [ -n "$DL_KBPS" ] || [ -n "$UL_KBPS" ] || [ -n "$APN" ]; then
+              json_add_string "status" "ok"
+              json_dump
+              exit 0
+            fi
+            json_init
+          fi
+        fi
+
+        json_add_int "qci" 0
+        json_add_string "status" "no_data"
         json_dump
         ;;
     esac

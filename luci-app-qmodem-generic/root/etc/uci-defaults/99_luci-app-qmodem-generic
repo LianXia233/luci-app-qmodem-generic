@@ -6,4 +6,8 @@
 [ -x /usr/sbin/qmodem-mt5700-fix ] && /usr/sbin/qmodem-mt5700-fix
 /etc/init.d/qmodem-mt5700-fix enable 2>/dev/null || true
 
+# rpcd 插件必须可执行，否则 rpcd 不会加载（qos/签约速率面板将无数据）
+[ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
+[ -f /usr/libexec/rpcd/luci-app-qmodem-generic ] && chmod 755 /usr/libexec/rpcd/luci-app-qmodem-generic 2>/dev/null
+
 exit 0

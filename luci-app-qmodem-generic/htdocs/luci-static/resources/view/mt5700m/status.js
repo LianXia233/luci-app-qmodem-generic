@@ -122,6 +122,7 @@ return view.extend({
 						trafficResetSchedule: r[10],
 						currentBand: r[6],
 						iface: r[7],
+						net: r[8],
 						devStatus: devStatus,
 						qosInfo: r[9] || {},
 						allInfo: allInfo,
@@ -134,8 +135,11 @@ return view.extend({
 
 	// 把 QModem 的 modem_info 数组摊平成视图使用的扁平对象
 	parseStatus: function(res) {
+		var self = this;
 		var find = controls.findEntry;
-		var base = res.base || [], cell = res.cell || [], sim = res.sim || [], conn = res.conn || [];
+		var base = res.base || [], cell = res.cell || [], sim = res.sim || [],
+		    conn = res.conn || [], net = res.net || [];
+		var qosInfo = res.qosInfo || {};
 		var data = {};
 
 		data.model = find(base, 'name') || find(base, 'model') || _('Modem');
@@ -147,7 +151,15 @@ return view.extend({
 		data.rsrp = find(cell, 'RSRP') || '';
 		data.rsrq = find(cell, 'RSRQ') || '';
 		data.sinr = find(cell, 'SINR') || '';
-		data.sysmode_detail = find(cell, 'network_mode') || '';
+		/* 接入技术：不同模组上报字段名不一（network_mode / Network Type /
+		 * Radio Access Technology），逐个尝试，全模组通用 */
+		data.sysmode_detail = this.cleanText(
+			find(cell, 'network_mode') ||
+			find(cell, 'Network Type') ||
+			find(net, 'Network Type') ||
+			find(conn, 'Network Type') ||
+			find(cell, 'Radio Access Technology') ||
+			find(net, 'Radio Access Technology') || '');
 		data.mcc = find(cell, 'MCC') || '';
 		data.mnc = find(cell, 'MNC') || '';
 
@@ -156,11 +168,24 @@ return view.extend({
 		data.imsi = find(sim, 'IMSI') || '';
 		var rawIccid = find(sim, 'ICCID') || '';
 		data.iccid = rawIccid ? String(rawIccid).replace(/[\n\r]/g, '') : '--';
-		data.phone_number = find(sim, 'SIM Number') || '';
+		/* 电话号码：多数 SIM 不存储 MSISDN，仅当模组/网络上报时显示，否则 -- */
+		data.phone_number = this.cleanText(
+			find(sim, 'SIM Number') || find(sim, 'MSISDN') || find(sim, 'Phone Number') ||
+			find(net, 'SIM Number') || find(net, 'MSISDN') || '');
 
-		data.active_apn = res.apn || '';
+		/* 运营商原始名称（清洗换行/控制字符后交由 operatorInfo 映射中文运营商） */
+		data.operator_name = this.cleanText(
+			find(sim, 'ISP') ||
+			find(sim, 'operator') || find(sim, 'Operator') ||
+			find(net, 'ISP') || find(net, 'operator') ||
+			find(cell, 'ISP') || '');
+
+		/* APN：配置值 → QoS 上报（AT+CGCONTRDP）→ 网络信息上报 */
+		data.active_apn = this.cleanText(
+			res.apn || qosInfo.apn ||
+			find(net, 'APN') || find(sim, 'APN') || '');
 		data.network_interface = res.ifname || '';
-		data.qosInfo = res.qosInfo || {};
+		data.qosInfo = qosInfo;
 		data.reachable = base.length || cell.length ? '1' : '0';
 		data.connected = /^yes$/i.test(String(
 		(conn.connection_status) || (conn.connect_status) ||
@@ -168,6 +193,12 @@ return view.extend({
 		find(base, 'connect_status') || ''
 	)) ? '1' : '0';
 		return data;
+	},
+
+	// 清洗模组上报文本中的换行/控制字符与首尾空白（如 ISP 常见 "\nCHINA MOBILE"）
+	cleanText: function(raw) {
+		if (raw == null) return '';
+		return String(raw).replace(/[\x00-\x1f\x7f]+/g, '').trim();
 	},
 
 	// 清洗 QModem get_dns 返回值：部分模组驱动会在 DNS IP 后追加换行+二进制垃圾，
@@ -428,9 +459,9 @@ return view.extend({
 	// QCI (QoS Class Identifier) — 3GPP 定义的承载 QoS 等级，决定网络资源优先级
 	// GBR = 保证比特率（语音 / 视频等实时业务），Non-GBR = 非保证比特率（互联网数据）
 	qciExplain: function(qosInfo) {
-		if (!qosInfo || qosInfo.status !== 'ok' || qosInfo.qci == null)
+		var qci = qosInfo ? parseInt(qosInfo.qci, 10) : 0;
+		if (!qosInfo || qosInfo.status !== 'ok' || !qci)
 			return { label: '', desc: '' };
-		var qci = parseInt(qosInfo.qci, 10);
 		var map = {
 			1:  { label: 'QCI 1', desc: _('GBR · 实时语音 (VoLTE)') },
 			2:  { label: 'QCI 2', desc: _('GBR · 实时视频通话') },
@@ -667,11 +698,13 @@ return view.extend({
 		var connected = data.connected === '1', reachable = data.reachable === '1';
 		var session = this.parseSession(res, connected);
 		var carrierInfo = this.carrierInfo(res);
-		var opInfo = controls.operatorInfo(null, data.mcc, data.mnc);
+		/* 运营商：优先小区 MCC/MNC 映射，回退模组上报的运营商名称（ISP 等），
+		 * 两者皆无时 SIM 卡片显示 --，顶部横幅显示通用占位 */
+		if (/^(n\/a|none|null|--)$/i.test(data.operator_name || ''))
+			data.operator_name = '';
+		var opInfo = controls.operatorInfo(data.operator_name || null, data.mcc, data.mnc);
 		var operator = opInfo.name;
-		if (!/[A-Za-z0-9\u4e00-\u9fff]/.test(operator || ''))
-			operator = '';
-		data.operator = operator;
+		data.operator = (operator && operator !== _('Mobile Network')) ? operator : '';
 
 		return E('div', { 'class':'mt5700m-page mt-ui-page' }, [
 			this.styleNode(), controls.styleNode(),
