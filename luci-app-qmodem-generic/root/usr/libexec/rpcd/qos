@@ -2,10 +2,12 @@
 # QModem QOS/Radio ubus service — 提供 QCI / AMBR（签约速率）/ APN / 调制信息查询
 # 部署路径: /usr/libexec/rpcd/qos （必须可执行，rpcd 才会加载）
 #
-# qos_info — 全模组通用策略：按序探测以下标准 3GPP AT 命令，取到数据即返回：
+# qos_info — 全模组通用策略：按序探测以下 AT 命令，取到数据即返回：
 #   1) AT+CGEQOSRDP=<cid> — TS 27.007 EPS QoS 动态参数，
 #      返回 +CGEQOSRDP: <cid>,<QCI>,...,<DL_AMBR>,<UL_AMBR>（kbps），Quectel 等多数模组支持
-#   2) AT+CGCONTRDP       — TS 27.007 PDP 上下文动态参数兜底：
+#   2) AT+C5GQOSRDP       — Neoway 系：返回 +C5GQOSRDP: <cid>,<5QI>,...,
+#      <DL_SAMBR>,<UL_SAMBR>（kbps），含 5QI 与签约速率
+#   3) AT+CGCONTRDP       — TS 27.007 PDP 上下文动态参数兜底：
 #      解析 APN 与引号包裹的 "UL,DL" 形式 AMBR 字段（部分 MTK/Fibocom 固件）
 # 任一命令不被模组支持（ERROR/超时）时自动尝试下一条；全部失败返回 status=no_data。
 # 注意：前端优先使用 QModem network_info 上报的 AMBR/QCI 键，本插件仅作兜底。
@@ -102,7 +104,24 @@ case "$1" in
           fi
         fi
 
-        # ---- 2) CGCONTRDP 兜底：APN + 引号内 "UL,DL" 形式的 AMBR ----
+        # ---- 2) C5GQOSRDP（Neoway 系）：<cid>,<5QI>,...,<DL_SAMBR>,<UL_SAMBR>(kbps) ----
+        NQ_LINE=$(at_cmd 'AT+C5GQOSRDP' | sed -n 's/.*+C5GQOSRDP:[[:space:]]*//p' | head -n1)
+        if [ -n "$NQ_LINE" ]; then
+          QCI=$(printf '%s\n' "$NQ_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')
+          DL_AMBR=$(printf '%s\n' "$NQ_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $(NF-1)); print $(NF-1)}')
+          UL_AMBR=$(printf '%s\n' "$NQ_LINE" | awk -F',' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $NF); print $NF}')
+          if [ -n "$QCI" ] || { is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ]; } || { is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ]; }; then
+            json_init
+            [ -n "$QCI" ] && json_add_int "qci" "$QCI" || json_add_int "qci" 0
+            is_num "$DL_AMBR" && [ "$DL_AMBR" -gt 0 ] && json_add_int "downlink_rate_kbps" "$DL_AMBR"
+            is_num "$UL_AMBR" && [ "$UL_AMBR" -gt 0 ] && json_add_int "uplink_rate_kbps" "$UL_AMBR"
+            json_add_string "status" "ok"
+            json_dump
+            exit 0
+          fi
+        fi
+
+        # ---- 3) CGCONTRDP 兜底：APN + 引号内 "UL,DL" 形式的 AMBR ----
         # 行示例： +CGCONTRDP: 1,,"cmiot5g","","",...,"128,262143",0,65535
         CONTRDP_LINE=$(at_cmd 'AT+CGCONTRDP' | sed -n 's/.*+CGCONTRDP:[[:space:]]*//p' | head -n1)
         if [ -n "$CONTRDP_LINE" ]; then

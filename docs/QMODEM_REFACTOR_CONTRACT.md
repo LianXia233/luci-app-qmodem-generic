@@ -99,8 +99,11 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
 - 接入技术（通用解析链）：小区 `network_mode` → 各信息源 `Network Type` → `Radio Access Technology`
 - APN（通用解析链）：UCI 配置值 → QoS 上报（rpcd `qos qos_info` 的 `apn` 字段，来自 AT+CGCONTRDP）→ 网络信息的 `APN` 键
 - QoS Level 与签约速率（两级数据源，**优先 QModem 上报**）：
-  1) QModem `network_info` 的 `AMBR UL` / `AMBR DL` 键（vendor 脚本口径，单位 Mbps，前端 ×1000 换算 kbps）与 `QCI` / `5QI` 键（Quectel / Meig / Neoway 等已导出）；
-  2) 缺失时回退 rpcd 插件 `/usr/libexec/rpcd/qos` 的 AT 探测（`AT+CGEQOSRDP=<cid>` → `AT+CGCONTRDP` 兜底），模组不支持则显示 `--`。
+  1) QModem 全部 modem_info 数组中的 `QCI` / `5QI` 键与 network_info 的
+     `AMBR UL` / `AMBR DL` 键（vendor 脚本口径，单位 Mbps，前端 ×1000 换算 kbps）；
+  2) 缺失时回退 rpcd 插件 `/usr/libexec/rpcd/qos` 的 AT 探测链
+     （`AT+CGEQOSRDP=<cid>` → `AT+C5GQOSRDP` → `AT+CGCONTRDP` 兜底），仍无则该行显示 `--`。
+     SIM 卡片的 QoS Level 行常显，不随数据缺失隐藏。
 - 调制信息（rpcd 插件同一对象的 `radio_info` 方法）：返回 `{ rat, band, dl_modulation, ul_modulation, dl_mimo, ul_mimo, dl_mcs?, ul_mcs?, status }`；
   探测链：Fibocom 系 `AT+GTCAINFO?`（PCC 行含 band 编码 50x=NR x / 101+N=LTE N、MIMO 层数、调制枚举 0=BPSK…4=256QAM）
   → Quectel 系 `AT+QNWCFG="nr5g_csi"`（下行 PDSCH MCS）。前端载波卡片渲染为 `NR · MCS 20 · 64QAM`

@@ -142,9 +142,10 @@ return view.extend({
 		var base = res.base || [], cell = res.cell || [], sim = res.sim || [],
 		    conn = res.conn || [], net = res.net || [];
 
-		/* QoS Level 与签约速率：优先使用 QModem network_info 上报的数据
-		 * （vendor 脚本导出的 'AMBR UL'/'AMBR DL'，单位 Mbps；'QCI'/'5QI'），
-		 * 缺失时回退 AT 探测插件（rpcd qos qos_info）的结果 */
+		/* QoS Level 与签约速率：优先使用 QModem 各信息源上报的数据
+		 * （network_info 等 vendor 脚本导出的 'AMBR UL'/'AMBR DL'，单位 Mbps；
+		 * 'QCI'/'5QI' 键在全部 modem_info 数组中查找），缺失时回退 AT 探测
+		 * 插件（rpcd qos qos_info：CGEQOSRDP / C5GQOSRDP / CGCONTRDP）的结果 */
 		var atQos = res.qosInfo || {};
 		function mbpsToKbps(v) {
 			var n = parseFloat(v);
@@ -152,7 +153,11 @@ return view.extend({
 		}
 		var qmUl = mbpsToKbps(find(net, 'AMBR UL'));
 		var qmDl = mbpsToKbps(find(net, 'AMBR DL'));
-		var qmQci = parseInt(find(net, 'QCI'), 10) || parseInt(find(net, '5QI'), 10) || 0;
+		var qmQciRaw = find(net, 'QCI') || find(net, '5QI') ||
+			find(base, 'QCI') || find(base, '5QI') ||
+			find(cell, 'QCI') || find(cell, '5QI') ||
+			find(sim, 'QCI') || find(sim, '5QI');
+		var qmQci = parseInt(qmQciRaw, 10) || 0;
 		var qosInfo = {
 			qci: qmQci || Number(atQos.qci) || 0,
 			uplink_rate_kbps: qmUl || Number(atQos.uplink_rate_kbps) || 0,
@@ -594,13 +599,14 @@ return view.extend({
 				this.infoRow(_('Access technology'), data.sysmode_detail),
 				this.infoRow(_('APN'), data.active_apn),
 				this.infoRow(_('Subscription rate'), subRate || '--'),
-				qciInfo.label ? E('div', { 'class':'mt5700m-info-row' }, [
+				/* QoS Level 常显：模组上报 QCI/5QI 时展示映射等级，未知时显示 -- */
+				E('div', { 'class':'mt5700m-info-row' }, [
 					E('span', {}, _('QoS Level')),
-					E('div', {}, [
+					qciInfo.label ? E('div', {}, [
 						E('strong', {}, qciInfo.label),
 						E('span', { 'style':'font-weight:400;margin-left:6px' }, qciInfo.desc)
-					])
-				]) : null,
+					]) : E('strong', {}, '--')
+				]),
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi),
 				this.infoRow(_('Phone number'), data.phone_number)

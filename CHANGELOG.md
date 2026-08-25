@@ -3,6 +3,19 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-8] - 2026-08-25
+
+### 修复
+- **SIM 与签约卡片"QoS Level"行不再消失**：改为常显——模组上报 QCI/5QI 时展示
+  映射等级（含 Non-GBR / GBR 说明），无法获取时显示 `--`，不再整行隐藏。
+
+### 变更
+- **QModem 侧 QCI 扫描范围扩大**：`QCI` / `5QI` 键现于全部 modem_info 数组
+  （network_info / base_info / cell_info / sim_info）中查找，任一来源命中即优先采用。
+- **AT 探测链新增 Neoway C5GQOSRDP**（位于 CGEQOSRDP 之后、CGCONTRDP 之前）：
+  返回 `+C5GQOSRDP: <cid>,<5QI>,...,<DL_SAMBR>,<UL_SAMBR>`，同时提供 5QI 与
+  签约速率，提升对 Neoway 系模组的兼容性。
+
 ## [2.4.11-7] - 2026-08-25
 
 ### 新增
