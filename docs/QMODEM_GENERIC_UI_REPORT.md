@@ -67,6 +67,44 @@
   「上行调制 NR · MCS 20 · 64QAM / 下行调制 NR · MCS 0 · QPSK」样式的磁贴，
   MCS 与调制任一缺失自动省略对应段。实测 FM350-GL（n41/100MHz）：下行 QPSK、上行 64QAM、DL MIMO 3 层 / UL MIMO 2 层。
 
+### 7. 流量统计重做：本机持久化分天记录 + 方向自动识别（2026-08-26 第三轮）
+
+用户反馈概览页流量卡片「上下行统计相反」，并要求：兼容识别所有模组、数据重启不丢失、
+每天单独记录、按中国时区切日、支持定时自动清零与手动立即清零。实测确认内核 netdev
+计数方向正确（rx=下行），「相反」源于个别模组驱动把两个计数器接反——因此不做全局字段
+翻转，而是**逐模组自动识别**。本轮交付：
+
+- **后台采集服务**（新增 4 个后端文件）：
+  - `/usr/bin/qmodem-stats-collect`：单次 `run <节>`（采样+落盘+输出 JSON）、`show`（只读）、
+    `reset`（清零）。计数器来源链：ubus `qmodem get_stats`（available=1）→ 内核 netdev
+    `/sys/class/net/<dev>/statistics/*_bytes` 兜底，全模组通用；同日采样做差累计，新值小于
+    旧值视为回绕/重拨、按新值起算；跨零点采样的增量归属相邻日。
+  - `/usr/bin/qmodem-stats-loop <节> [间隔]`：常驻循环，默认 60 秒。
+  - `/etc/init.d/qmodem-stats-collect`：procd 服务（START=97），为每个启用的 modem-device
+    配置节启动一个循环实例——**开机即采样，不依赖 LuCI 页面打开**。
+  - `/usr/libexec/rpcd/qmodem_stats`：rpcd 插件，暴露 `daily_stats` / `stats_history` /
+    `stats_reset` 三个方法（ACL 已放行）。
+- **持久化与切日**：记录写 overlay 持久分区 `/etc/qmodem-stats/<节>.stats`
+  （键值格式：last_ts/last_rx/last_tx/total_rx/total_tx/swapped + day_<日期>=rx / dayx_<日期>=tx），
+  自动保留最近 90 天；日期边界用 epoch+28800（awk strftime UTC）计算，不受系统时区影响。
+  脚本兼容 dash/busybox ash（日期键经连字符→下划线转换后再作变量名），jshn.sh 缺失时
+  内置纯 shell JSON 生成器兜底。
+- **上下行方向自动识别**：累计流量 >50MB 且 tx > rx 时判定该驱动上下行接反，置
+  `swapped=1`；前端据此交换今日下载/上传、历史条形图与累计拆分的显示，并提示
+  「模组驱动上报的上下行计数相反，已自动交换」。
+- **前端流量面板重写**（`status.js trafficPanel(usage, iface, daily)`）：三卡改为
+  「今日下载 / 今日上传 / 本机累计（下载 · 上传拆分）」+ 最近 14 天每日双行条形图
+  （下行蓝 / 上传绿，含今天一行），全部来自本机分天记录；今天尚无完整记录时给出
+  「明天出现第一个完整自然日记录」说明。`load()` 第 13 个 Promise 接入
+  `controls.getDailyStats(section)`。
+- **清零链路**：「立即清零流量统计」= 模组侧 `clearStats`（部分模组不支持则跳过）
+  → 本机 `statsReset`（rpcd `qmodem_stats.stats_reset`），两步串行执行；本机清零保留当前
+  计数器基准，之后不会把清零前的差额误记为新流量。「定时自动清零」沿用 QModem 原生
+  计划任务能力不变。
+- **实机验证**（FM350-GL / RNDIS）：60 秒采样周期下 ~6MB 真实下载准确入账；清零后立即
+  采样无误录增量；注入历史数据后整机重启，`/etc/qmodem-stats/` 数据完好、服务自启、
+  分天记录正常输出；LuCI 会话经 ACL 可调用新 rpcd 方法。
+
 ## 分析与综合（Analysis / Synthesis）
 
 本轮重构的本质是把「型号特例」下沉为「数据驱动」。QModem 的契约是：信息方法统一返回 `{ modem_info: [{ key, value, full_name, type, class, extra_info }] }`。只要 UI 不复读具体 key、不假设型号，而是 (a) 通用解析配置节、(b) 按 `class` 分组渲染全部字段、(c) 按 `getDisabledFeatures` / `get_mode` / `get_lockband` 的实际返回做能力门控，就能天然适配 QModem 管理的任意模组——这正是 QModem-next 的做法，本包沿用了同一模式并叠加了更精致的卡片视觉。

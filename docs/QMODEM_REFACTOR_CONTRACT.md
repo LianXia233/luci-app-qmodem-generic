@@ -38,6 +38,11 @@
 - `getSms(section)` → `{ sms: [ { index, status, sender, content, time, ... } ] }`
 - `getUsageStats(section)` → `{ available:0/1, updated_at, total_rx_bytes, total_tx_bytes }`（**部分模组返回 available:0**）
 - `getTrafficResetSchedule(section)` → QModem 流量统计自动清零计划
+- `getDailyStats(section)` → **本机持久化分天流量统计**（rpcd 插件 `qmodem_stats` 的
+  `daily_stats` 方法，数据由后台服务每 60 秒采样落盘 `/etc/qmodem-stats/<section>.stats`）：
+  `{ config_section, updated_at, available:true, today_rx, today_tx, total_rx, total_tx,
+  swapped:0/1, days:[{date:'YYYY-MM-DD', rx, tx}...] }`。`days` 只含今天之前的历史（保留 90 天）；
+  日期按中国时区 UTC+8 切分；`swapped=1` 表示该模组驱动上下行计数接反，前端需交换下载/上传显示。
 - `getInterfaceStatus(name)` → 网络接口状态（`ipv4-address`,`ipv6-address`,`up`,`mtu`,`proto` 等；name 为接口名）
 - `getModemSections()` → `[{id,name,model,manufacturer,at_port,enabled}]`
 - `resolveSection()` → 返回当前模组配置节 id（优先采用用户上次在模组选择器中的选择，否则第一个启用模组）；无模组返回 null。通用辅助新增：`getModemSectionsSync()`（同步读列表）、`getModemList()`、`getStoredSection()/setStoredSection()`、`renderModemBar(sections,currentId,onSwitch)`（模组选择器）、`groupByClass(entries)`、`renderInfoGrouped(entries)`（按 class 渲染 QModem 返回的全部字段）、`formatSignal(value,type)`（信号分级文案）。
@@ -55,6 +60,9 @@
 - `doReboot(section, method)`（method: 'soft'/'hard'）
 - `clearDialLog(section)`
 - `clearStats(section)` / `setTrafficResetSchedule(section, params)`
+- `statsReset(section)` → 清零**本机**持久化累计与分天记录（rpcd `qmodem_stats.stats_reset`）。
+  「立即清零流量统计」按钮 = `clearStats(section).catch(→null)`（模组侧，部分模组不支持）
+  `.then(() => statsReset(section))`（本机记录），两者都要执行。
 - `setNeighborCell(section, params)` / `setSmsStorage(section, storage)`
 - `modemDial(section)` / `modemHang(section)` / `modemRedial(section)`
 
@@ -133,6 +141,9 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
 ## 5. 防御式渲染
 - 某字段对当前模组不可用（如 ICCID、部分邻区、流量统计）：显示 `--` 或给出"本模组经 QModem 暂不支持/暂无数据"的提示，不要调用旧后端。
 - `getUsageStats` 部分模组返回 `available:0`：流量面板显示"本模组经 QModem 暂未提供流量统计（部分模组驱动未实现 usage_stats）"，不要报错。
+- `getDailyStats` 返回的 `swapped=1` 时，今日下载/上传、历史条形图与累计拆分都要交换 rx/tx，
+  并显示「模组驱动上下行计数相反，已自动交换」提示；`days` 为空且今天尚无流量时显示
+  「正在后台记录每日流量历史，明天将出现第一个完整自然日的记录」。
 - `getDisabledFeatures` 含 `"LockBand"`/`"NeighborCell"` 时，隐藏对应设置 UI（保留展示）。
 - 所有 `.then` 加 `.catch` 兜底，出错时显示告警而非白屏。
 

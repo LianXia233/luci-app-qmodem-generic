@@ -42,6 +42,36 @@ apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk
 
 安装后在 LuCI 菜单 **移动网络 → 模组管理** 下使用。
 
+## 流量统计（本机持久化分天记录）
+
+概览页「流量统计」卡片由本包自带的采集服务驱动，与模组侧计数相互独立：
+
+- **后台采样**：procd 服务 `/etc/init.d/qmodem-stats-collect` 开机自启，
+  `/usr/bin/qmodem-stats-loop` 每 60 秒调用一次 `/usr/bin/qmodem-stats-collect run <配置节>`，
+  无论 LuCI 是否打开都不漏记。
+- **重启不丢失**：记录落盘于 overlay 持久分区 `/etc/qmodem-stats/<配置节>.stats`，
+  自动保留最近 90 天。
+- **按中国时区（UTC+8）切日**：日期边界由 epoch+28800 计算，不受路由器系统时区影响；
+  跨零点采样的增量归属相邻日。
+- **上下行方向自动识别（兼容所有模组）**：正常模组 rx(下行) 远大于 tx(上行)；个别驱动把
+  两个计数器接反。累计流量超过 50MB 且 tx > rx 时判定方向颠倒（`swapped=1`），前端自动
+  交换下载/上传显示并给出提示。
+- **全模组通用计数器来源**：优先 QModem `get_stats`，未实现时回退内核 netdev 计数器
+  （`/sys/class/net/<dev>/statistics/*_bytes`）；模组重拨/计数器回绕时按新值起算，不会误录增量。
+- **自动 / 手动清零**：「流量自动清零」卡片设置定时清零计划（QModem 原生能力）；
+  「立即清零」在模组侧清零的同时同步清零本机累计与分天记录（rpcd 方法
+  `qmodem_stats.stats_reset`），清零保留计数器基准，不会把清零前的差额误记为新流量。
+
+相关文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `/usr/bin/qmodem-stats-collect` | 采样 / 落盘 / 输出 JSON / 清零（`run` / `show` / `reset`） |
+| `/usr/bin/qmodem-stats-loop` | 按间隔驱动采集器的常驻循环 |
+| `/etc/init.d/qmodem-stats-collect` | procd 服务，为每个启用的 modem-device 启动一个循环实例 |
+| `/usr/libexec/rpcd/qmodem_stats` | rpcd 插件：`daily_stats` / `stats_history` / `stats_reset` |
+| `/etc/qmodem-stats/` | 数据目录（持久分区，可直接备份） |
+
 ## MT5700 系列 SIM 初始化（自动修复）
 
 MT5700M-CN 等海思平台模组上电后 SIM 卡槽处于未初始化状态，QModem 拨号流程不会主动
