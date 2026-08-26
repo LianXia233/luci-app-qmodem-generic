@@ -3,6 +3,23 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-9] - 2026-08-26
+
+### 修复
+- **移动数据连接状态误报"未连接"**（概览页 `status.js` / 连接页 `connection.js`）：
+  ECM/RNDIS/NCM 等内置自动拨号模组的 `get_connect_status` 可能恒报 `No`，但
+  接口已获取全局地址、实际有网。原逻辑以 `||` 串接各来源原始值——`"No"` 也是
+  真值字符串，串接会令后面的 `"Yes"` 失效，导致明明有网却显示「移动数据未连接」。
+  现改为多来源综合判定（`controls.js` 新增 `evalConnectionStatus()`）：
+  ① netifd 接口 up 且持有全局地址（IPv4 任一；IPv6 排除 `fe80::/10` 链路本地）
+  为最强证据 → ② 模组 AT 自报 `connect_status` → ③ QModem 拨号状态，
+  任一命中即判已连接，并记录采信来源。
+- **肯定写法归一化**：新增 `isConnectedValue()` 统一识别 `yes` / `y` / `1` /
+  `true` / `connected` / `online` / `connect` / `已连接` 等变体（忽略大小写与
+  首尾空白）；新增 `hasGlobalAddress()` 判定接口地址有效性。
+- 实机验证（FM350-GL，RNDIS 模式）：接口 `10.5.220.69/24` + 全局 IPv6 下，
+  概览页顶部横幅、连接徽标与移动数据页均正确显示「已连接」。
+
 ## [2.4.11-8] - 2026-08-25
 
 ### 修复
