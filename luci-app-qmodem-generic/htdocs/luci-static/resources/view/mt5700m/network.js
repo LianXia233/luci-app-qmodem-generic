@@ -429,6 +429,7 @@ return view.extend({
 		return controls.card(_('网络模式'),
 			_('模组对外呈现的拨号模式（由 QModem get_mode / set_mode 提供）。'), [
 				controls.state(_('当前模式'), active ? modeLabel(active) : '--'),
+				E('div', { 'class': 'mt-control-state mt-control-state-current' }, [ E('span', {}, _('当前制式')), E('strong', {}, active ? modeLabel(active) : '--') ]),
 				keys.length ? E('div', { 'class': 'mt-net-actions' }, buttons)
 					: E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 未上报可用的网络模式。'))
 			]);
@@ -457,6 +458,9 @@ return view.extend({
 
 		return controls.card(_('网络优选'),
 			_('选择模组允许驻网的制式。至少保留一项，取消全部选择会导致无法注册网络。'), [
+				E('div', { 'class': 'mt-control-state mt-control-state-current' },
+					[ E('span', {}, _('当前优选')), E('strong', {},
+						keys.filter(function(k) { return String(prefer[k]) === '1'; }).join(' / ') || '--') ]),
 				E('div', { 'class': 'mt-band-options' }, options),
 				E('div', { 'class': 'mt-band-actions' }, E('button', {
 					'type': 'button', 'class': 'btn cbi-button-apply',

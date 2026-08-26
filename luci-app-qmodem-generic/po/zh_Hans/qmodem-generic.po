@@ -3730,3 +3730,9 @@ msgstr "未锁定，模组可自由驻网到该类别全部可用频段。"
 
 msgid "可用 %d"
 msgstr "可用 %d"
+
+msgid "当前制式"
+msgstr "当前制式"
+
+msgid "当前优选"
+msgstr "当前优选"
