@@ -1,0 +1,21 @@
+#!/bin/sh
+# QModem 流量统计采样循环 — 由 /etc/init.d/qmodem-stats-collect 拉起。
+# 用法: qmodem-stats-loop <config_section> [interval_seconds]
+
+config_section="$1"
+interval="${2:-60}"
+
+case "$config_section" in
+	''|*[!a-zA-Z0-9_-]*) exit 1 ;;
+esac
+case "$interval" in
+	''|*[!0-9]*) interval=60 ;;
+esac
+
+# 启动先立即采一次，建立基准点
+/usr/bin/qmodem-stats-collect run "$config_section" >/dev/null 2>&1 || true
+
+while :; do
+	sleep "$interval"
+	/usr/bin/qmodem-stats-collect run "$config_section" >/dev/null 2>&1 || true
+done

@@ -2486,6 +2486,18 @@ msgstr "上传"
 msgid "Download %s · Upload %s"
 msgstr "下载 %s · 上传 %s"
 
+msgid "Today download"
+msgstr "今日下载"
+
+msgid "Today upload"
+msgstr "今日上传"
+
+msgid "Modem driver reports reversed counters; download/upload were swapped automatically."
+msgstr "该模组驱动上报的上下行计数相反，已自动交换下载/上传显示。"
+
+msgid "Daily history is being recorded in the background; the first full-day record will appear tomorrow."
+msgstr "正在后台记录每日流量历史，明天将出现第一个完整自然日的记录。"
+
 msgid "Waiting for data"
 msgstr "等待数据"
 
@@ -3655,3 +3667,45 @@ msgstr "高级设置"
 
 msgid "高级连接信息"
 msgstr "高级连接信息"
+
+msgid "流量自动清零"
+msgstr "流量自动清零"
+
+msgid "设置定时自动清零流量统计，或手动立即清零。"
+msgstr "设置定时自动清零流量统计，或手动立即清零。"
+
+msgid "启用自动清零"
+msgstr "启用自动清零"
+
+msgid "清零频率"
+msgstr "清零频率"
+
+msgid "每月（按日期）"
+msgstr "每月（按日期）"
+
+msgid "每日"
+msgstr "每日"
+
+msgid "清零日（每月）"
+msgstr "清零日（每月）"
+
+msgid "小时"
+msgstr "小时"
+
+msgid "分钟"
+msgstr "分钟"
+
+msgid "保存计划"
+msgstr "保存计划"
+
+msgid "保存流量清零计划"
+msgstr "保存流量清零计划"
+
+msgid "QModem 将更新定时任务，使流量统计按设定时间自动清零。是否继续？"
+msgstr "QModem 将更新定时任务，使流量统计按设定时间自动清零。是否继续？"
+
+msgid "立即清零流量统计"
+msgstr "立即清零流量统计"
+
+msgid "此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？"
+msgstr "此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？"

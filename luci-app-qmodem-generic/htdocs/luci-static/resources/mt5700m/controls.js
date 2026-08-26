@@ -52,6 +52,10 @@ var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', par
 var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { } });
 var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { } });
 var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_traffic_reset_schedule', params: ['config_section'], expect: { } });
+// 持久化分天流量统计（/usr/libexec/rpcd/qmodem_stats 提供）：
+// daily_stats 采样一次并返回今日/历史/累计；stats_reset 清零本地分天记录
+var callDailyStats = rpc.declare({ object: 'qmodem_stats', method: 'daily_stats', params: ['config_section'], expect: { } });
+var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { } });
 
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { } });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { } });
@@ -233,6 +237,10 @@ function getSimSwitchCapabilities(section) { return callGetSimSwitchCapabilities
 function getUsageStats(section) {
 	return callGetUsageStats(section).catch(function() { return { available: 0 }; });
 }
+function getDailyStats(section) {
+	return callDailyStats(section).catch(function() { return null; });
+}
+function statsReset(section) { return callStatsReset(section); }
 function getTrafficResetSchedule(section) { return callGetTrafficResetSchedule(section); }
 
 /* ------------------------------------------------------------------ */
@@ -731,6 +739,8 @@ return baseclass.extend({
 	getSimSlot: getSimSlot,
 	getSimSwitchCapabilities: getSimSwitchCapabilities,
 	getUsageStats: getUsageStats,
+	getDailyStats: getDailyStats,
+	statsReset: statsReset,
 	getTrafficResetSchedule: getTrafficResetSchedule,
 
 	sendAt: sendAt,

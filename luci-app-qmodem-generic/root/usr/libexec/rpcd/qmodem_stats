@@ -1,0 +1,31 @@
+#!/bin/sh
+# QModem 流量统计 rpcd 服务 — 暴露持久化的分天流量记录给 LuCI。
+# 实际逻辑在 /usr/bin/qmodem-stats-collect：
+#   daily_stats    采样一次并返回统计（页面打开即刷新，与后台采集服务共用同一存储）
+#   stats_history  仅读取已存储的统计（不触发采样）
+#
+# 存储：/etc/qmodem-stats/<section>.stats，重启保留；日期按中国时区（UTC+8）切分。
+
+case "$1" in
+	list)
+		echo '{"daily_stats":{"config_section":"string"},"stats_history":{"config_section":"string"},"stats_reset":{"config_section":"string"}}'
+		;;
+	call)
+		read input
+		config_section=$(echo "$input" | jsonfilter -e '@.config_section' 2>/dev/null)
+		case "$config_section" in
+			''|*[!a-zA-Z0-9_-]*) config_section='' ;;
+		esac
+		if [ -z "$config_section" ]; then
+			echo '{"error":"invalid config_section"}'
+			exit 0
+		fi
+
+		case "$2" in
+			daily_stats)   /usr/bin/qmodem-stats-collect run "$config_section" ;;
+			stats_history) /usr/bin/qmodem-stats-collect show "$config_section" ;;
+			stats_reset)   /usr/bin/qmodem-stats-collect reset "$config_section" ;;
+			*) echo '{"error":"unknown method"}' ;;
+		esac
+		;;
+esac

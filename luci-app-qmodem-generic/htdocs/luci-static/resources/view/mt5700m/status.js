@@ -98,7 +98,8 @@ return view.extend({
 				guard(controls.getNetworkInfo(section), _('Network'), []),
 				guard(controls.getQosInfo(section), 'QOS', {}),
 				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {}),
-				guard(controls.getRadioInfo(section), _('Modulation'), {})
+				guard(controls.getRadioInfo(section), _('Modulation'), {}),
+				guard(controls.getDailyStats(section), _('Daily traffic'), null)
 			]).then(function(r) {
 				// 从合并后的接口视图中取物理设备名，查询设备速率
 				var iface = r[7] || {};
@@ -126,6 +127,7 @@ return view.extend({
 						net: r[8],
 						qosInfo: r[9] || {},
 						radioInfo: r[11] || {},
+						daily: r[12] || null,
 						devStatus: devStatus,
 						allInfo: allInfo,
 						errors: errors
@@ -615,10 +617,17 @@ return view.extend({
 		]);
 	},
 
-	// 流量面板：数据源为 QModem get_usage_stats。
-	// huawei 返回 available:0 —— 此时给出说明而不是图表，也绝不回退到旧后端。
-	trafficPanel: function(usage, interfaceName) {
-		usage = usage || {};
+	// 流量面板：数据源为 QModem get_usage_stats（当前计数器）+ qmodem_stats
+	// daily_stats（本机持久化的分天记录，重启不丢失，按中国时区 UTC+8 切日）。
+	// huawei 等模组 available:0 时给出说明而不是图表。
+	// 方向自动识别：个别驱动把 rx/tx 接反（tx 持续大于 rx），后端识别后以
+	// swapped=1 标记，这里统一交换显示，保证「下载 > 上传」的常规直觉正确。
+	trafficPanel: function(usage, interfaceName, daily) {
+		usage = usage || {}; daily = daily || {};
+		var swapped = Number(daily.swapped) === 1;
+		var dl = swapped ? (Number(daily.total_tx) || 0) : (Number(daily.total_rx) || 0);
+		var ul = swapped ? (Number(daily.total_rx) || 0) : (Number(daily.total_tx) || 0);
+
 		var head = E('div', { 'class':'mt5700m-traffic-head' }, [
 			E('div', {}, [
 				E('h3', {}, _('Traffic Statistics')),
@@ -637,8 +646,6 @@ return view.extend({
 			]);
 		}
 
-		var rx = Number(usage.total_rx_bytes) || 0, tx = Number(usage.total_tx_bytes) || 0;
-		var total = rx + tx, maximum = Math.max(rx, tx, 1);
 		function stat(label, value, split) {
 			return E('div', { 'class':'mt5700m-traffic-stat' }, [
 				E('div', { 'class':'mt5700m-traffic-label' }, label),
@@ -646,23 +653,46 @@ return view.extend({
 				E('div', { 'class':'mt5700m-traffic-split' }, split || '')
 			]);
 		}
-		function bar(label, value, cls) {
+
+		// 分天历史：最近 14 天，每天两行（下行蓝 / 上行绿），按全表最大值归一化
+		var dayRows = Array.isArray(daily.days) ? daily.days.slice(-14) : [];
+		var maxDay = 1;
+		dayRows.forEach(function(d) {
+			maxDay = Math.max(maxDay, Number(d.rx) || 0, Number(d.tx) || 0);
+		});
+		if (!dayRows.length)
+			maxDay = Math.max(dl, ul, 1);
+		function dayBar(date, rxDl, txUl, isToday) {
 			return E('div', { 'class':'mt5700m-day' }, [
-				E('span', { 'class':'mt5700m-date' }, label),
+				E('span', { 'class':'mt5700m-date' }, date.substring(5)),
 				E('div', { 'class':'mt5700m-bars' }, [
-					E('div', { 'class':'mt5700m-bar' + (cls ? ' ' + cls : '') }, E('i', { 'style':'width:' + Math.max(1, value / maximum * 100).toFixed(1) + '%' }))
+					E('div', { 'class':'mt5700m-bar' }, E('i', { 'style':'width:' + Math.max(rxDl ? 2 : 0, rxDl / maxDay * 100).toFixed(1) + '%' })),
+					E('div', { 'class':'mt5700m-bar tx' }, E('i', { 'style':'width:' + Math.max(txUl ? 2 : 0, txUl / maxDay * 100).toFixed(1) + '%' }))
 				]),
-				E('span', { 'class':'mt5700m-values' }, controls.formatBytes(value))
+				E('span', { 'class':'mt5700m-values' }, controls.formatBytes(rxDl + txUl))
 			]);
 		}
+		var todayRow = dayBar(_('Today'), Number(daily.today_rx) || 0, Number(daily.today_tx) || 0, true).cloneNode(true);
+		var history = E('div', { 'class':'mt5700m-days' }, [ todayRow ].concat(
+			dayRows.map(function(d) {
+				return dayBar(String(d.date || ''), swapped ? (Number(d.tx) || 0) : (Number(d.rx) || 0),
+					swapped ? (Number(d.rx) || 0) : (Number(d.tx) || 0), false);
+			})
+		));
+
 		return E('section', { 'class':'mt5700m-traffic mt-ui-card' }, [
 			head,
 			E('div', { 'class':'mt5700m-traffic-layout' }, [
-				stat(_('Download'), rx),
-				stat(_('Upload'), tx),
-				stat(_('All-time total'), total, _('Download %s · Upload %s').format(controls.formatBytes(rx), controls.formatBytes(tx))),
-				E('div', { 'class':'mt5700m-days' }, [ bar(_('Download'), rx), bar(_('Upload'), tx, 'tx') ])
-			])
+				stat(_('Today download'), swapped ? (Number(daily.today_tx) || 0) : (Number(daily.today_rx) || 0)),
+				stat(_('Today upload'), swapped ? (Number(daily.today_rx) || 0) : (Number(daily.today_tx) || 0)),
+				stat(_('All-time total'), dl + ul, _('Download %s · Upload %s').format(controls.formatBytes(dl), controls.formatBytes(ul))),
+				history
+			]),
+			swapped ? E('p', { 'class':'mt5700m-focus-desc', 'style':'margin-top:10px' },
+				_('Modem driver reports reversed counters; download/upload were swapped automatically.')) : null,
+			isTrafficAvailable(usage) && !dayRows.length && !(Number(daily.today_rx) + Number(daily.today_tx)) ?
+				E('p', { 'class':'mt5700m-focus-desc', 'style':'margin-top:10px' },
+					_('Daily history is being recorded in the background; the first full-day record will appear tomorrow.')) : null
 		]);
 	},
 
@@ -721,8 +751,13 @@ return view.extend({
 			}),
 			controls.action(_('立即清零流量统计'), function() {
 				controls.confirmModal(_('立即清零流量统计'),
-					_('此操作会立即清零该模组的流量计数。是否继续？'),
-					function() { return controls.clearStats(section); });
+					_('此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？'),
+					function() {
+						// QModem clear_stats（模组侧）+ 本地持久化记录一并清零；
+						// 部分模组不支持模组侧清零，本地记录仍会重置
+						return Promise.resolve(controls.clearStats(section)).catch(function() { return null; })
+							.then(function() { return controls.statsReset(section); });
+					});
 			})
 		];
 		return controls.card(_('流量自动清零'), _('设置定时自动清零流量统计，或手动立即清零。'), body, true);
@@ -792,7 +827,7 @@ return view.extend({
 			]),
 			E('div', { 'class':'mt5700m-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
 			E('div', { 'class':'mt5700m-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
-			this.trafficPanel(res.usage, data.network_interface),
+			this.trafficPanel(res.usage, data.network_interface, res.daily),
 		isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
 			E('div', { 'class':'mt5700m-shortcuts' }, [
 				this.shortcut(_('Mobile data'), _('APN, dialing, IP details and session counters'), 'admin/modem/mt5700m/connection'),

@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+# QModem 流量统计后台采集服务 — 周期性采样各模组流量计数并写入
+# /etc/qmodem-stats/<section>.stats（overlay 持久分区）。
+#
+# 有了这个后台服务，即使 LuCI 页面没有打开，流量也会持续按中国时区分天累计，
+# 路由器重启后历史记录不丢失。
+
+START=97
+STOP=10
+USE_PROCD=1
+
+. $IPKG_INSTROOT/lib/functions.sh
+
+COLLECT_INTERVAL=60
+
+start_modem_stats_instance()
+{
+	local config_section="$1"
+	local state instance_name
+
+	config_get state "$config_section" state
+	[ "$state" = "disabled" ] && return 0
+
+	instance_name="qmodem_stats_${config_section}"
+	procd_open_instance "$instance_name"
+	procd_set_param command /bin/sh /usr/bin/qmodem-stats-loop "$config_section" "$COLLECT_INTERVAL"
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param respawn 3600 5 5
+	procd_close_instance
+}
+
+start_service()
+{
+	mkdir -p /etc/qmodem-stats
+	config_load qmodem
+	config_foreach start_modem_stats_instance modem-device
+}

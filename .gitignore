@@ -3,6 +3,7 @@
 *.apk
 *.lmo
 bin/
+!**/root/usr/bin/
 output/
 dist/
 sdk/

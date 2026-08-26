@@ -1,0 +1,320 @@
+#!/bin/sh
+# QModem 流量统计持久化采集器 — 分天记录、重启不丢失、按中国时区（UTC+8）切日。
+#
+# 数据来源（全模组通用，按序回退）：
+#   1) ubus qmodem get_stats —— QModem 官方口径（vendor 脚本可能上报模组内部
+#      计数或 netdev 计数），available=1 时直接采用；
+#   2) netdev 兜底 —— 从 /etc/config/qmodem <节>.network 指定的网口读取
+#      /sys/class/net/<dev>/statistics/{rx,tx}_bytes 内核计数器。
+#
+# 存储：/etc/qmodem-stats/<section>.stats（overlay 持久分区，重启保留）。
+#
+# 用法：
+#   qmodem-stats-collect run  <config_section>   采样一次并落盘，输出当前统计 JSON
+#   qmodem-stats-collect show <config_section>   仅输出当前统计 JSON（不采样）
+#   qmodem-stats-collect reset <config_section>  清零本地累计与分天记录（配合
+#                                                QModem 定时清零/手动清零使用）
+#
+# 方向自动识别：正常模组 rx(下行) 远大于 tx(上行)。个别驱动把两个计数器接反，
+# 累计流量超过 50MB 且 tx > rx 时判定方向颠倒，输出中自动交换并以 swapped=1 标记。
+
+STATS_DIR="${QMODEM_STATS_DIR:-/etc/qmodem-stats}"
+KEEP_DAYS=90
+SWAP_MIN_BYTES=$((50 * 1024 * 1024))
+
+# jshn（json_* 函数）：OpenWrt 固件自带；缺失时回退到内置的纯 shell JSON 生成器
+if [ -f /usr/share/libubox/jshn.sh ]; then
+	. /usr/share/libubox/jshn.sh
+else
+	# 内置 JSON 生成器：_J 为已生成的 JSON 片段，_JS 为容器栈（o=对象 a=数组），
+	# _NEED=1 表示下一个字段/元素前需要补逗号。
+	json_init() { _J=''; _JS=''; _NEED=0; }
+	__esc() { printf '%s' "$1" | awk '{gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s", $0}'; }
+	__sep() { [ "$_NEED" = 1 ] && _J="$_J,"; _NEED=0; }
+	json_add_string() { __sep; _J="$_J\"$1\":\"$(__esc "$2")\""; _NEED=1; }
+	json_add_int() { case "$2" in ''|*[!0-9-]*) v=0 ;; *) v=$2 ;; esac; __sep; _J="$_J\"$1\":$v"; _NEED=1; }
+	json_add_boolean() { [ "$2" = "1" ] && v=true || v=false; __sep; _J="$_J\"$1\":$v"; _NEED=1; }
+	json_add_array() { __sep; _J="$_J\"$1\":["; _JS="$_JS a"; }
+	json_close_array() { _J="$_J]"; _JS=${_JS%?}; _NEED=1; }
+	json_add_object() { __sep; _J="$_J{ "; _JS="$_JS o"; }
+	json_close_object() { _J="$_J }"; _JS=${_JS%?}; _NEED=1; }
+	json_dump() { printf '{%s}\n' "$_J"; }
+fi
+
+# ---- 工具函数 -------------------------------------------------------------
+
+cn_day_of() {
+	# epoch 秒 → 中国时区日期 YYYY-MM-DD（awk strftime 第三参 1 = UTC，避免依赖系统时区）
+	awk -v t="$1" 'BEGIN{print strftime("%Y-%m-%d", t + 28800, 1)}'
+}
+
+cn_span_days() {
+	# 两个时刻之间相差的中国日期天数（同日为 0）
+	awk -v a="$1" -v b="$2" 'BEGIN{
+		da = strftime("%Y-%m-%d", a + 28800, 1);
+		db = strftime("%Y-%m-%d", b + 28800, 1);
+		if (da == db) { print 0; exit }
+		y1 = substr(da,1,4)+0; m1 = substr(da,6,2)+0; d1 = substr(da,9,2)+0;
+		y2 = substr(db,1,4)+0; m2 = substr(db,6,2)+0; d2 = substr(db,9,2)+0;
+		print int((mktime(y2" "m2" "d2" 12 0 0") - mktime(y1" "m1" "d1" 12 0 0")) / 86400);
+	}'
+}
+
+
+# 日期键（2026-08-26）→ 合法 shell 变量名前缀（连字符替换为下划线）
+day_var() {
+	printf 'd_%s' "$(printf '%s' "$1" | tr '-' '_')"
+}
+
+is_num() {
+	case "$1" in
+		''|*[!0-9]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+load_stats() {
+	last_ts=0; last_rx=0; last_tx=0; total_rx=0; total_tx=0; swapped=0; day=""
+	# 文件不存在（首次采样）时保留上述默认值，保证后续算术运算可用
+	[ -f "$1" ] || return 0
+	while IFS='=' read -r k v; do
+		case "$k" in
+			last_ts) is_num "$v" && last_ts=$v ;;
+			last_rx) is_num "$v" && last_rx=$v ;;
+			last_tx) is_num "$v" && last_tx=$v ;;
+			total_rx) is_num "$v" && total_rx=$v ;;
+			total_tx) is_num "$v" && total_tx=$v ;;
+			swapped) swapped=$v ;;
+			day_*)
+				d=${k#day_}
+				case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) continue ;; esac
+				is_num "$v" || continue
+				case " $day " in *" $d "*) ;; *) day="$day $d" ;; esac
+				eval "$(day_var "$d")_rx=\$v"
+				;;
+			dayx_*)
+				d=${k#dayx_}
+				case "$d" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *) continue ;; esac
+				is_num "$v" || continue
+				case " $day " in *" $d "*) ;; *) day="$day $d" ;; esac
+				eval "$(day_var "$d")_tx=\$v"
+				;;
+		esac
+	done < "$1"
+}
+
+save_stats() {
+	now="$2"
+	tmp="${1}.tmp"
+	{
+		echo "last_ts=$now"
+		echo "last_rx=$last_rx"
+		echo "last_tx=$last_tx"
+		echo "total_rx=$total_rx"
+		echo "total_tx=$total_tx"
+		echo "swapped=$swapped"
+		for d in $day; do
+			vp="$(day_var "$d")"
+			eval "v=\"\${${vp}_rx}\""; is_num "$v" && echo "day_${d}=$v"
+			eval "v=\"\${${vp}_tx}\""; is_num "$v" && echo "dayx_${d}=$v"
+		done
+	} > "$tmp"
+	cutoff=$(awk -v t="$now" -v k="$KEEP_DAYS" 'BEGIN{print strftime("%Y-%m-%d", t + 28800 - k * 86400, 1)}')
+	{
+		grep -Ev '^day' "$tmp"
+		while IFS='=' read -r key val; do
+			case "$key" in
+				day_*)
+					d=${key#day_}
+					[ ! "$d" \< "$cutoff" ] && echo "${key}=${val}"
+					;;
+				dayx_*)
+					d=${key#dayx_}
+					[ ! "$d" \< "$cutoff" ] && echo "${key}=${val}"
+					;;
+			esac
+		done < "$tmp"
+	} > "${tmp}.2"
+	mv "${tmp}.2" "$1"
+	rm -f "$tmp"
+}
+
+add_delta() {
+	_d="$1"; _dr="$2"; _dt="$3"
+	is_num "$_dr" || _dr=0
+	is_num "$_dt" || _dt=0
+	[ "$_dr" -eq 0 ] && [ "$_dt" -eq 0 ] && return 0
+
+	vp="$(day_var "$_d")"
+	eval "rx=\"\${${vp}_rx:-0}\""
+	eval "tx=\"\${${vp}_tx:-0}\""
+	rx=$((rx + _dr)); tx=$((tx + _dt))
+	eval "${vp}_rx=$rx"; eval "${vp}_tx=$tx"
+	case " $day " in *" $_d "*) ;; *) day="$day $_d" ;; esac
+	total_rx=$((total_rx + _dr))
+	total_tx=$((total_tx + _dt))
+}
+
+# ---- 当前计数器读取 -------------------------------------------------------
+
+read_counters() {
+	config_section="$1"
+	cur_rx=''; cur_tx=''
+
+	resp=$(ubus call qmodem get_stats "{\"config_section\":\"$config_section\"}" 2>/dev/null)
+	if [ -n "$resp" ]; then
+		if [ "$(jsonfilter -s "$resp" -e '@.available' 2>/dev/null)" = "true" ]; then
+			cur_rx=$(jsonfilter -s "$resp" -e '@.total_rx_bytes' 2>/dev/null)
+			cur_tx=$(jsonfilter -s "$resp" -e '@.total_tx_bytes' 2>/dev/null)
+		fi
+	fi
+
+	is_num "$cur_rx" || cur_rx=''
+	is_num "$cur_tx" || cur_tx=''
+
+	# 兜底：直接读内核 netdev 计数器（QModem 未实现 get_stats 的模组也通用）
+	if [ -z "$cur_rx" ] && [ -z "$cur_tx" ]; then
+		netdev=$(uci -q get "qmodem.${config_section}.network" 2>/dev/null)
+		if [ -n "$netdev" ] && [ -r "/sys/class/net/${netdev}/statistics/rx_bytes" ]; then
+			cur_rx=$(cat "/sys/class/net/${netdev}/statistics/rx_bytes" 2>/dev/null)
+			cur_tx=$(cat "/sys/class/net/${netdev}/statistics/tx_bytes" 2>/dev/null)
+			is_num "$cur_rx" || cur_rx=''
+			is_num "$cur_tx" || cur_tx=''
+		fi
+	fi
+
+	[ -n "$cur_rx" ] || [ -n "$cur_tx" ]
+}
+
+# ---- 主逻辑 ---------------------------------------------------------------
+
+do_run() {
+	config_section="$1"
+	mkdir -p "$STATS_DIR"
+	FILE="$STATS_DIR/${config_section}.stats"
+	[ -f "$FILE" ] && load_stats "$FILE"
+	now=$(date +%s)
+
+	# 首次运行（无状态文件）时 load_stats 未执行，这里统一补齐默认值，
+	# 保证后续算术比较不会遇到空变量。
+	last_ts=${last_ts:-0}; last_rx=${last_rx:-0}; last_tx=${last_tx:-0}
+	total_rx=${total_rx:-0}; total_tx=${total_tx:-0}; swapped=${swapped:-0}
+
+	is_num "$cur_rx" || cur_rx=0
+	is_num "$cur_tx" || cur_tx=0
+
+	if read_counters "$config_section"; then
+		today=$(cn_day_of "$now")
+
+		if [ "$last_ts" -gt 0 ]; then
+			last_day=$(cn_day_of "$last_ts")
+			dr=$((cur_rx - last_rx)); [ "$dr" -lt 0 ] && dr=$cur_rx
+			dt=$((cur_tx - last_tx)); [ "$dt" -lt 0 ] && dt=$cur_tx
+			if [ "$today" = "$last_day" ]; then
+			# 同一天：常规增量。计数器回绕/重置（模组重拨、驱动重置）时，
+			# 新值小于旧值 → 增量从 0 起算，新计数值即为本轮新增流量。
+			dr=$((cur_rx - last_rx)); [ "$dr" -lt 0 ] && dr=$cur_rx
+			dt=$((cur_tx - last_tx)); [ "$dt" -lt 0 ] && dt=$cur_tx
+			add_delta "$today" "$dr" "$dt"
+			else
+				# 跨日界：采样间隔内的流量无法精确归属到具体某天，
+				# 均匀拆分到跨越的各天（60 秒采样周期下极少发生）。
+				n=$(cn_span_days "$last_ts" "$now")
+				[ "$n" -ge 1 ] || n=1
+				i=0
+				while [ "$i" -lt "$n" ]; do
+					d_i=$(cn_day_of $((now - (n - i - 1) * 86400)))
+					if [ "$i" -eq 0 ]; then
+						add_delta "$d_i" "$dr" "$dt"
+					else
+						add_delta "$d_i" 0 0
+					fi
+					i=$((i + 1))
+				done
+			fi
+		else
+			: # 首次采样：只记基准点，不计增量
+		fi
+
+		last_ts=$now
+		last_rx=$cur_rx
+		last_tx=$cur_tx
+
+		# 方向自动识别：累计流量足够大且 tx > rx，视为该驱动上下行相反
+		if [ "$total_rx" -gt "$SWAP_MIN_BYTES" ] && [ "$total_tx" -gt "$total_rx" ]; then
+			swapped=1
+		fi
+
+		save_stats "$FILE" "$now"
+	fi
+
+	do_show "$config_section"
+}
+
+do_show() {
+	config_section="$1"
+	FILE="$STATS_DIR/${config_section}.stats"
+	[ -f "$FILE" ] && load_stats "$FILE"
+	now=$(date +%s)
+	today=$(cn_day_of "$now")
+
+	json_init
+	json_add_string config_section "$config_section"
+	json_add_int updated_at "$last_ts"
+	json_add_boolean available 1
+	vp="$(day_var "$today")"
+	eval "t_rx=\"\${${vp}_rx:-0}\""
+	eval "t_tx=\"\${${vp}_tx:-0}\""
+	is_num "$total_rx" || total_rx=0
+	is_num "$total_tx" || total_tx=0
+	case "$swapped" in 1) ;; *) swapped=0 ;; esac
+	json_add_int today_rx "$t_rx"
+	json_add_int today_tx "$t_tx"
+	json_add_int total_rx "$total_rx"
+	json_add_int total_tx "$total_tx"
+	json_add_int swapped "$swapped"
+
+	json_add_array days
+	for d in $day; do
+		[ "$d" \< "$today" ] || continue
+		vp="$(day_var "$d")"
+		json_add_object
+		json_add_string date "$d"
+		eval "json_add_int rx \"\${${vp}_rx:-0}\""
+		eval "json_add_int tx \"\${${vp}_tx:-0}\""
+		json_close_object
+	done
+	json_close_array
+
+	json_dump
+}
+
+do_reset() {
+	config_section="$1"
+	FILE="$STATS_DIR/${config_section}.stats"
+	mkdir -p "$STATS_DIR"
+	# 保留当前计数器基准：清零后下一轮采样不会把（清零前的）差额误记为新流量
+	read_counters "$config_section" || true
+	now=$(date +%s)
+	{
+		echo "last_ts=$now"
+		echo "last_rx=${cur_rx:-0}"
+		echo "last_tx=${cur_tx:-0}"
+		echo "total_rx=0"
+		echo "total_tx=0"
+		echo "swapped=0"
+	} > "$FILE.tmp"
+	mv "$FILE.tmp" "$FILE"
+
+	json_init
+	json_add_string config_section "$config_section"
+	json_add_boolean result 1
+	json_dump
+}
+
+case "$1" in
+	run)   shift; do_run "$@" ;;
+	show)  shift; do_show "$@" ;;
+	reset) shift; do_reset "$@" ;;
+	*) echo "Usage: $0 {run|show|reset} <config_section>" >&2; exit 1 ;;
+esac

@@ -3,6 +3,38 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-10] - 2026-08-26
+
+### 新增
+- **流量统计全面重做：本机持久化分天记录**（概览页流量卡片 + 后端新服务）：
+  - **数据不再依赖页面打开**：新增 procd 服务 `qmodem-stats-collect`
+    （`/usr/bin/qmodem-stats-loop` 每 60 秒驱动 `/usr/bin/qmodem-stats-collect run`），
+    开机即后台采样，无论 LuCI 是否打开都不漏记。
+  - **重启不丢失**：记录落盘于 overlay 持久分区 `/etc/qmodem-stats/<配置节>.stats`，
+    实机重启验证数据完好；自动保留最近 90 天。
+  - **按中国时区（UTC+8）切日**：日期边界由 epoch+28800 计算（awk strftime UTC），
+    不受路由器系统时区影响；跨零点采样的增量归属相邻日。
+  - **上下行方向自动识别，兼容所有模组**：正常模组 rx(下行) 远大于 tx(上行)；
+    个别驱动把两个计数器接反。累计流量超过 50MB 且 tx > rx 时判定方向颠倒，
+    输出以 `swapped=1` 标记，前端自动交换下载/上传显示并给出提示。
+    计数器来源链：QModem `get_stats`（available=1 时）→ 内核 netdev
+    `/sys/class/net/<dev>/statistics/*_bytes` 兜底，未实现 get_stats 的模组同样可用。
+  - **计数器回绕保护**：模组重拨 / 驱动重置导致计数变小（或清零）时按新值起算，
+    不会误录巨额增量。
+  - 前端流量面板改为「今日下载 / 今日上传 / 本机累计」三卡 + 最近 14 天每日
+    双行条形图（下行蓝 / 上传绿，含今天），全部来自本机持久化记录。
+- **手动立即清零同步本地记录**：「立即清零流量统计」在 QModem 模组侧清零
+  （部分模组不支持时跳过）之外，同时调用新的 rpcd 方法 `qmodem_stats.stats_reset`
+  清零本机累计与分天记录；清零保留当前计数器基准，之后不会把清零前的差额
+  误记为新流量。
+
+### 变更
+- rpcd 新增插件 `qmodem_stats`（`daily_stats` / `stats_history` /
+  `stats_reset` 三个方法），ACL 同步放行；`.gitignore` 放行包内
+  `root/usr/bin/` 安装脚本目录。
+- po/zh_Hans 补充新增界面文案翻译（今日下载/上传、方向反转提示、首日说明、
+  清零确认等）。
+
 ## [2.4.11-9] - 2026-08-26
 
 ### 修复
