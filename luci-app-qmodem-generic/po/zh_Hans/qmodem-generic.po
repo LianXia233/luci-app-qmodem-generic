@@ -3709,3 +3709,24 @@ msgstr "立即清零流量统计"
 
 msgid "此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？"
 msgstr "此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？"
+
+msgid "3G UMTS"
+msgstr "3G UMTS"
+
+msgid "5G NR"
+msgstr "5G NR"
+
+msgid "共 %d 个频段"
+msgstr "共 %d 个频段"
+
+msgid "已选 %d / %d"
+msgstr "已选 %d / %d"
+
+msgid "当前锁定 %d 个："
+msgstr "当前锁定 %d 个："
+
+msgid "未锁定，模组可自由驻网到该类别全部可用频段。"
+msgstr "未锁定，模组可自由驻网到该类别全部可用频段。"
+
+msgid "可用 %d"
+msgstr "可用 %d"

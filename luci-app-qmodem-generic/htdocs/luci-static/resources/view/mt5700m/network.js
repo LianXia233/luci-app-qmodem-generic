@@ -225,13 +225,40 @@ function scsText(value) {
 	return raw;
 }
 
-/* 频段类别中文名 */
+/* 频段类别中文名：QModem 各 vendor 脚本返回的类别键不统一
+ * （UMTS/LTE/NR/NR_NSA/NRNSA/NRSA/GW/Lte…），全部映射为友好标签 */
 var BAND_CLASS_LABEL = {
 	GW: _('2G / 3G（GSM / WCDMA）'),
-	LTE: _('4G LTE'),
+	UMTS: _('3G UMTS'),
+	LTE: '4G LTE',
+	Lte: '4G LTE',
+	NR: '5G NR',
+	NR_NSA: _('5G NR（NSA 非独立组网）'),
 	NRNSA: _('5G NR（NSA 非独立组网）'),
+	NR_SA: _('5G NR（SA 独立组网）'),
 	NRSA: _('5G NR（SA 独立组网）')
 };
+
+/* 类别显示顺序：3G → 4G → 5G，其余未知类别按字母序排在最后 */
+var BAND_CLASS_ORDER = [ 'GW', 'UMTS', 'LTE', 'Lte', 'NR', 'NR_NSA', 'NRNSA', 'NR_SA', 'NRSA' ];
+
+function bandClassLabel(k) { return BAND_CLASS_LABEL[k] || k; }
+
+/* 频段号排序：数字频段按数值升序，非数字的排后面按字典序 */
+function bandSortKey(id) {
+	var n = parseInt(String(id).replace(/[^0-9].*$/, ''), 10);
+	return isNaN(n) ? null : n;
+}
+
+function sortBands(items) {
+	return items.slice().sort(function(a, b) {
+		var na = bandSortKey(a.id), nb = bandSortKey(b.id);
+		if (na !== null && nb !== null) return na - nb;
+		if (na !== null) return -1;
+		if (nb !== null) return 1;
+		return String(a.id).localeCompare(String(b.id));
+	});
+}
 
 /* 拨号/网络模式中文名 */
 var MODE_LABEL = {
@@ -306,13 +333,16 @@ return view.extend({
 			'.mt-net-panel{padding:16px}.mt-net-panel h3{font-size:14px;margin:0 0 12px}',
 			'.mt-net-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--border-color-low,#edf0f4);font-size:13px}',
 			'.mt-net-row:last-child{border-bottom:0}.mt-net-row span:first-child{color:var(--text-color-medium,#707985)}.mt-net-row strong{text-align:right;word-break:break-word}',
+			'.mt-net-row-block{display:block}.mt-net-row-block>span:first-child{display:block;margin-bottom:8px}.mt-net-row-block strong{display:block;text-align:left}',
+			'.mt-locksum{display:flex;flex-direction:column;gap:7px}.mt-locksum-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mt-locksum-label{flex:0 0 auto;font-size:11px;font-weight:700;color:#4a7db3;background:#eaf2fb;border-radius:6px;padding:2px 8px;white-space:nowrap}.mt-locksum-chips{display:flex;flex-wrap:wrap;gap:4px}.mt-locksum-chip{display:inline-flex;align-items:center;justify-content:center;min-width:26px;padding:2px 7px;border-radius:6px;background:#e9f2fc;border:1px solid #c9ddf2;color:#1c62a8;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}.mt-locksum-chip.off{background:var(--background-color-low,#eef1f4);border-color:var(--border-color-low,#dfe4ea);color:#8a939d}.mt-locksum-avail{font-size:10.5px;color:#8a939d;white-space:nowrap}',
 			'.mt-net-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.mt-net-actions .btn{border-radius:9px;padding:7px 14px}',
 			'.mt-scan-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:12px}.mt-scan-panel{padding:16px}.mt-scan-panel h4{font-size:14px;margin:0 0 12px;color:var(--text-color-high,#20242a)}.mt-scan-table{width:100%;border-collapse:collapse;font-size:12.5px}.mt-scan-table th,.mt-scan-table td{padding:6px 10px;border-bottom:1px solid var(--border-color-low,#edf0f4);text-align:left}.mt-scan-table th{color:var(--text-color-medium,#707985);font-weight:600;background:var(--background-color-low,#f8fafb)}.mt-scan-table td{text-align:right;font-weight:600}.mt-scan-table td:first-child{text-align:left;font-weight:400}.mt-scan-note{color:var(--text-color-medium,#707985);font-size:12px;padding:8px 0}.mt-scan-raw{margin-top:8px}',
 			'.mt-net-details{margin-top:14px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:12px;overflow:hidden}',
 			'.mt-net-details summary{cursor:pointer;padding:13px 15px;font-size:13px;font-weight:650}.mt-net-raw{margin:0;padding:14px;background:#17202a;color:#dce6ef;white-space:pre-wrap;word-break:break-word;font:12px/1.55 monospace;max-height:420px;overflow:auto}',
 			'.mt-freq-head{margin-top:20px;padding:19px 20px;border-radius:13px;background:linear-gradient(135deg,#f4f7fb,#f1f8f6);border:1px solid #dce7ee}.mt-freq-head h3{font-size:18px;margin:0 0 6px}.mt-freq-head p{margin:0;color:var(--text-color-medium,#68717d);font-size:12px}',
 			'.mt-freq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.mt-freq-card{padding:17px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff)}.mt-freq-card h4{margin:0 0 12px;font-size:14px}.mt-freq-field{margin:11px 0}.mt-freq-field label{display:block;font-size:12px;color:var(--text-color-medium,#6d7680);margin-bottom:5px}.mt-freq-field input,.mt-freq-field select{width:100%;box-sizing:border-box}.mt-freq-help{font-size:11px;color:var(--text-color-medium,#7b838c);margin-top:5px}.mt-freq-actions{display:flex;justify-content:flex-end;margin-top:14px}',
-			'.mt-band-card{padding:18px}.mt-band-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.mt-band-head h3{margin:0 0 4px;font-size:15px}.mt-band-head p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.45}.mt-band-head .btn{flex:0 0 auto}.mt-band-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.mt-band-option{display:flex;align-items:center;gap:9px;min-height:40px;padding:7px 10px;border:1px solid var(--border-color-low,#e8ecf0);border-radius:9px;background:var(--background-color-low,#f8fafb);cursor:pointer;font-size:12px;transition:border-color .15s ease,background-color .15s ease}.mt-band-option:hover{border-color:#9cc5ee;background:#f1f7fd}.mt-band-option input{flex:0 0 auto;width:16px!important;height:16px;margin:0}.mt-band-apply{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:18px;padding:15px 18px}.mt-band-apply p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-apply .btn{flex:0 0 auto}',
+			'.mt-band-card{padding:18px}.mt-band-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.mt-band-head h3{margin:0 0 4px;font-size:15px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.mt-band-total{font-size:11px;font-weight:600;color:#4a7db3;background:#eaf2fb;border-radius:999px;padding:1px 9px}.mt-band-head p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-locked-list{color:#08775d;font-weight:600}.mt-band-tools{display:flex;align-items:center;gap:7px;flex:0 0 auto}.mt-band-tools .btn{padding:5px 12px;font-size:12px}.mt-band-count{font-size:11px;color:#6d7680;font-variant-numeric:tabular-nums;white-space:nowrap}',
+			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:6px 4px 5px;border:1px solid var(--border-color-low,#e8ecf0);border-radius:9px;background:var(--background-color-low,#f8fafb);cursor:pointer;font-size:13.5px;font-weight:650;font-variant-numeric:tabular-nums;text-align:center;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease;-webkit-user-select:none;user-select:none}.mt-band-option:hover{border-color:#9cc5ee;background:#f1f7fd}.mt-band-option.checked{border-color:#4b94df;background:#e9f2fc;box-shadow:inset 0 0 0 1px #4b94df;color:#1c62a8}.mt-band-option input{position:absolute;width:0;height:0;margin:0;opacity:0;pointer-events:none}.mt-band-option .mt-band-name{display:none}.mt-band-option input:focus-visible+.mt-band-name,.mt-band-option:focus-within{outline:2px solid #9cc5ee;outline-offset:1px}.mt-band-apply{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:18px;padding:15px 18px}.mt-band-apply p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-apply .btn{flex:0 0 auto}',
 			'.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
 			// 图形化信号条
 			'.mt-sbar{display:flex;align-items:center;gap:8px;margin:4px 0}.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:var(--text-color-medium,#707985)}.mt-sbar-track{flex:1;height:16px;border-radius:8px;background:#eef1f5;overflow:hidden;min-width:60px}.mt-sbar-fill{height:100%;border-radius:8px;transition:width .35s ease}.mt-sbar-value{flex:0 0 auto;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:72px;text-align:right}',
@@ -325,8 +355,8 @@ return view.extend({
 			'.mt-cell-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#eef2f6;color:#4a5561;font-size:10px;font-weight:700;text-transform:uppercase}.mt-cell-role.pcc{background:#dcf6eb;color:#08775d}',
 			// 服务小区强调块
 			'.mt-ssb-serving{padding:16px;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border-color-low,#e8ecf0);margin-bottom:12px}.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mt-ssb-serving-title{font-size:13px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-ssb-serving-meta{font-size:11px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
-			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
-			'@media(max-width:430px){.mt-band-head{display:block}.mt-band-head .btn{margin-top:10px}.mt-band-options{grid-template-columns:1fr}}'
+			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(auto-fill,minmax(56px,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
+			'@media(max-width:430px){.mt-band-head{display:block}.mt-band-tools{margin-top:10px}.mt-band-options{grid-template-columns:repeat(auto-fill,minmax(52px,1fr))}}'
 		].join(''));
 	},
 
@@ -445,17 +475,17 @@ return view.extend({
 	/* ---------------- 锁频段 ---------------- */
 
 	lockBandPanel: function(section, bandClass, data) {
-		var available = bandItems(ci(data, [ 'available_band', 'availableband', 'bands' ]));
+		var available = sortBands(bandItems(ci(data, [ 'available_band', 'availableband', 'bands' ])));
 		var locked = bandItems(ci(data, [ 'lock_band', 'lockband', 'locked_band' ]));
 		var lockedIds = {};
 		locked.forEach(function(item) { lockedIds[item.id] = true; });
 
 		if (!available.length) {
-			available = locked.slice();
+			available = sortBands(locked.slice());
 			if (!available.length)
 				return E('section', { 'class': 'mt-band-card mt-ui-card' }, [
 					E('div', { 'class': 'mt-band-head' }, E('div', {}, [
-						E('h3', {}, BAND_CLASS_LABEL[bandClass] || bandClass),
+						E('h3', {}, bandClassLabel(bandClass)),
 						E('p', {}, _('本模组经 QModem 未上报该类别的可用频段。'))
 					]))
 				]);
@@ -468,42 +498,76 @@ return view.extend({
 				'value': item.id,
 				'checked': lockedIds[item.id] ? 'checked' : null
 			});
+			box.addEventListener('change', function() {
+				options.forEach(function(labelEl, i) {
+					labelEl.classList[boxes[i].checked ? 'add' : 'remove']('checked');
+				});
+				refresh();
+			});
 			boxes.push(box);
-			return E('label', { 'class': 'mt-band-option' }, [ box, E('span', {}, item.name) ]);
+			return E('label', { 'class': 'mt-band-option' + (lockedIds[item.id] ? ' checked' : '') },
+				[ box, E('span', {}, item.id), E('span', { 'class': 'mt-band-name' }, item.name) ]);
 		});
+
+		var summaryNode = E('span', { 'class': 'mt-band-count' }, '');
+		function refresh() {
+			var n = boxes.filter(function(b) { return b.checked; }).length;
+			summaryNode.textContent = _('已选 %d / %d').format(n, available.length);
+			options.forEach(function(labelEl, i) {
+				labelEl.classList[boxes[i].checked ? 'add' : 'remove']('checked');
+			});
+		}
+		refresh();
+		function currentCsv() {
+			return boxes.filter(function(b) { return b.checked; })
+				.map(function(b) { return b.value; }).join(',');
+		}
+		var applyBtn = E('button', {
+			'type': 'button', 'class': 'btn cbi-button-apply',
+			'click': function() {
+				var csv = currentCsv();
+				controls.confirmModal(_('应用频段锁定'),
+					csv ? _('将 %s 锁定到频段 %s？移动数据会短暂中断。').format(bandClassLabel(bandClass), csv)
+						: _('解除 %s 的频段锁定？').format(bandClassLabel(bandClass)),
+					function() {
+						return controls.setLockBand(section, { band_class: bandClass, lock_band: csv });
+					}, true);
+			}
+		}, _('应用锁定'));
 
 		return E('section', { 'class': 'mt-band-card mt-ui-card' }, [
 			E('div', { 'class': 'mt-band-head' }, [
 				E('div', {}, [
-					E('h3', {}, BAND_CLASS_LABEL[bandClass] || bandClass),
-					E('p', {}, _('已锁定 %d 个频段，共 %d 个可用频段。不勾选任何频段表示解除锁定。')
-						.format(locked.length, available.length))
+					E('h3', {}, [
+						bandClassLabel(bandClass),
+						E('span', { 'class': 'mt-band-total' },
+							_('共 %d 个频段').format(available.length))
+					]),
+					E('p', {}, locked.length
+						? _('当前锁定 %d 个：').format(locked.length) +
+						  E('span', { 'class': 'mt-band-locked-list' },
+							locked.map(function(b) { return b.name; }).join('、')).textContent
+						: _('未锁定，模组可自由驻网到该类别全部可用频段。'))
 				]),
-				E('button', {
-					'type': 'button', 'class': 'btn',
-					'click': function() { boxes.forEach(function(b) { b.checked = true; }); }
-				}, _('全选'))
+				E('div', { 'class': 'mt-band-tools' }, [
+					summaryNode,
+					E('button', {
+						'type': 'button', 'class': 'btn',
+						'click': function() { boxes.forEach(function(b) { b.checked = true; }); refresh(); }
+					}, _('全选')),
+					E('button', {
+						'type': 'button', 'class': 'btn',
+						'click': function() { boxes.forEach(function(b) { b.checked = false; }); refresh(); }
+					}, _('清空'))
+				])
 			]),
 			E('div', { 'class': 'mt-band-options' }, options),
 			E('div', { 'class': 'mt-band-actions' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn',
-					'click': function() { boxes.forEach(function(b) { b.checked = false; }); }
+					'click': function() { boxes.forEach(function(b) { b.checked = false; }); refresh(); }
 				}, _('清空')),
-				E('button', {
-					'type': 'button', 'class': 'btn cbi-button-apply',
-					'click': function() {
-						var checked = boxes.filter(function(b) { return b.checked; })
-							.map(function(b) { return b.value; });
-						var csv = checked.join(',');
-						controls.confirmModal(_('应用频段锁定'),
-							csv ? _('将 %s 锁定到频段 %s？移动数据会短暂中断。').format(BAND_CLASS_LABEL[bandClass] || bandClass, csv)
-								: _('解除 %s 的频段锁定？').format(BAND_CLASS_LABEL[bandClass] || bandClass),
-							function() {
-								return controls.setLockBand(section, { band_class: bandClass, lock_band: csv });
-							}, true);
-					}
-				}, _('应用锁定'))
+				applyBtn
 			])
 		]);
 	},
@@ -519,12 +583,17 @@ return view.extend({
 			: null;
 
 		var lockband = plainObject(lockRaw, 'lockband');
-		var classes = [ 'GW', 'LTE', 'NRNSA', 'NRSA' ].filter(function(k) {
+		/* QModem 各 vendor 的类别键不统一（GW/UMTS/LTE/Lte/NR/NR_NSA/NRNSA/NRSA…），
+		 * 全部接受：先按 BAND_CLASS_ORDER 排序，未知类别按字母序追加在最后 */
+		var classes = Object.keys(lockband).filter(function(k) {
 			return lockband[k] && typeof lockband[k] === 'object';
 		});
-		Object.keys(lockband).forEach(function(k) {
-			if (classes.indexOf(k) === -1 && lockband[k] && typeof lockband[k] === 'object')
-				classes.push(k);
+		classes.sort(function(a, b) {
+			var ia = BAND_CLASS_ORDER.indexOf(a), ib = BAND_CLASS_ORDER.indexOf(b);
+			if (ia !== -1 && ib !== -1) return ia - ib;
+			if (ia !== -1) return -1;
+			if (ib !== -1) return 1;
+			return String(a).localeCompare(String(b));
 		});
 
 		if (!classes.length) {
@@ -749,12 +818,32 @@ return view.extend({
 		var prefer = plainObject(res.prefer, 'network_prefer');
 		var preferOn = Object.keys(prefer).filter(function(k) { return String(prefer[k]) === '1'; });
 		var lockband = plainObject(res.lockband, 'lockband');
-		var lockedSummary = Object.keys(lockband).filter(function(k) {
-			return lockband[k] && bandItems(ci(lockband[k], [ 'lock_band', 'lockband' ])).length;
-		}).map(function(k) {
-			return (BAND_CLASS_LABEL[k] || k) + '：' +
-				bandItems(ci(lockband[k], [ 'lock_band', 'lockband' ])).map(function(b) { return b.name; }).join(', ');
+		/* 无线状态·频段锁定行：按制式分组渲染成频段芯片，替代大段逗号文本 */
+		var lockClasses = Object.keys(lockband).filter(function(k) {
+			return lockband[k] && typeof lockband[k] === 'object' &&
+				(bandItems(ci(lockband[k], [ 'lock_band', 'lockband' ])).length ||
+				 bandItems(ci(lockband[k], [ 'available_band', 'availableband', 'bands' ])).length);
 		});
+		lockClasses.sort(function(a, b) {
+			var ia = BAND_CLASS_ORDER.indexOf(a), ib = BAND_CLASS_ORDER.indexOf(b);
+			if (ia !== -1 && ib !== -1) return ia - ib;
+			if (ia !== -1) return -1;
+			if (ib !== -1) return 1;
+			return String(a).localeCompare(String(b));
+		});
+		var lockedSummaryNode = lockClasses.length ? E('div', { 'class': 'mt-locksum' },
+			lockClasses.map(function(k) {
+				var locked = sortBands(bandItems(ci(lockband[k], [ 'lock_band', 'lockband' ])));
+				var availCount = bandItems(ci(lockband[k], [ 'available_band', 'availableband', 'bands' ])).length;
+				return E('div', { 'class': 'mt-locksum-group' }, [
+					E('span', { 'class': 'mt-locksum-label' }, bandClassLabel(k)),
+					E('span', { 'class': 'mt-locksum-chips' }, locked.length
+						? locked.map(function(b) { return E('span', { 'class': 'mt-locksum-chip' }, b.id); })
+						: [ E('span', { 'class': 'mt-locksum-chip off' }, _('未锁定')) ]),
+					availCount ? E('span', { 'class': 'mt-locksum-avail' },
+						_('可用 %d').format(availCount)) : null
+				]);
+			})) : null;
 
 		var rawDump;
 		try {
@@ -806,11 +895,11 @@ return view.extend({
 				]),
 				E('section', { 'class': 'mt-net-panel' }, [
 					E('h3', {}, _('无线状态')),
-					this.row(_('运营商'), operatorName),
-					this.row(_('网络模式'), activeMode ? modeLabel(activeMode) : ''),
-					this.row(_('网络优选'), preferOn.length ? preferOn.join(' / ') : ''),
-					this.row(_('频段锁定'), lockedSummary.length ? lockedSummary.join('；') : _('未锁定')),
-					this.row(_('AT 端口'), atPort)
+					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('运营商')), E('strong', {}, operatorName) ]),
+					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络模式')), E('strong', {}, activeMode ? modeLabel(activeMode) : '--') ]),
+					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络优选')), E('strong', {}, preferOn.length ? preferOn.join(' / ') : '--') ]),
+					E('div', { 'class': 'mt-net-row mt-net-row-block' }, [ E('span', {}, _('频段锁定')), lockedSummaryNode || E('strong', {}, _('未锁定')) ]),
+					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('AT 端口')), E('strong', {}, shown(atPort)) ])
 				])
 			]),
 			this.currentBandSection(res.currentBand),
