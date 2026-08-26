@@ -111,6 +111,75 @@ function entryMap(arr) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 移动数据连接判定（多来源，任一可靠来源肯定即视为已连接）             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 背景：部分模组（ECM/NCM/RNDIS 或内置自动拨号的 mbim/qmi 固件）由模组自身
+ * 维持数据连接，QModem 的 get_connect_status 只反映"QModem 是否执行过拨号"，
+ * 此类模组上恒返回 No，但接口已获取 IP、实际有网——只看该字段必然误报
+ * "模组在线，移动数据未连接"。因此按可靠性依次采信三个来源：
+ *   1) 接口证据（最强）：netifd 逻辑接口 up 且持有全局 IPv4/IPv6 地址
+ *   2) 模组自报：base_info 的 connect_status（QModem AT 探测，模组视角）
+ *   3) QModem 拨号状态：get_connect_status（connection_status / connect_status）
+ */
+
+// 各来源 connect_status 的肯定写法归一化（去空白、大小写、1/true 等变体）
+function isConnectedValue(v) {
+	var s = String(v == null ? '' : v).trim().toLowerCase();
+	return s === 'yes' || s === 'y' || s === '1' || s === 'true' ||
+		s === 'connected' || s === 'online' || s === 'connect' || s === '已连接';
+}
+
+// netifd 接口是否持有全局地址（IPv4 任一 / IPv6 排除链路本地 fe80::/10）
+function hasGlobalAddress(iface) {
+	if (!iface || typeof iface !== 'object')
+		return false;
+	var lists = [ iface['ipv4-address'], iface['ipv6-address'], iface['ipv6-prefix'] ];
+	for (var i = 0; i < lists.length; i++) {
+		var list = Array.isArray(lists[i]) ? lists[i] : [];
+		for (var j = 0; j < list.length; j++) {
+			var addr = list[j] && list[j].address;
+			if (addr && !/^fe[89ab][0-9a-f]?:/i.test(String(addr)))
+				return true;
+		}
+	}
+	return false;
+}
+
+/*
+ * 综合判定移动数据是否已连接。入参（均可选）：
+ *   conn  — get_connect_status 的原始返回（对象或 modem_info 数组）
+ *   base  — base_info 的 modem_info 数组（模组 AT 自报 connect_status）
+ *   iface — getInterfaceStatus 的合并接口视图（netifd）
+ * 返回 { connected: bool, source: 'iface'|'at'|'dial'|'' }，source 为采信的来源。
+ */
+function evalConnectionStatus(opts) {
+	opts = opts || {};
+
+	// 1) 接口证据：接口 up 且持有全局地址 —— 实际有网的最强证据
+	if (opts.iface && opts.iface.up === true && hasGlobalAddress(opts.iface))
+		return { connected: true, source: 'iface' };
+
+	// 2) 模组自报：base_info 里的 connect_status（不同 QModem 版本键名不一）
+	var atStatus = findEntry(opts.base, 'connect_status') ||
+		findEntry(opts.base, 'connection_status');
+	if (isConnectedValue(atStatus))
+		return { connected: true, source: 'at' };
+
+	// 3) QModem 拨号状态：对象直取字段，数组走 modem_info。每个来源独立判定，
+	//    绝不用 || 串接原始值——"No" 也是真值字符串，串接会让后面的 "Yes" 失效。
+	var c = opts.conn;
+	var dialStatus = c && c.connect_status != null ? c.connect_status :
+		(c && c.connection_status != null ? c.connection_status :
+		findEntry(c, 'connect_status') || findEntry(c, 'connection_status'));
+	if (isConnectedValue(dialStatus))
+		return { connected: true, source: 'dial' };
+
+	return { connected: false, source: '' };
+}
+
+/* ------------------------------------------------------------------ */
 /* 数据获取封装（返回 Promise）                                        */
 /* ------------------------------------------------------------------ */
 
@@ -634,6 +703,9 @@ return baseclass.extend({
 	findEntry: findEntry,
 	entryList: entryList,
 	entryMap: entryMap,
+	isConnectedValue: isConnectedValue,
+	hasGlobalAddress: hasGlobalAddress,
+	evalConnectionStatus: evalConnectionStatus,
 
 	getBaseInfo: getBaseInfo,
 	getInfo: getInfo,

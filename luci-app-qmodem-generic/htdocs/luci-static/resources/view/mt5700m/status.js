@@ -213,11 +213,12 @@ return view.extend({
 		data.network_interface = res.ifname || '';
 		data.qosInfo = qosInfo;
 		data.reachable = base.length || cell.length ? '1' : '0';
-		data.connected = /^yes$/i.test(String(
-		(conn.connection_status) || (conn.connect_status) ||
-		find(conn, 'connect_status') || find(conn, 'connection_status') ||
-		find(base, 'connect_status') || ''
-	)) ? '1' : '0';
+		/* 连接判定：多来源综合（接口有全局 IP > 模组自报 connect_status >
+		 * QModem 拨号状态）。ECM 等内置拨号模组 get_connect_status 恒为 No，
+		 * 但接口已获取地址、实际有网，必须判为已连接 */
+		data.connected = controls.evalConnectionStatus({
+			conn: conn, base: base, iface: (res.iface || {})
+		}).connected ? '1' : '0';
 		return data;
 	},
 

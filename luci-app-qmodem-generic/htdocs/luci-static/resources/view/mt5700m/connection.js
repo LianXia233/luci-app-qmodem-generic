@@ -83,12 +83,13 @@ return view.extend({
 				 * QModem 为本模组生成的 IPv4/IPv6 逻辑接口并合并地址视图 */
 				return Promise.all([
 					guard(controls.getConnectStatus(section), '连接状态', errors),
+					guard(controls.getBaseInfo(section), '模组信息', errors),
 					guard(controls.getDns(section), 'DNS', errors),
 					guard(controls.getMode(section), '拨号模式', errors),
 					guard(controls.getDialStatus(section), '拨号状态', errors),
 					guard(controls.getInterfaceStatus(section), '接口状态', errors)
 				]).then(function(results) {
-					var ifstat = results[4] || {};
+					var ifstat = results[5] || {};
 					var devName = ifstat.l3_device || ifstat.device || '';
 
 					/* MTU 不在接口 dump 里，从物理设备状态补齐 */
@@ -102,9 +103,10 @@ return view.extend({
 							section: section,
 							iface: self.iface,
 							conn: results[0],
-							dns: results[1],
-							mode: results[2],
-							dial: results[3],
+							base: results[1],
+							dns: results[2],
+							mode: results[3],
+							dial: results[4],
 							ifstat: ifstat,
 							devstat: devstat || {},
 							errors: errors
@@ -276,7 +278,12 @@ return view.extend({
 
 		var section = res.section;
 		var conn = entriesOf(res.conn);
-		var connected = controls.findEntry(conn, 'connect_status') === 'Yes';
+		/* 连接判定：多来源综合（接口有全局 IP > 模组自报 connect_status >
+		 * QModem 拨号状态），任一来源肯定即已连接。内置拨号（ECM 等）模组
+		 * get_connect_status 恒为 No 但实际有网，靠接口/模组证据兜底 */
+		var connected = controls.evalConnectionStatus({
+			conn: res.conn, base: res.base, iface: res.ifstat || {}
+		}).connected;
 		var mode = plainObject(res.mode, 'mode');
 		var modeName = Object.keys(mode || {}).filter(function(k) {
 			return String(mode[k]) === '1';
