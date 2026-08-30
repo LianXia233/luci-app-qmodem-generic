@@ -3736,3 +3736,51 @@ msgstr "当前制式"
 
 msgid "当前优选"
 msgstr "当前优选"
+
+msgid "模组支持库"
+msgstr "模组支持库"
+
+msgid "把本插件内置的模组定义写入 QModem 的模组支持库，用于 QModem 版本尚未收录某些型号的场合（例如 Quectel RG520N-CN）。写入前自动备份，已存在的型号不会重复写入。"
+msgstr "把本插件内置的模组定义写入 QModem 的模组支持库，用于 QModem 版本尚未收录某些型号的场合（例如 Quectel RG520N-CN）。写入前自动备份，已存在的型号不会重复写入。"
+
+msgid "QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。"
+msgstr "QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。"
+
+msgid "QModem 依赖模组支持库识别模组型号。若本模组尚未被 QModem 收录，可在此写入内置定义。"
+msgstr "QModem 依赖模组支持库识别模组型号。若本模组尚未被 QModem 收录，可在此写入内置定义。"
+
+msgid "支持库路径"
+msgstr "支持库路径"
+
+msgid "内置型号"
+msgstr "内置型号"
+
+msgid "已入库"
+msgstr "已入库"
+
+msgid "以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备，QModem 才会识别该模组。"
+msgstr "以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备，QModem 才会识别该模组。"
+
+msgid "内置型号均已存在于支持库中，无需同步。"
+msgstr "内置型号均已存在于支持库中，无需同步。"
+
+msgid "未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem，或在终端执行 /usr/sbin/qmodem-modem-support 查看原因。"
+msgstr "未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem，或在终端执行 /usr/sbin/qmodem-modem-support 查看原因。"
+
+msgid "读取支持库失败：%s"
+msgstr "读取支持库失败：%s"
+
+msgid "同步支持库"
+msgstr "同步支持库"
+
+msgid "已写入支持库：%s。请重启 QModem（/etc/init.d/qmodem restart）或重启设备使其生效。"
+msgstr "已写入支持库：%s。请重启 QModem（/etc/init.d/qmodem restart）或重启设备使其生效。"
+
+msgid "同步未生效：%s"
+msgstr "同步未生效：%s"
+
+msgid "支持库已是最新，本次未做修改。"
+msgstr "支持库已是最新，本次未做修改。"
+
+msgid "同步支持库失败：%s"
+msgstr "同步支持库失败：%s"

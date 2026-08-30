@@ -6,6 +6,7 @@
 			"ubus": {
 				"qmodem": [ "*" ],
 				"qmodem_stats": [ "*" ],
+				"qmodem_support": [ "*" ],
 				"qos": [ "*" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ],
@@ -18,6 +19,7 @@
 			"ubus": {
 				"qmodem": [ "*" ],
 				"qmodem_stats": [ "*" ],
+				"qmodem_support": [ "*" ],
 				"qos": [ "*" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ]

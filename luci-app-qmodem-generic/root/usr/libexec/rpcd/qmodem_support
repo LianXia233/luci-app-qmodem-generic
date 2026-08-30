@@ -1,0 +1,26 @@
+#!/bin/sh
+# QModem 模组支持库 rpcd 服务 —— 供 LuCI「高级」页查看注入状态并一键同步。
+# 实际逻辑在 /usr/sbin/qmodem-modem-support：
+#   status  只查询内置型号是否已存在于支持库（不修改任何文件）
+#   sync    执行一次合并（写入前自动备份，写入后校验，失败回滚）
+#
+# 支持库：/usr/share/qmodem/modem_support.json（由 QModem 提供）
+
+case "$1" in
+	list)
+		echo '{"status":{},"sync":{}}'
+		;;
+	call)
+		read input
+		if [ ! -x /usr/sbin/qmodem-modem-support ]; then
+			echo '{"available":0,"path":"","added":[],"skipped":[],"missing":[],"error":"qmodem-modem-support 未安装"}'
+			exit 0
+		fi
+
+		case "$2" in
+			status) /usr/sbin/qmodem-modem-support --status ;;
+			sync)   /usr/sbin/qmodem-modem-support --json ;;
+			*) echo '{"available":0,"path":"","added":[],"skipped":[],"missing":[],"error":"unknown method"}' ;;
+		esac
+		;;
+esac

@@ -3,6 +3,23 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-12] - 2026-08-30
+
+### 新增
+- **模组支持库自动注入（Quectel RG520N-CN）**：QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号，未收录的型号不会生成 `modem-device`，LuCI 里也就看不到该模组。RG520N-CN（VID `2c7c` / USB 接口 / 高通平台）在部分 QModem 版本中正属此列，以往只能手工 `vi` 编辑支持库。现提供完整的自动链路：
+  - 内置定义 `root/usr/share/qmodem-generic/extra_modem_support.json`（`usb.rg520n-cn`：WCDMA `1/8`、LTE `1/3/5/8/34/38/39/40/41`、NR NSA/SA `1/8/28/41/78`、modes `qmi/gobinet/ecm/mbim/rndis/ncm`），字段与缩进同 QModem 上游条目完全一致。
+  - 合并脚本 `/usr/sbin/qmodem-modem-support`（POSIX sh，不依赖 jq/python）：按 `usb` / `pcie` 分组定位、幂等跳过已有型号、写入前生成 `.bak` 备份、写入后校验（`jsonfilter` 可用时按 JSON 解析校验）失败自动回滚、目录锁防并发、QModem 未安装（支持库不存在）时静默退出 0。
+  - 开机服务 `/etc/init.d/qmodem-modem-support`（`START=90`，早于 QModem 自身启动）；首次安装由 `uci-defaults` 立即执行一次。
+  - rpcd 插件 `qmodem_support`（`status` / `sync`）并在 ACL 放行；LuCI「高级」页新增「模组支持库」卡片：显示支持库路径、内置型号、已入库状态，支持一键同步，**未识别到模组时同样可见**（否则「未收录」时用户反而看不到注入入口）。
+
+### 变更
+- `controls.js` 新增 `getSupportStatus()` / `syncSupport()`；`advanced.js` 的 `load()` 改为并行获取支持库状态与模组配置节。
+- `Makefile` 的 `postinst` 增加新脚本/服务的权限与 `enable`，`PKG_RELEASE` 11 → 12。
+- po/zh_Hans 补充新增界面文案翻译（16 条）。
+
+### 验证
+- 以上游 QModem 当前 `modem_support.json`（usb 89 / pcie 40 / device 8 条）为样本：注入后 JSON 合法、`rg520n-cn` 落在 `usb` 组且字段与预设一致、`pcie` / `device` 组不受影响、文本差异仅 19 行新增、其余字节零改动；重复运行幂等跳过；支持库缺失 / 损坏 / 已收录 / 内置定义缺失 / 并发加锁五种边界场景行为均符合预期。
+
 ## [2.4.11-11] - 2026-08-26
 
 ### 修复

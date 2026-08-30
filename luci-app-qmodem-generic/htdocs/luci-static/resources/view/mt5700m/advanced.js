@@ -174,11 +174,18 @@ return view.extend({
 		var self = this;
 		var errors = [];
 
-		return controls.resolveSection().then(function(section) {
+		// 模组支持库状态与具体模组无关：即使 QModem 还没识别到任何模组也必须可读，
+		// 否则「未识别到模组」时用户连手动注入支持库的入口都看不到。
+		var supportPromise = controls.getSupportStatus();
+
+		return Promise.all([ supportPromise, controls.resolveSection() ])
+		.then(function(rr) {
+			var support = rr[0] || {};
+			var section = rr[1];
 			self.section = section;
 
 			if (!section)
-				return { section: null, errors: errors };
+				return { section: null, support: support, errors: errors };
 
 			return Promise.all([
 				guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
@@ -192,6 +199,7 @@ return view.extend({
 			]).then(function(r) {
 				return {
 					section: section,
+					support: support,
 					disabled: r[0],
 					rebootCaps: r[1],
 					atCfg: r[2],
@@ -205,7 +213,7 @@ return view.extend({
 			});
 		}).catch(function(err) {
 			errors.push('加载失败：' + ((err && err.message) || String(err)));
-			return { section: null, errors: errors };
+			return { section: null, support: {}, errors: errors };
 		});
 	},
 
@@ -292,6 +300,85 @@ return view.extend({
 				}, opts.apply || _('应用'))
 			])
 		], opts.wide);
+	},
+
+	/* ---------------- 模组支持库（内置型号注入） ---------------- */
+
+	/*
+	 * 部分 QModem 版本的 /usr/share/qmodem/modem_support.json 未收录某些型号
+	 * （例如 Quectel RG520N-CN）：未收录时 QModem 不会为其生成 modem-device，
+	 * 页面里也就看不到这个模组。本卡片显示内置型号的注入状态并支持一键同步，
+	 * 用来替代手工 vi 编辑支持库的做法。
+	 *
+	 * 数据与动作来自本包自带的 rpcd 插件 qmodem_support（status / sync），
+	 * 与具体模组无关 —— 即使一个模组都没识别到也照常显示。
+	 */
+	supportCard: function(support) {
+		var self = this;
+		support = support || {};
+
+		var available = String(support.available) === '1';
+		var skipped = support.skipped || [];
+		var missing = support.missing || [];
+		var builtin = [].concat(skipped).concat(missing);
+		var path = support.path || '/usr/share/qmodem/modem_support.json';
+
+		var body = [];
+
+		if (!available) {
+			body.push(E('div', { 'class': 'mt-control-note' },
+				_('未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem，或在终端执行 /usr/sbin/qmodem-modem-support 查看原因。').format(path)));
+		} else if (support.error) {
+			body.push(E('div', { 'class': 'mt-control-note' },
+				_('读取支持库失败：%s').format(support.error)));
+		} else {
+			body.push(controls.state(_('支持库路径'), path));
+			body.push(controls.state(_('内置型号'), builtin.length ? builtin.join('、') : '--'));
+			body.push(controls.state(_('已入库'), skipped.length ? skipped.join('、') : _('无')));
+			body.push(missing.length
+				? E('div', { 'class': 'mt-control-note' },
+					_('以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备，QModem 才会识别该模组。').format(missing.join('、')))
+				: E('div', { 'class': 'mt-control-note' },
+					_('内置型号均已存在于支持库中，无需同步。')));
+		}
+
+		body.push(E('div', { 'class': 'mt-control-actions' }, [
+			E('button', {
+				'type': 'button',
+				'class': 'btn cbi-button-apply',
+				'click': function() { self.supportSync(); }
+			}, _('同步支持库')),
+			E('button', {
+				'type': 'button',
+				'class': 'btn',
+				'click': function() { window.location.reload(); }
+			}, _('刷新状态'))
+		]));
+
+		return controls.card(_('模组支持库'),
+			_('把本插件内置的模组定义写入 QModem 的模组支持库，用于 QModem 版本尚未收录某些型号的场合（例如 Quectel RG520N-CN）。写入前自动备份，已存在的型号不会重复写入。'),
+			body, true);
+	},
+
+	/* 执行一次同步：由 rpcd qmodem_support.sync 完成写入，成功后刷新页面 */
+	supportSync: function() {
+		return controls.syncSupport().then(function(res) {
+			res = res || {};
+			var added = res.added || [];
+
+			if (added.length)
+				ui.addNotification(null, E('p', {},
+					_('已写入支持库：%s。请重启 QModem（/etc/init.d/qmodem restart）或重启设备使其生效。').format(added.join('、'))));
+			else if (res.error)
+				ui.addNotification(null, E('p', {}, _('同步未生效：%s').format(res.error)), 'warning');
+			else
+				ui.addNotification(null, E('p', {}, _('支持库已是最新，本次未做修改。')));
+
+			window.location.reload();
+		}).catch(function(err) {
+			ui.addNotification(null, E('p', {},
+				_('同步支持库失败：%s').format((err && err.message) || String(err))), 'danger');
+		});
 	},
 
 	/* ---------------- 模组能力与重启 ---------------- */
@@ -595,7 +682,16 @@ return view.extend({
 					E('p', {}, _('模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。'))
 				]),
 				E('div', { 'class': 'alert-message warning mt-hardware-warning' },
-					_('未检测到模组（请确认 QModem 已识别该设备）。')) ]
+					_('未检测到模组（请确认 QModem 已识别该设备）。')),
+				E('section', { 'class': 'mt-control-section' }, [
+					E('div', { 'class': 'mt-control-section-head' }, [
+						E('h3', {}, _('模组支持库')),
+						E('p', {}, _('QModem 依赖模组支持库识别模组型号。若本模组尚未被 QModem 收录，可在此写入内置定义。'))
+					]),
+					E('div', { 'class': 'mt-control-grid' }, [
+						this.supportCard(res.support)
+					])
+				]) ]
 			));
 
 		var section = res.section;
@@ -633,6 +729,15 @@ return view.extend({
 		].concat(warnings).concat([
 			E('div', { 'class': 'alert-message warning mt-hardware-warning' },
 				_('修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。')),
+			E('section', { 'class': 'mt-control-section' }, [
+				E('div', { 'class': 'mt-control-section-head' }, [
+					E('h3', {}, _('模组支持库')),
+					E('p', {}, _('QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。'))
+				]),
+				E('div', { 'class': 'mt-control-grid' }, [
+					this.supportCard(res.support)
+				])
+			]),
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模组能力与维护')),

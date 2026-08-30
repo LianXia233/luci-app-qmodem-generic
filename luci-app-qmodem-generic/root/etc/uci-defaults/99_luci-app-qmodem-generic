@@ -6,12 +6,19 @@
 [ -x /usr/sbin/qmodem-mt5700-fix ] && /usr/sbin/qmodem-mt5700-fix
 /etc/init.d/qmodem-mt5700-fix enable 2>/dev/null || true
 
+# 模组支持库：把内置模组定义（例如 Quectel RG520N-CN）合并进 QModem 的
+# /usr/share/qmodem/modem_support.json，使 QModem 尚未收录的型号可被识别。
+# 真正的合并逻辑位于 /usr/sbin/qmodem-modem-support（幂等，写入前自动备份）。
+[ -x /usr/sbin/qmodem-modem-support ] && /usr/sbin/qmodem-modem-support
+/etc/init.d/qmodem-modem-support enable 2>/dev/null || true
+
 # 流量统计后台采集服务：持久化分天流量（重启不丢失，中国时区分天）
 /etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
 
 # rpcd 插件必须可执行，否则 rpcd 不会加载（qos/签约速率、流量统计面板将无数据）
 [ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
 [ -f /usr/libexec/rpcd/qmodem_stats ] && chmod 755 /usr/libexec/rpcd/qmodem_stats
+[ -f /usr/libexec/rpcd/qmodem_support ] && chmod 755 /usr/libexec/rpcd/qmodem_support
 [ -f /usr/bin/qmodem-stats-collect ] && chmod 755 /usr/bin/qmodem-stats-collect
 [ -f /usr/bin/qmodem-stats-loop ] && chmod 755 /usr/bin/qmodem-stats-loop
 mkdir -p /etc/qmodem-stats 2>/dev/null || true

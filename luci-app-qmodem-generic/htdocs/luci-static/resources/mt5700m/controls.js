@@ -57,6 +57,11 @@ var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_t
 var callDailyStats = rpc.declare({ object: 'qmodem_stats', method: 'daily_stats', params: ['config_section'], expect: { } });
 var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { } });
 
+// 模组支持库注入（/usr/libexec/rpcd/qmodem_support 提供）：
+// status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并
+var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { } });
+var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { } });
+
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { } });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { } });
 var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { } });
@@ -242,6 +247,17 @@ function getDailyStats(section) {
 }
 function statsReset(section) { return callStatsReset(section); }
 function getTrafficResetSchedule(section) { return callGetTrafficResetSchedule(section); }
+
+// 模组支持库（/usr/share/qmodem/modem_support.json）注入状态与同步。
+// 该能力与具体模组无关，即使 QModem 尚未识别到任何模组也应可调用：
+// status 只读取，sync 会改写支持库（后端写入前自动备份，校验失败回滚）。
+function getSupportStatus() {
+	return callSupportStatus().catch(function() {
+		return { available: 0, path: '', added: [], skipped: [], missing: [],
+			error: 'qmodem_support 不可用（请确认 rpcd 已重启并已升级本插件）' };
+	});
+}
+function syncSupport() { return callSupportSync(); }
 
 /* ------------------------------------------------------------------ */
 /* 控制动作封装（写操作，返回 Promise）                                */
@@ -742,6 +758,8 @@ return baseclass.extend({
 	getDailyStats: getDailyStats,
 	statsReset: statsReset,
 	getTrafficResetSchedule: getTrafficResetSchedule,
+	getSupportStatus: getSupportStatus,
+	syncSupport: syncSupport,
 
 	sendAt: sendAt,
 	sendSms: sendSms,

@@ -1,0 +1,255 @@
+#!/bin/sh
+# 把本包内置的模组定义合并进 QModem 的模组支持库。
+#
+# 背景
+# ----
+# QModem 通过 /usr/share/qmodem/modem_support.json 识别模组型号。部分
+# QModem 版本尚未收录部分型号（例如 Quectel RG520N-CN），未收录时 QModem
+# 不会为该模组生成 modem-device，LuCI 中也就看不到这个模组。以往只能手动
+# vi 编辑该文件，本脚本把这件事变成安装 / 开机时自动完成。
+#
+# 用法
+# ----
+#   /usr/sbin/qmodem-modem-support            # 同步，日志写入 syslog
+#   /usr/sbin/qmodem-modem-support --status   # 只查询，不修改（同样只输出 JSON）
+#   /usr/sbin/qmodem-modem-support --json     # 同步并输出单行 JSON 摘要（rpcd 用）
+#
+# 行为约定
+# --------
+# - 幂等：支持库中已存在的型号一律跳过，绝不重复写入。
+# - 安全：写入前生成 /usr/share/qmodem/modem_support.json.bak；
+#         写入后用 jsonfilter（若存在）校验，校验失败自动回滚备份。
+# - 保守：QModem 未安装（支持库文件不存在）时直接退出 0，不创建任何文件。
+#
+# 数据源位于 /usr/share/qmodem-generic/extra_modem_support.json，
+# 结构与 QModem 的 modem_support.json 完全一致（4 空格缩进）：
+#   { "modem_support": { "usb": { "<model>": { ... } }, "pcie": { ... } } }
+
+TAG='qmodem-modem-support'
+TARGET="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
+EXTRA="${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_support.json}"
+BACKUP="$TARGET.bak"
+TMP="$TARGET.tmp.$$"
+LOCKDIR="${QMODEM_SUPPORT_LOCKDIR:-/var/run/qmodem-modem-support.lock}"
+
+JSON_OUT=0
+STATUS_ONLY=0
+for _arg in "$@"; do
+	case "$_arg" in
+		--json) JSON_OUT=1 ;;
+		--status) STATUS_ONLY=1; JSON_OUT=1 ;;
+	esac
+done
+
+ADDED=''
+SKIPPED=''
+MISSING=''
+ERR=''
+BACKED_UP=0
+LOCKED=0
+
+log() {
+	[ "$JSON_OUT" = "1" ] || printf '%s\n' "$1"
+	logger -t "$TAG" "$1" 2>/dev/null || true
+}
+
+# 空格分隔列表 → JSON 数组内容（型号名均为 [a-z0-9._-]，无需转义）
+json_array() {
+	local out='' first=1 item
+	for item in $1; do
+		if [ "$first" = 1 ]; then out="\"$item\""; first=0
+		else out="$out,\"$item\""; fi
+	done
+	printf '%s' "$out"
+}
+
+emit() {
+	local available="$1"
+	printf '{"available":%s,"path":"%s","added":[%s],"skipped":[%s],"missing":[%s],"error":%s}\n' \
+		"$available" "$TARGET" "$(json_array "$ADDED")" "$(json_array "$SKIPPED")" \
+		"$(json_array "$MISSING")" \
+		"$( [ -n "$ERR" ] && printf '"%s"' "$ERR" || printf 'null' )"
+}
+
+# 枚举数据源中的待处理型号，每行输出 "<group> <model>"（只处理 usb / pcie 组）
+list_models() {
+	awk '
+		/^ {8}"(usb|pcie)": \{[ \t]*$/ {
+			grp = $0
+			sub(/^[ \t]*"/, "", grp)
+			sub(/".*$/, "", grp)
+			next
+		}
+		grp != "" && /^ {12}"[^"]+": \{[ \t]*$/ {
+			mdl = $0
+			sub(/^[ \t]*"/, "", mdl)
+			sub(/".*$/, "", mdl)
+			print grp " " mdl
+		}
+	' "$EXTRA"
+}
+
+# 打印目标文件中指定分组的内容（不含 "usb": { 这一行本身）
+group_body() {
+	awk -v grp="$1" '
+		BEGIN { out = 0 }
+		out == 0 {
+			if ($0 ~ "^        \"" grp "\": \\{[ \t]*$") { out = 1; next }
+			next
+		}
+		out == 1 {
+			if ($0 ~ /^        \}[,]?[ \t]*$/) exit
+			print
+		}
+	' "$TARGET"
+}
+
+# 目标文件的指定分组里是否已有该型号（只在该分组内查找，避免跨组误判）
+has_model() {
+	group_body "$1" | grep -q "\"$2\"[ \t]*:[ \t]*{"
+}
+
+# 从数据源中抽取该型号的完整定义块（保留原缩进）
+model_block() {
+	awk -v mdl="$1" '
+		BEGIN { out = 0; indent = 0 }
+		out == 0 {
+			p = index($0, "\"" mdl "\": {")
+			if (p > 1) {
+				out = 1
+				indent = p - 1
+				print
+			}
+			next
+		}
+		out == 1 {
+			print
+			pre = substr($0, 1, indent)
+			rest = substr($0, indent + 1)
+			if (pre ~ /^[ \t]*$/ && substr(rest, 1, 1) == "}") exit
+		}
+	' "$EXTRA"
+}
+
+# 把块插到目标文件指定分组的开头；返回值非 0 表示未找到该分组
+insert_block() {
+	awk -v grp="$1" -v blk="$2" '
+		BEGIN { done = 0 }
+		{
+			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*$") {
+				print $0
+				print blk ","
+				done = 1
+				next
+			}
+			print
+		}
+		END { if (done == 0) exit 3 }
+	' "$TARGET" > "$TMP"
+}
+
+# 写入后校验：文件非空、以 } 收尾、jsonfilter（若有）能解析出 modem_support
+validate() {
+	[ -s "$TARGET" ] || return 1
+	tail -n 1 "$TARGET" 2>/dev/null | grep -q '}[ \t]*$' || return 1
+	if command -v jsonfilter >/dev/null 2>&1; then
+		jsonfilter -i "$TARGET" -e '@.modem_support' 2>/dev/null | grep -q . || return 1
+	fi
+	return 0
+}
+
+# ---------------------------------------------------------------- 前置检查
+if [ ! -f "$EXTRA" ]; then
+	ERR="内置模组定义缺失：$EXTRA"
+	log "$ERR"
+	emit 0
+	exit 1
+fi
+
+if [ ! -f "$TARGET" ]; then
+	# QModem 未安装（或支持库尚未生成）：不做任何事，保持路由器的原始状态
+	log "未找到 $TARGET，跳过（请先安装 QModem）"
+	emit 0
+	exit 0
+fi
+
+if ! validate; then
+	ERR="现有支持库无法解析，已放弃修改：$TARGET"
+	log "$ERR"
+	emit 1
+	exit 1
+fi
+
+# ---------------------------------------------------------------- 遍历型号
+BACKED_UP=0
+while read -r GROUP MODEL; do
+	[ -n "$GROUP" ] && [ -n "$MODEL" ] || continue
+
+	if has_model "$GROUP" "$MODEL"; then
+		SKIPPED="$SKIPPED $MODEL"
+		log "支持库已包含 $MODEL（$GROUP），跳过"
+		continue
+	fi
+
+	if [ "$STATUS_ONLY" = "1" ]; then
+		MISSING="$MISSING $MODEL"
+		continue
+	fi
+
+	BLOCK=$(model_block "$MODEL")
+	if [ -z "$BLOCK" ]; then
+		log "内置定义中未能提取 $MODEL，跳过"
+		continue
+	fi
+
+	# 首个需要写入的型号处取锁，避免开机服务与安装脚本并发改写同一文件
+	if [ "$LOCKED" = "0" ]; then
+		mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || true
+		if ! mkdir "$LOCKDIR" 2>/dev/null; then
+			ERR="另一个同步进程正在运行，已跳过本次写入"
+			log "$ERR"
+			emit 1
+			exit 0
+		fi
+		LOCKED=1
+		trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+	fi
+
+	if [ "$BACKED_UP" = "0" ]; then
+		cp -f "$TARGET" "$BACKUP" 2>/dev/null || true
+		BACKED_UP=1
+	fi
+
+	if ! insert_block "$GROUP" "$BLOCK"; then
+		rm -f "$TMP"
+		ERR="在 $TARGET 中未找到分组 $GROUP，已放弃修改"
+		log "$ERR"
+		emit 1
+		exit 1
+	fi
+
+	# 用 cat 覆盖而不是 mv，保留原文件的 inode 与权限位
+	cat "$TMP" > "$TARGET" 2>/dev/null || true
+	rm -f "$TMP"
+
+	if ! validate; then
+		[ -f "$BACKUP" ] && cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
+		ERR="写入后校验失败，已回滚：$TARGET"
+		log "$ERR"
+		emit 1
+		exit 1
+	fi
+
+	ADDED="$ADDED $MODEL"
+	log "已向支持库（$GROUP）注入 $MODEL，原文件备份为 $BACKUP"
+done <<EOF
+$(list_models)
+EOF
+
+# ---------------------------------------------------------------- 结果输出
+if [ -n "$ADDED" ]; then
+	log "本次新增 $(echo "$ADDED" | wc -w | tr -d ' ') 个型号；QModem 需重启或重启设备后生效"
+fi
+
+emit 1
+exit 0

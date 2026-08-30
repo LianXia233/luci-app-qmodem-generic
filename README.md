@@ -16,6 +16,7 @@
 - [安装](#安装)
 - [流量统计（本机持久化分天记录）](#流量统计本机持久化分天记录)
 - [MT5700 系列 SIM 初始化（自动修复）](#mt5700-系列-sim-初始化自动修复)
+- [模组支持库自动注入（RG520N-CN 等）](#模组支持库自动注入rg520n-cn-等)
 - [自行编译](#自行编译)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
 - [已知事项](#已知事项)
@@ -34,7 +35,7 @@
 | 射频与小区 Radio and Cells | 频段、邻区、锁频锁小区、诊断 |
 | 短信 Messages | 基于 SIM 的收发与会话视图 |
 | 模组与 SIM | 模组身份、SIM 信息与维护操作 |
-| 高级 Advanced | 诊断控制台、IP 透传 / Post-Route / DMZ 等 |
+| 高级 Advanced | 模组支持库同步、诊断控制台、IP 透传 / Post-Route / DMZ 等 |
 | AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入） |
 | 设备参数设置 | QModem `modem-device` 配置节（从「高级 / 模组与 SIM」页进入） |
 
@@ -44,6 +45,7 @@
 - 动态字段自适应：QModem 返回的任何未知字段按 `full_name` 原样展示，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
 - MT5700 系列海思模组 SIM 卡槽上电自动初始化（开机服务 + 首次安装脚本）。
+- 内置模组定义自动注入 QModem 支持库（当前含 Quectel RG520N-CN），替代手工 `vi /usr/share/qmodem/modem_support.json`。
 
 ## 安装后文件布局
 
@@ -55,8 +57,9 @@
   init.d/
     qmodem-stats-collect        # 流量采样 procd 服务（开机自启）
     qmodem-mt5700-fix           # MT5700 SIM 初始化开机服务（START=99）
+    qmodem-modem-support        # 模组支持库同步开机服务（START=90，早于 QModem）
   uci-defaults/
-    99_luci-app-qmodem-generic  # 首次安装：执行修复并 enable 上述服务
+    99_luci-app-qmodem-generic  # 首次安装：执行修复/同步并 enable 上述服务
   qmodem-stats/                 # 流量数据目录（overlay 持久分区，可直接备份）
 /usr/
   bin/
@@ -64,8 +67,13 @@
     qmodem-stats-loop           # 按间隔驱动采集器的常驻循环
   sbin/
     qmodem-mt5700-fix           # SIM 初始化修复脚本（幂等）
+    qmodem-modem-support        # 模组支持库合并脚本（幂等，写入前备份）
   libexec/rpcd/
     qmodem_stats                # rpcd 插件：daily_stats / stats_history / stats_reset
+    qmodem_support              # rpcd 插件：status / sync（模组支持库状态与同步）
+  share/
+    qmodem-generic/
+      extra_modem_support.json  # 本包内置的待注入模组定义（当前含 rg520n-cn）
 /www/luci-static/resources/mt5700m/   # 前端资源（历史前缀，见「已知事项」）
 ```
 
@@ -138,6 +146,62 @@ QModem 在拨号前会逐条执行 `pre_dial_at_cmds`，从而在上电后正确
   ```sh
   /usr/sbin/qmodem-mt5700-fix
   ```
+
+## 模组支持库自动注入（RG520N-CN 等）
+
+QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号。该文件未收录某个型号时，QModem 不会为其生成 `modem-device`，LuCI 里也就看不到这个模组 —— 例如 Quectel **RG520N-CN**（VID `2c7c`、USB 接口、高通平台）在部分 QModem 版本中就没有条目。
+
+本包内置了这些型号的定义，安装时与每次开机自动合并进 QModem 支持库，不需要手工 `vi` 编辑 JSON。
+
+**自动流程**
+
+1. 首次安装：`/etc/uci-defaults/99_luci-app-qmodem-generic` 立即执行一次合并。
+2. 每次开机：`/etc/init.d/qmodem-modem-support`（`START=90`，早于 QModem 自身启动）再执行一次。
+3. 随时手动：LuCI **移动网络 → 模组管理 → 高级 → 模组支持库** 点「同步支持库」，或终端执行 `/usr/sbin/qmodem-modem-support`。
+
+写入的定义（与 QModem 上游 `usb` 组条目格式完全一致）：
+
+```json
+"rg520n-cn": {
+  "manufacturer_id": "2c7c",
+  "manufacturer": "quectel",
+  "platform": "qualcomm",
+  "data_interface": "usb",
+  "pdp_index": "1",
+  "wcdma_band": "1/8",
+  "lte_band": "1/3/5/8/34/38/39/40/41",
+  "nsa_band": "1/8/28/41/78",
+  "sa_band": "1/8/28/41/78",
+  "modes": [ "qmi", "gobinet", "ecm", "mbim", "rndis", "ncm" ]
+}
+```
+
+**安全性与边界**
+
+| 行为 | 说明 |
+| --- | --- |
+| 幂等 | 型号已存在时直接跳过，绝不重复写入 |
+| 备份 | 首次写入前生成 `modem_support.json.bak`，用于回滚 |
+| 校验 | 写入后校验（有 `jsonfilter` 时按 JSON 解析校验），失败自动回滚备份 |
+| 不改动既有内容 | 只在对应分组（`usb` / `pcie`）开头插入新条目，其余字节不动 |
+| QModem 未安装 | 支持库文件不存在时直接退出，不创建任何文件 |
+| 并发保护 | 用 `/var/run/qmodem-modem-support.lock` 目录锁避免开机服务与安装脚本并发改写 |
+| 跨组不误判 | 按分组内查找：`usb` 组已有同名条目时不会影响 `pcie` 组 |
+
+**生效条件**：QModem 只在启动 / 重扫时读取支持库，注入后需重启 QModem 或重启设备：
+
+```sh
+/etc/init.d/qmodem restart   # 或直接 reboot
+```
+
+**追加其它型号**：直接编辑 `/usr/share/qmodem-generic/extra_modem_support.json`，按同样结构追加条目，再执行 `/usr/sbin/qmodem-modem-support` 即可（结构与 QModem 支持库一致：`modem_support.usb` / `modem_support.pcie`，4 空格缩进）。
+
+| 文件 | 作用 |
+| --- | --- |
+| `/usr/share/qmodem-generic/extra_modem_support.json` | 本包内置的待注入模组定义（当前含 `rg520n-cn`） |
+| `/usr/sbin/qmodem-modem-support` | 合并逻辑：`--status` 只查询，`--json` 机器可读输出 |
+| `/etc/init.d/qmodem-modem-support` | 开机同步服务（`START=90`） |
+| `/usr/libexec/rpcd/qmodem_support` | rpcd 插件：`status` / `sync`，供 LuCI 调用 |
 
 ## 自行编译
 

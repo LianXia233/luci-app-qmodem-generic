@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.4.11
-PKG_RELEASE:=11
+PKG_RELEASE:=12
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -23,17 +23,23 @@ LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
-# 确保 rpcd 脚本、uci-defaults 钩子、MT5700 修复脚本/服务、流量统计采集服务
-# 具有执行权限并注册 ubus 服务
+# 确保 rpcd 脚本、uci-defaults 钩子、MT5700 修复脚本/服务、模组支持库同步
+# 脚本/服务、流量统计采集服务具有执行权限并注册 ubus 服务
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
 [ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
 [ -f /usr/libexec/rpcd/qmodem_stats ] && chmod 755 /usr/libexec/rpcd/qmodem_stats
+[ -f /usr/libexec/rpcd/qmodem_support ] && chmod 755 /usr/libexec/rpcd/qmodem_support
 [ -f /usr/bin/qmodem-stats-collect ] && chmod 755 /usr/bin/qmodem-stats-collect
 [ -f /usr/bin/qmodem-stats-loop ] && chmod 755 /usr/bin/qmodem-stats-loop
 [ -f /etc/uci-defaults/99_luci-app-qmodem-generic ] && chmod 755 /etc/uci-defaults/99_luci-app-qmodem-generic
 [ -f /usr/sbin/qmodem-mt5700-fix ] && chmod 755 /usr/sbin/qmodem-mt5700-fix
 [ -f /etc/init.d/qmodem-mt5700-fix ] && chmod 755 /etc/init.d/qmodem-mt5700-fix
+[ -f /usr/sbin/qmodem-modem-support ] && chmod 755 /usr/sbin/qmodem-modem-support
+[ -f /etc/init.d/qmodem-modem-support ] && chmod 755 /etc/init.d/qmodem-modem-support
+# 立即同步一次模组支持库（幂等），并注册开机服务
+[ -x /usr/sbin/qmodem-modem-support ] && /usr/sbin/qmodem-modem-support
+/etc/init.d/qmodem-modem-support enable 2>/dev/null || true
 [ -f /etc/init.d/qmodem-stats-collect ] && chmod 755 /etc/init.d/qmodem-stats-collect
 /etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
 mkdir -p /etc/qmodem-stats 2>/dev/null || true
