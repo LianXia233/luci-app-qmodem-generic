@@ -18,6 +18,10 @@ on:
         type: boolean
         required: false
         default: false
+      keep_releases:
+        description: '发布后保留最近几个 Release（其余自动删除，含对应 tag）'
+        required: false
+        default: '1'
 
 # 加入并发控制：相同 workflow 多次触发时自动取消旧任务
 concurrency:
@@ -215,14 +219,34 @@ jobs:
           VER=$(awk -F':=' '/^PKG_VERSION/ {gsub(/[[:space:]]/, "", $2); print $2}' "$PKG_DIR/Makefile")
           REL=$(awk -F':=' '/^PKG_RELEASE/ {gsub(/[[:space:]]/, "", $2); print $2}' "$PKG_DIR/Makefile")
           TAG="${{ inputs.release_tag }}"
-          
-          if [ -z "$TAG" ]; then
-            TAG="v${VER}-${REL}-build${{ github.run_number }}"
+
+          # tag 与显示名称分离：
+          #   tag  保持机器可读，正式版用固定 tag（v2.4.11-r13），重复构建时原地
+          #        更新而不是每次新建，从源头上避免 Release 历史堆积；预发布才带
+          #        运行号以便区分。
+          #   name 用人类可读格式，不再直接把裸 tag 当标题显示。
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            NAME="luci-app-qmodem-generic v${VER}-r${REL} Nightly (build ${{ github.run_number }})"
+            if [ -z "$TAG" ]; then
+              TAG="v${VER}-r${REL}-nightly.${{ github.run_number }}"
+            fi
+          else
+            NAME="luci-app-qmodem-generic v${VER}-r${REL}"
+            if [ -z "$TAG" ]; then
+              TAG="v${VER}-r${REL}"
+            fi
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
           {
             echo "## luci-app-qmodem-generic ${VER}-${REL}"
+            echo
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo '> **预发布版本（Nightly）**：仅供测试，生产环境请使用正式版。'
+            else
+              echo '> **正式版（Stable）**'
+            fi
             echo
             echo "QModem 通用美化版 LuCI Web UI，适用于任意被 QModem 识别的模组。"
             echo
@@ -264,8 +288,45 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
           body_path: release-notes.md
           prerelease: ${{ inputs.prerelease }}
           files: dist/*
           fail_on_unmatched_files: true
+
+      # 发布后清理历史 Release，避免长期累积。
+      # releases 接口按创建时间倒序返回，跳过前 KEEP 个即可保留最新。
+      - name: Clean up old releases
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          KEEP="${{ inputs.keep_releases }}"
+          case "$KEEP" in
+            ''|*[!0-9]*) echo "::warning::keep_releases 取值非法，跳过清理"; exit 0 ;;
+          esac
+          # 兜底：至少保留 1 个，避免误填 0 导致 Release 被清空
+          if [ "$KEEP" -lt 1 ]; then
+            echo "::warning::keep_releases < 1，已按 1 处理"
+            KEEP=1
+          fi
+          echo "策略：保留最新 $KEEP 个 Release"
+
+          mapfile -t IDS < <(gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '.[].id')
+          total=${#IDS[@]}
+          echo "当前共 $total 个 Release"
+
+          if [ "$total" -le "$KEEP" ]; then
+            echo "数量未超过保留阈值，无需清理"
+            exit 0
+          fi
+
+          for id in "${IDS[@]:$KEEP}"; do
+            tag=$(gh api "repos/${{ github.repository }}/releases/$id" --jq '.tag_name')
+            echo "删除 Release id=$id tag=$tag"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$id" \
+              || echo "::warning::删除 release $id 失败"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" \
+              || echo "::warning::删除 tag $tag 失败"
+          done
