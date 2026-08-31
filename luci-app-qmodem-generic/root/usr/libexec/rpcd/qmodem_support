@@ -5,6 +5,38 @@
 #   sync    执行一次合并（写入前自动备份，写入后校验，失败回滚）
 #
 # 支持库：/usr/share/qmodem/modem_support.json（由 QModem 提供）
+#
+# 为什么不能只用 [ -x ] 判定「支持库是否可用」
+# ------------------------------------------
+# 本包脚本在部分固件镜像里会以 0644 落地：仓库中的源码文件未带可执行位
+# （git mode 100644），而随固件镜像打包时 postinst 不会被执行，于是脚本
+# 文件一直都在，却缺少 x 位。此前 rpcd 用 [ ! -x ... ] 一刀切判死，导致
+# 「模组支持库」卡片明明可用，却显示「未检测到 QModem 的模组支持库」。
+#
+# 现在的处理顺序是：文件存在即先补权限 → 补不上（只读文件系统）就退化为
+# sh 解释执行 → 都不行才按缺失报错。这样已刷机的设备无需重刷即可自愈。
+
+SYNC_BIN=/usr/sbin/qmodem-modem-support
+SUPPORT_LIB=/usr/share/qmodem/modem_support.json
+
+# 统一输出“不可用”结果；字段结构与同步脚本保持一致，前端无需改动
+unavailable() {
+	printf '{"available":0,"path":"%s","added":[],"skipped":[],"missing":[],"error":"%s"}\n' \
+		"$SUPPORT_LIB" "$1"
+}
+
+run_sync() {
+	# $1 = 传给同步脚本的参数：--status 或 --json
+	if [ ! -x "$SYNC_BIN" ]; then
+		chmod 755 "$SYNC_BIN" 2>/dev/null || true
+	fi
+
+	if [ -x "$SYNC_BIN" ]; then
+		"$SYNC_BIN" "$1"
+	else
+		sh "$SYNC_BIN" "$1"
+	fi
+}
 
 case "$1" in
 	list)
@@ -12,15 +44,20 @@ case "$1" in
 		;;
 	call)
 		read input
-		if [ ! -x /usr/sbin/qmodem-modem-support ]; then
-			echo '{"available":0,"path":"","added":[],"skipped":[],"missing":[],"error":"qmodem-modem-support 未安装"}'
+		if [ ! -f "$SYNC_BIN" ]; then
+			unavailable "同步脚本缺失：$SYNC_BIN（请重新安装 luci-app-qmodem-generic）"
+			exit 0
+		fi
+
+		if [ ! -f "$SUPPORT_LIB" ]; then
+			unavailable "未找到模组支持库 $SUPPORT_LIB，请先安装 QModem"
 			exit 0
 		fi
 
 		case "$2" in
-			status) /usr/sbin/qmodem-modem-support --status ;;
-			sync)   /usr/sbin/qmodem-modem-support --json ;;
-			*) echo '{"available":0,"path":"","added":[],"skipped":[],"missing":[],"error":"unknown method"}' ;;
+			status) run_sync --status ;;
+			sync)   run_sync --json ;;
+			*) unavailable "unknown method" ;;
 		esac
 		;;
 esac

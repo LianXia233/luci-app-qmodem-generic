@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.4.11
-PKG_RELEASE:=12
+PKG_RELEASE:=13
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -24,7 +24,13 @@ LUCI_PKGARCH:=all
 include $(TOPDIR)/feeds/luci/luci.mk
 
 # 确保 rpcd 脚本、uci-defaults 钩子、MT5700 修复脚本/服务、模组支持库同步
-# 脚本/服务、流量统计采集服务具有执行权限并注册 ubus 服务
+# 脚本/服务、流量统计采集服务具有执行权限并注册 ubus 服务。
+#
+# 重要：本包随固件镜像打包时 postinst 不会被执行，镜像里的文件会保持源码
+# 自身的权限位。因此这些脚本在仓库中必须以 100755 提交——否则 /usr/sbin 下
+# 的脚本会落地成 0644，rpcd 的 [ -x ] 判定与 procd 启动都会失败，「模组
+# 支持库」卡片会误报「未检测到 QModem 的模组支持库」。下面的 chmod 只是
+# 通过包管理器安装时的兜底，不能作为唯一保障。
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
 [ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
