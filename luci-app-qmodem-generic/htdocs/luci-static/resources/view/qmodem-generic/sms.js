@@ -2,12 +2,12 @@
 'require view';
 'require ui';
 'require dom';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 短信（Messages）
  *
- * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（封装于 mt5700m.controls）：
+ * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（封装于 qmodem-generic.controls）：
  *   get_sms   → 会话列表 / 消息内容
  *   send_sms  → 发送短信
  *   delete_sms→ 删除模组内短信

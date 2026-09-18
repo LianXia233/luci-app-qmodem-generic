@@ -3,12 +3,12 @@
 'require form';
 'require uci';
 'require ui';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 移动数据（Mobile Data）
  *
- * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 mt5700m.controls 封装）：
+ * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 qmodem-generic.controls 封装）：
  *   get_connect_status / get_dns / get_mode / dial_status / network.interface status
  * APN 等拨号参数读写 /etc/config/qmodem 的 modem-device 配置节。
  * 旧的 AT 文本后端与旧 ubus 对象已全部移除。

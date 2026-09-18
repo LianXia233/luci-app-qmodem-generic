@@ -1,7 +1,7 @@
 'use strict';
 'require view';
 'require ui';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 模组与 SIM 页面 — 数据与动作全部经 QModem 的 `qmodem` ubus 对象。
@@ -387,7 +387,7 @@ return view.extend({
 			E('section', { 'class':'mt-system-maintenance mt-ui-card' }, [
 				E('div', {}, [ E('h3', {}, _('Protection and maintenance')), E('p', {}, _('Module protection, recovery and communication troubleshooting tools.')) ]),
 				E('div', { 'class':'mt-system-actions' }, [
-					E('a', { 'class':'btn', 'href':L.url('admin/modem/mt5700m/settings') }, _('Communication diagnostics')),
+					E('a', { 'class':'btn', 'href':L.url('admin/modem/qmodem-generic/settings') }, _('Communication diagnostics')),
 					E('button', { 'class':'btn', 'click':function() { self.showThermalManager(temperature); } }, _('Configure thermal protection')),
 					E('button', { 'class':'btn', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('Device identity laboratory')),
 					E('button', { 'class':'btn cbi-button-negative', 'click':function() { self.showFactoryReset(); } }, _('Restore factory settings'))

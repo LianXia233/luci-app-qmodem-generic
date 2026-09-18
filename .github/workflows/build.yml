@@ -81,14 +81,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ImmortalWrt 23.05 / 24.10 使用 opkg → 产物为 .ipk
-          - tag: immortalwrt-23.05-ipk
-            sdk_dir: https://downloads.immortalwrt.org/releases/23.05.7/targets/x86/64
-            optional: false
-          - tag: immortalwrt-24.10-ipk
-            sdk_dir: https://downloads.immortalwrt.org/releases/24.10.6/targets/x86/64
-            optional: false
-          # ImmortalWrt 25.12 / snapshots 使用 apk → 产物为 .apk
+          # ImmortalWrt 25.12 及更新版本使用 apk → 产物为 .apk（兼容基线 25.12+，不再构建 24.10 及更早）
           - tag: immortalwrt-25.12-apk
             sdk_dir: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
             optional: false
@@ -252,9 +245,6 @@ jobs:
             echo
             echo "### 安装"
             echo '```sh'
-            echo '# opkg（ImmortalWrt 23.05 / 24.10）'
-            echo 'opkg install luci-app-qmodem-generic_*.ipk'
-            echo
             echo '# apk（ImmortalWrt 25.12 / snapshot）'
             echo 'apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
             echo '```'

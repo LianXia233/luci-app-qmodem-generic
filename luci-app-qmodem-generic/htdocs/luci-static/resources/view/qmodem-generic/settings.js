@@ -3,15 +3,15 @@
 'require form';
 'require uci';
 'require ui';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 设备参数（Settings）
  *
  * 本页编辑的是 QModem 的 UCI 配置 /etc/config/qmodem 中当前模组的
- * modem-device 配置节，不再使用旧的 /etc/config/mt5700m。
+ * modem-device 配置节，不再使用旧版包专用的 /etc/config 配置节。
  * 配置节 id 由 controls.resolveSection() 解析（任意 QModem 支持的模组）。
- * 仅暴露 QModem 真实存在的选项，不再提供 mt5700m 私有的 host/port/timeout。
+ * 仅暴露 QModem 真实存在的选项，不再提供旧版私有的 host/port/timeout。
  */
 
 /* 显示值：空/未知一律显示 -- */
@@ -170,8 +170,8 @@ return view.extend({
 					}, _('保存设备参数')))
 				]),
 				E('div', { 'class': 'mt-diag-back' }, [
-					E('a', { 'class': 'btn', 'href': L.url('admin/modem/mt5700m/system') }, _('返回模组与 SIM')),
-					E('a', { 'class': 'btn', 'href': L.url('admin/modem/mt5700m/advanced') }, _('返回高级设置'))
+					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/system') }, _('返回模组与 SIM')),
+					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/advanced') }, _('返回高级设置'))
 				])
 			]));
 		}).catch(function(err) {

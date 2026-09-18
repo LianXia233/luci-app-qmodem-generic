@@ -74,33 +74,30 @@
   share/
     qmodem-generic/
       extra_modem_support.json  # 本包内置的待注入模组定义（当前含 rg520n-cn）
-/www/luci-static/resources/mt5700m/   # 前端资源（历史前缀，见「已知事项」）
+/www/luci-static/resources/qmodem-generic/   # 前端资源（通用命名空间）
 ```
 
-> 注意：内部资源路径 / 菜单路由 / CSS 类名仍沿用 `mt5700m` 前缀，属历史包袱，改动会破坏加载与导航，故保留。
+> 前端资源路径、菜单路由、JS 模块与 CSS 类名统一使用 `qmodem-generic` 命名空间，不绑定任何具体模组型号。
 
 ## 依赖与支持的版本
 
 | 目标系统 | 包格式 | 状态 |
 | --- | --- | --- |
-| ImmortalWrt 23.05 | `.ipk` | ✅ 支持 |
-| ImmortalWrt 24.10 | `.ipk` | ✅ 支持 |
 | ImmortalWrt 25.12 | `.apk` | ✅ 支持 |
 | ImmortalWrt snapshot | `.apk` | ⚠️ 允许失败 |
+
+**兼容基线**：OpenWrt / ImmortalWrt **25.12 及更新版本**（`LUCI_DEPENDS` 要求 `luci-base (>= 25.12)`），不再支持 24.10 及更早版本。
 
 **前置依赖**：运行时依赖 [`qmodem`](https://github.com/FUjr/QModem) 后端，请**先安装 QModem** 再安装本包。本包是 `LUCI_PKGARCH:=all` 的纯前端包，一个架构编译出的产物可用于所有架构。
 
 ## 安装
 
 ```sh
-# opkg（ImmortalWrt 23.05 / 24.10）
-opkg install luci-app-qmodem-generic_*.ipk
-
 # apk（ImmortalWrt 25.12 / snapshot）
 apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk
 ```
 
-> ⚠️ 若设备上此前安装过 `luci-app-mt5700m`，请先 `opkg remove luci-app-mt5700m` 再安装本包，两者会在 `luci-static/resources/mt5700m/` 下产生文件冲突。
+> ⚠️ 若设备上此前安装过旧版 `luci-app-mt5700m`，请先 `opkg remove luci-app-mt5700m` 再安装本包，避免旧包残留的菜单与 ACL 条目干扰。
 
 安装后在 LuCI 菜单 **移动网络 → 模组管理** 下使用。
 
@@ -224,8 +221,6 @@ make package/luci-app-qmodem-generic/compile V=s
 
    | 矩阵 | SDK | 包格式 | 必需 |
    | --- | --- | --- | --- |
-   | `immortalwrt-23.05-ipk` | 23.05.7 | `.ipk` | ✅ |
-   | `immortalwrt-24.10-ipk` | 24.10.6 | `.ipk` | ✅ |
    | `immortalwrt-25.12-apk` | 25.12.1 | `.apk` | ✅ |
    | `immortalwrt-snapshot-apk` | snapshots | `.apk` | 允许失败 |
 
@@ -236,8 +231,7 @@ make package/luci-app-qmodem-generic/compile V=s
 ## 已知事项
 
 - `po/zh_Hans/qmodem-generic.po` 已与当前 JavaScript UI 字符串同步；QModem 动态返回的未知字段会按 `full_name` 原样显示，内置字段使用中文标签映射。
-- 内部资源路径 / 菜单路由 / CSS 类名仍沿用 `mt5700m` 前缀，属历史包袱，改动会破坏加载与导航，故保留。
-- `sms.js` 的导入导出文件名与 `localStorage` 键仍含 `mt5700m-` 前缀（为兼容既有备份）。
+- 前端命名空间（资源目录、JS 模块、菜单路由、CSS 类名）已统一为 `qmodem-generic`，与具体模组型号彻底解耦。
 
 ## 相关文档
 

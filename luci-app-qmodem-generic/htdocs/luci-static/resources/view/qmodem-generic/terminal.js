@@ -1,12 +1,12 @@
 'use strict';
 'require view';
 'require ui';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * AT 命令终端（AT Terminal）
  *
- * 命令下发经由 QModem 的 `qmodem` ubus 对象（封装于 mt5700m.controls）：
+ * 命令下发经由 QModem 的 `qmodem` ubus 对象（封装于 qmodem-generic.controls）：
  *   get_at_cfg → AT 端口（at_port）与可选端口列表（ports）
  *   send_at    → 发送 AT 命令并回显响应
  * 旧的 AT 文本后端（command 子命令）已移除。
@@ -95,13 +95,13 @@ return view.extend({
 			'.mt-terminal-hero h2{color:#fff;margin:0 0 6px}.mt-terminal-hero p{color:#cbd2da;margin:0;max-width:760px}',
 			'.mt-terminal-card{border:1px solid var(--border-color-low,#e4e8ec);border-radius:12px;background:var(--background-color-high,#fff);padding:18px}',
 			'.mt-terminal-warning{padding:11px 13px;border-radius:8px;background:#fff7e5;color:#795300;font-size:12px;margin-bottom:14px}',
-			'.mt5700m-terminal-row{display:flex;gap:8px;align-items:center;margin-bottom:14px}',
-			'.mt5700m-terminal-row input{flex:1;font-family:monospace}',
-			'.mt5700m-terminal-row label{font-size:12px;color:var(--text-color-medium,#6e7783);white-space:nowrap}',
-			'.mt5700m-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}',
+			'.qmodem-generic-terminal-row{display:flex;gap:8px;align-items:center;margin-bottom:14px}',
+			'.qmodem-generic-terminal-row input{flex:1;font-family:monospace}',
+			'.qmodem-generic-terminal-row label{font-size:12px;color:var(--text-color-medium,#6e7783);white-space:nowrap}',
+			'.qmodem-generic-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}',
 			'.mt-terminal-saved-item{display:inline-flex}.mt-terminal-saved-item .btn:first-child{border-radius:4px 0 0 4px}.mt-terminal-saved-item .btn:last-child{border-radius:0 4px 4px 0;margin-left:-1px;color:#a33}',
-			'.mt5700m-output{white-space:pre-wrap;word-break:break-word;background:#111820;color:#d7e1ea;border-radius:9px;padding:15px;min-height:320px;max-height:560px;overflow:auto;font-family:monospace;font-size:13px;line-height:1.55}',
-			'@media(max-width:680px){.mt5700m-terminal-row{flex-wrap:wrap}.mt5700m-terminal-row input{flex-basis:100%}.mt-terminal-hero{padding:20px}}'
+			'.qmodem-generic-output{white-space:pre-wrap;word-break:break-word;background:#111820;color:#d7e1ea;border-radius:9px;padding:15px;min-height:320px;max-height:560px;overflow:auto;font-family:monospace;font-size:13px;line-height:1.55}',
+			'@media(max-width:680px){.qmodem-generic-terminal-row{flex-wrap:wrap}.qmodem-generic-terminal-row input{flex-basis:100%}.mt-terminal-hero{padding:20px}}'
 		].join(''));
 	},
 
@@ -159,7 +159,7 @@ return view.extend({
 	},
 
 	loadSaved: function() {
-		try { return JSON.parse(window.localStorage.getItem('mt5700m.at.saved') || '[]'); }
+		try { return JSON.parse(window.localStorage.getItem('qmodem-generic.at.saved') || '[]'); }
 		catch (e) { return []; }
 	},
 
@@ -172,7 +172,7 @@ return view.extend({
 			return;
 		var saved = this.loadSaved().filter(function(item) { return item.command !== command; });
 		saved.push({ label:label.substring(0, 40), command:command });
-		window.localStorage.setItem('mt5700m.at.saved', JSON.stringify(saved.slice(-20)));
+		window.localStorage.setItem('qmodem-generic.at.saved', JSON.stringify(saved.slice(-20)));
 		this.renderSaved(container, input, output);
 	},
 
@@ -183,7 +183,7 @@ return view.extend({
 			container.appendChild(E('span', { 'class':'mt-terminal-saved-item' }, [
 				self.quickButton(item.label, item.command, input, output),
 				E('button', { 'type':'button', 'class':'btn', 'title':_('Remove saved command'), 'click':function() {
-					window.localStorage.setItem('mt5700m.at.saved', JSON.stringify(self.loadSaved().filter(function(entry) { return entry.command !== item.command; })));
+					window.localStorage.setItem('qmodem-generic.at.saved', JSON.stringify(self.loadSaved().filter(function(entry) { return entry.command !== item.command; })));
 					self.renderSaved(container, input, output);
 				} }, '×')
 			]));
@@ -226,8 +226,8 @@ return view.extend({
 			'class': 'cbi-input-text',
 			'placeholder': _('Enter AT command, for example AT^HCSQ?')
 		});
-		var output = E('pre', { 'class': 'mt5700m-output' }, _('Ready.'));
-		var saved = E('div', { 'class':'mt5700m-quick' });
+		var output = E('pre', { 'class': 'qmodem-generic-output' }, _('Ready.'));
+		var saved = E('div', { 'class':'qmodem-generic-quick' });
 
 		/* AT 端口选择：来自 get_at_cfg().at_cfg.ports，默认使用解析出的 at_port */
 		var ports = Array.isArray(res.ports) ? res.ports.slice() : [];
@@ -237,7 +237,7 @@ return view.extend({
 		var portRow = null;
 		if (ports.length) {
 			this.portSelect = controls.select(ports.map(function(port) { return [ port, port ]; }), this.atPort || ports[0]);
-			portRow = E('div', { 'class': 'mt5700m-terminal-row' }, [
+			portRow = E('div', { 'class': 'qmodem-generic-terminal-row' }, [
 				E('label', {}, 'AT 端口'),
 				this.portSelect,
 				E('span', { 'class': 'mt-control-desc', 'style': 'margin:0' }, '命令经 QModem 的 send_at 下发')
@@ -262,7 +262,7 @@ return view.extend({
 			E('section', { 'class': 'mt-terminal-card mt-ui-card' }, [
 			E('div', { 'class': 'mt-terminal-warning' }, _('Use query commands whenever possible. Configuration and reset commands may interrupt mobile connectivity.')),
 			portRow,
-			E('div', { 'class': 'mt5700m-terminal-row' }, [
+			E('div', { 'class': 'qmodem-generic-terminal-row' }, [
 				input,
 				E('button', {
 					'class': 'btn cbi-button-apply',
@@ -278,7 +278,7 @@ return view.extend({
 				}, _('Clear'))
 				,E('button', { 'class':'btn', 'click':function() { self.saveCommand(input, saved, output); } }, _('Save command'))
 			]),
-			E('div', { 'class': 'mt5700m-quick' }, [
+			E('div', { 'class': 'qmodem-generic-quick' }, [
 				this.quickButton('AT', 'AT', input, output),
 				this.quickButton('ATI', 'ATI', input, output),
 				this.quickButton('SIM', 'AT+CPIN?', input, output),

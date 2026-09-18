@@ -7,13 +7,13 @@
 /*
  * 通用 QModem LuCI 前端 — QModem 数据层（美化版 UI 的数据桥梁）
  *
- * 本文件把原先基于 /usr/sbin/mt5700m-at 文本输出的数据获取方式，全面替换为
+ * 本文件把原先基于私有文本后端输出的数据获取方式，全面替换为
  * 经由 QModem 的 `qmodem` ubus 对象读取/下发。"显示的数据"与"控制动作"全部来自 QModem，
  * 不再依赖任何模组私有的文本后端。
  *
  * 设计原则（通用、不绑定任何具体模组型号）：
  *  - 本包对 QModem 管理的"任意模组"生效：QModem 识别到什么模组，这里就显示什么。
- *    UI 不假定某个型号（如 MT5700M），所有字段、能力、模式都按 QModem 实际返回渲染。
+ *    UI 不假定任何具体模组型号，所有字段、能力、模式都按 QModem 实际返回渲染。
  *  - 信息方法（base_info/sim_info/network_info/cell_info/info）返回
  *    { "modem_info": [ { key, value, full_name, type, class, extra_info }, ... ] }，
  *    使用 findEntry(arr, key) 取字段，使用 groupByClass(arr) 按 class 分组渲染"全部信息"。
@@ -392,7 +392,7 @@ function getModemSections() {
 }
 
 // 模组选择器的持久化键（localStorage）：记住用户上次查看的模组
-var SECTION_KEY = 'mt5700m_active_section';
+var SECTION_KEY = 'qmodem-generic_active_section';
 
 function getStorage() {
 	try { return window.localStorage; } catch (e) { return null; }

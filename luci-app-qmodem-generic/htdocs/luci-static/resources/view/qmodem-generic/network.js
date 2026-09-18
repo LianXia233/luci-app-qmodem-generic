@@ -4,12 +4,12 @@
 'require dom';
 'require form';
 'require uci';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 网络与小区（Radio & Cells）
  *
- * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 mt5700m.controls 封装）：
+ * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 qmodem-generic.controls 封装）：
  *   get_mode / get_network_prefer / get_lockband / get_neighborcell /
  *   get_current_band / cell_info / get_disabled_features / get_at_cfg
  * 控制动作：set_mode / set_network_prefer / set_lockband / send_at。

@@ -2,12 +2,12 @@
 'require view';
 'require ui';
 'require dom';
-'require mt5700m.controls as controls';
+'require qmodem-generic.controls as controls';
 
 /*
  * 高级设置（Advanced）
  *
- * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（由 mt5700m.controls 封装）：
+ * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（由 qmodem-generic.controls 封装）：
  *   get_disabled_features / get_reboot_caps / get_at_cfg / get_copyright /
  *   base_info / get_mode / get_network_prefer / get_lockband
  * 控制动作：do_reboot / set_mode / set_network_prefer / set_lockband / send_at。
@@ -839,8 +839,8 @@ return view.extend({
 					E('p', {}, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
 				]),
 				E('div', { 'class': 'mt-hardware-tool-actions' }, [
-					E('a', { 'class': 'btn', 'href': L.url('admin/modem/mt5700m/settings') }, _('设备参数设置')),
-					E('a', { 'class': 'btn cbi-button-action', 'href': L.url('admin/modem/mt5700m/terminal') }, _('AT 控制台')),
+					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/settings') }, _('设备参数设置')),
+					E('a', { 'class': 'btn cbi-button-action', 'href': L.url('admin/modem/qmodem-generic/terminal') }, _('AT 控制台')),
 					E('button', {
 						'type': 'button', 'class': 'btn',
 						'click': function() { window.location.reload(); }

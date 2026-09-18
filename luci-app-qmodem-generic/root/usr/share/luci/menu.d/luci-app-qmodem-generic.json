@@ -6,7 +6,7 @@
 			"type": "firstchild"
 		}
 	},
-	"admin/modem/mt5700m": {
+	"admin/modem/qmodem-generic": {
 		"title": "Modem Manager",
 		"order": 20,
 		"action": {
@@ -16,44 +16,44 @@
 			"acl": [ "luci-app-qmodem-generic" ]
 		}
 	},
-	"admin/modem/mt5700m/status": {
+	"admin/modem/qmodem-generic/status": {
 		"title": "Overview",
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "mt5700m/status"
+			"path": "qmodem-generic/status"
 		}
 	},
-	"admin/modem/mt5700m/connection": {
+	"admin/modem/qmodem-generic/connection": {
 		"title": "Mobile Data",
 		"order": 20,
-		"action": { "type": "view", "path": "mt5700m/connection" }
+		"action": { "type": "view", "path": "qmodem-generic/connection" }
 	},
-	"admin/modem/mt5700m/network": {
+	"admin/modem/qmodem-generic/network": {
 		"title": "Radio and Cells",
 		"order": 30,
-		"action": { "type": "view", "path": "mt5700m/network" }
+		"action": { "type": "view", "path": "qmodem-generic/network" }
 	},
-	"admin/modem/mt5700m/sms": {
+	"admin/modem/qmodem-generic/sms": {
 		"title": "Messages",
 		"order": 40,
-		"action": { "type": "view", "path": "mt5700m/sms" }
+		"action": { "type": "view", "path": "qmodem-generic/sms" }
 	},
-	"admin/modem/mt5700m/system": {
+	"admin/modem/qmodem-generic/system": {
 		"title": "Module and SIM",
 		"order": 50,
-		"action": { "type": "view", "path": "mt5700m/system" }
+		"action": { "type": "view", "path": "qmodem-generic/system" }
 	},
-	"admin/modem/mt5700m/terminal": {
-		"action": { "type": "view", "path": "mt5700m/terminal" }
+	"admin/modem/qmodem-generic/terminal": {
+		"action": { "type": "view", "path": "qmodem-generic/terminal" }
 	},
-	"admin/modem/mt5700m/advanced": {
+	"admin/modem/qmodem-generic/advanced": {
 		"title": "Advanced",
 		"order": 60,
-		"action": { "type": "view", "path": "mt5700m/advanced" }
+		"action": { "type": "view", "path": "qmodem-generic/advanced" }
 	},
-	"admin/modem/mt5700m/settings": {
-		"action": { "type": "view", "path": "mt5700m/settings" },
+	"admin/modem/qmodem-generic/settings": {
+		"action": { "type": "view", "path": "qmodem-generic/settings" },
 		"depends": {
 			"acl": [ "luci-app-qmodem-generic" ]
 		}

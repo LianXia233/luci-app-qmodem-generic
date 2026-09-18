@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.4.11
-PKG_RELEASE:=13
+PKG_RELEASE:=14
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -18,7 +18,8 @@ LUCI_TITLE:=Modem management (QModem beautified UI)
 LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem. \
 	All data is read through the `qmodem` ubus object, so it is not bound to a \
 	specific module model.
-LUCI_DEPENDS:=+luci-base +qmodem
+# 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）
+LUCI_DEPENDS:=+luci-base (>= 25.12) +qmodem
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

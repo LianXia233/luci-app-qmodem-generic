@@ -3,6 +3,29 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-14] - 2026-09-18
+
+### 变更
+- **LuCI 前端命名空间彻底迁移为 `qmodem-generic`**（`PKG_RELEASE` 13 → 14）：消除全部 `mt5700m` 历史命名包袱，UI 结构与具体模组型号彻底解耦：
+  - 资源目录迁移：`resources/view/mt5700m/` → `resources/view/qmodem-generic/`，`resources/mt5700m/controls.js` → `resources/qmodem-generic/controls.js`，不保留旧目录兼容。
+  - JS 模块命名空间：全部 9 个视图的 `require mt5700m.controls` → `require qmodem-generic.controls`。
+  - 菜单路由迁移：`admin/modem/mt5700m/*` → `admin/modem/qmodem-generic/*`，`action.path` 同步更新，无新旧路由并存。
+  - CSS 命名空间：`.mt5700m-*` 类名（页面/卡片/信号/载波/频段/流量等全部）→ `.qmodem-generic-*`，JS 动态 class、CSS 选择器与 media query 同步迁移。
+  - 运行时字符串：`L.url()` 跳转、`localStorage` 持久化键（`mt5700m_active_section`、`mt5700m.at.saved`）统一迁移为 `qmodem-generic` 命名空间。
+  - PO 翻译：清理 71 条旧版 `MT5700M` 死条目（当前 UI 已不引用），`msgfmt` 校验通过。
+- **OpenWrt 兼容基线调整为 25.12+**：
+  - `Makefile`：`LUCI_DEPENDS:=+luci-base (>= 25.12) +qmodem`。
+  - CI：移除 ImmortalWrt 23.05 / 24.10 编译矩阵，仅保留 25.12（必需）与 snapshot（允许失败）；Release 安装说明只保留 apk。
+  - README 兼容矩阵、安装说明、已知事项同步更新。
+
+### 保留（模型专用兼容层，与通用 UI 解耦）
+- `qmodem-mt5700-fix` 脚本/服务：仅服务于 MT5700 系列海思平台 SIM 卡槽初始化，作为独立的、按型号条件触发的 workaround 保留，不进入通用 UI 命名空间。
+- README / docs / CHANGELOG 中作为历史来源说明保留的 `mt5700m` 提及（均不涉及当前运行路径、路由、CSS 或模块命名空间）。
+
+### 验证
+- 全仓 `grep -RniE 'mt5700m|MT5700M'`：`htdocs/` 与 `menu.d/` 零残留；剩余命中仅为 README / docs 历史说明及 build.yml 旧包卸载提示。
+- 9 个 JS 文件全部通过 `node --check`；menu.d / acl.d JSON 解析通过；PO `msgfmt --check-format` 通过。
+
 ## [2.4.11-12] - 2026-08-30
 
 ### 新增
