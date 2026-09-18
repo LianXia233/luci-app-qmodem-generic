@@ -86,7 +86,7 @@
 | ImmortalWrt 25.12 | `.apk` | ✅ 支持 |
 | ImmortalWrt snapshot | `.apk` | ⚠️ 允许失败 |
 
-**兼容基线**：OpenWrt / ImmortalWrt **25.12 及更新版本**（`LUCI_DEPENDS` 要求 `luci-base (>= 25.12)`），不再支持 24.10 及更早版本。
+**兼容基线**：OpenWrt / ImmortalWrt **25.12 及更新版本**，不再支持 24.10 及更早（基线由 CI 编译矩阵与构建依赖强制：CI 仅编译 25.12 与 snapshot；OpenWrt buildroot 的 DEPENDS 不支持版本约束语法，故 `Makefile` 中保持 `+luci-base +qmodem` 写法）。
 
 **前置依赖**：运行时依赖 [`qmodem`](https://github.com/FUjr/QModem) 后端，请**先安装 QModem** 再安装本包。本包是 `LUCI_PKGARCH:=all` 的纯前端包，一个架构编译出的产物可用于所有架构。
 

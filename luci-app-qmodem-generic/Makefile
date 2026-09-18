@@ -18,8 +18,11 @@ LUCI_TITLE:=Modem management (QModem beautified UI)
 LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem. \
 	All data is read through the `qmodem` ubus object, so it is not bound to a \
 	specific module model.
-# 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）
-LUCI_DEPENDS:=+luci-base (>= 25.12) +qmodem
+# 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）。
+# 注意：OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法（package-metadata.pl
+# 会把 `(>=` / `25.12)` 当作不存在的包名，导致 make defconfig 失败），因此 25.12+
+# 基线由 CI 编译矩阵（仅 25.12 + snapshot）与文档强制，此处保持无版本约束写法。
+LUCI_DEPENDS:=+luci-base +qmodem
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

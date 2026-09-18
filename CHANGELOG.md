@@ -14,7 +14,7 @@
   - 运行时字符串：`L.url()` 跳转、`localStorage` 持久化键（`mt5700m_active_section`、`mt5700m.at.saved`）统一迁移为 `qmodem-generic` 命名空间。
   - PO 翻译：清理 71 条旧版 `MT5700M` 死条目（当前 UI 已不引用），`msgfmt` 校验通过。
 - **OpenWrt 兼容基线调整为 25.12+**：
-  - `Makefile`：`LUCI_DEPENDS:=+luci-base (>= 25.12) +qmodem`。
+  - `Makefile`：`LUCI_DEPENDS` 保持 `+luci-base +qmodem`（OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法，实测 25.12 SDK 会因 `(>=`/`25.12)` 被当作不存在的包名导致 `make defconfig` 失败；25.12+ 基线由 CI 编译矩阵与文档强制）。
   - CI：移除 ImmortalWrt 23.05 / 24.10 编译矩阵，仅保留 25.12（必需）与 snapshot（允许失败）；Release 安装说明只保留 apk。
   - README 兼容矩阵、安装说明、已知事项同步更新。
 
