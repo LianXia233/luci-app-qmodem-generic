@@ -3,6 +3,23 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-15] - 2026-09-20
+
+### 修复
+- **状态页把「模组未上报」的占位值当成真实读数渲染**（实测 Fibocom FM350-GL + QModem 3.2.0 / ImmortalWrt SNAPSHOT r0-1aa8ac8）：
+  - **温度显示 `0°C`**：模组不提供温度时，QModem 在 `base_info` 的 `temperature` 回填 `"0°C"`。前端只做「非数字字符剥离」后得到 `0`，被当作有效温度渲染在 20–80°C 刻度上。新增 `controls.normalizeTemperature()`：无数值或非正数一律视为未上报（0 不是有效工作温度），`status.js` / `system.js`（模组与 SIM 页温度卡）/ `advanced.js`（热保护提示）三处统一走该函数，未上报显示 `--`。
+  - **上下行带宽显示裸 `M`**：QModem 的 `cell_info` 中 `DL/UL Bandwidth` 在数值缺失时只回传单位残值 `"M"`（同样是 FM350-GL 实测值），而 `mhz()` 判断「含字母就原样返回」，于是页面显示成 `M`。新增加「必须含数字」判定，无数值返回空 → 显示 `--`。
+- **LuCI 26.x（Master 26.246+）旧 API 兼容**：该版本移除 `String.prototype.format`（仅保留 `String.prototype.format.call()`）与全局 `E()` / `findParent()`。本包视图仍沿用这些写法（数百处），在新版 LuCI 上表现为「菜单正常、内容区永远停在 Loading view」。在 `controls.js` 顶部新增按需注入的兼容层——所有视图 `require qmodem-generic.controls` 时即生效（早于任何视图体执行），缺失才注入、已存在绝不覆盖，不影响其它插件。
+  - 兼容层同时补齐全局 `_()`：26.x 的 `ui.js` 在错误提示路径（`LuCI.prototype.error` → `ui.addNotification`）直接引用全局 `_()`，缺失时会先崩在提示逻辑上、把真正的错误吞成一句 `_ is not defined`。补上轻量兜底（原样返回）后可正常显示真实错误。
+
+### 变更
+- `Makefile`：`PKG_RELEASE` 14 → 15。
+- README「已知事项」补充：占位值降级显示说明、`radio_info` 不可用时的 `--` 属预期、LuCI 26.x 兼容层说明。
+
+### 验证
+- 全部 9 个 JS 通过 `node --check`；兼容层在 Node 下实测 `'%04d-%02d-%02d %02d:%02d'.format(...)`、`%s`、`%d` 输出正确。
+- 设备实测（FM350-GL，页面 `admin/modem/mt5700m/status`）：温度由 `0°C` → `--`，`Downlink/Uplink bandwidth` 由 `M` → `--`，调制保持 `--`（`qos.radio_info` 返回 `unavailable`，属预期），IPv6 `Not assigned --` 不变；补 `_` 兜底后页面零 JS 错误。
+
 ## [2.4.11-14] - 2026-09-18
 
 ### 变更

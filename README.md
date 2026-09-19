@@ -232,6 +232,9 @@ make package/luci-app-qmodem-generic/compile V=s
 
 - `po/zh_Hans/qmodem-generic.po` 已与当前 JavaScript UI 字符串同步；QModem 动态返回的未知字段会按 `full_name` 原样显示，内置字段使用中文标签映射。
 - 前端命名空间（资源目录、JS 模块、菜单路由、CSS 类名）已统一为 `qmodem-generic`，与具体模组型号彻底解耦。
+- **字段未上报时的降级显示**：部分模组不会上报全部字段，QModem 会以占位值回填（实测 Fibocom FM350-GL：温度回 `"0°C"`、上下行带宽回 `"M"`）。本包自 2.4.11-15 起对这类占位值做归一化，未上报字段统一显示 `--`，不会把占位值当成真实读数。
+- **上下行调制**：来自 `qos` 对象的 `radio_info`；模组/固件不支持时该方法返回 `{"status":"unavailable"}`，页面显示 `--` 属预期降级，不是故障。
+- **LuCI 26.x（Master 26.246+）**：该版本移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失时才注入，不覆盖已有实现），无需在设备上手工补丁。
 
 ## 相关文档
 

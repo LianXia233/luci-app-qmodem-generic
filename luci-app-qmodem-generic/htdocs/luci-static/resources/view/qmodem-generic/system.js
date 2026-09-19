@@ -248,7 +248,8 @@ return view.extend({
 		var model = baseMap['name'] || _('Modem');
 		var manufacturer = baseMap['manufacturer'] || '--';
 		var revision = baseMap['revision'] || '';
-		var temperature = controls.findEntry(res.base, 'temperature') || '';
+		/* 模组未上报温度时 QModem 回填 "0°C"，归一化后按 -- 展示 */
+		var temperature = controls.normalizeTemperature(controls.findEntry(res.base, 'temperature')) || '';
 
 		var simStatusRaw = simMap['SIM Status'] || '';
 		var simStatus = simStatusText(simStatusRaw);

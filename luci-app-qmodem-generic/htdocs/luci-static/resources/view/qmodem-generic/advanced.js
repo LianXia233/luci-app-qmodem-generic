@@ -827,7 +827,7 @@ return view.extend({
 						command: function(v) { return 'AT^THERMAUTOFUN=1,1,' + v; },
 						apply: _('应用热保护设置'),
 						ok: _('热保护命令已被接受。'),
-						note: _('日常使用请保持热保护开启。当前模组温度：%s').format(shown(baseMap['temperature'])),
+						note: _('日常使用请保持热保护开启。当前模组温度：%s').format(shown(controls.normalizeTemperature(baseMap['temperature']))),
 						restart: false
 					}),
 					this.passthroughCard(section, atPort)

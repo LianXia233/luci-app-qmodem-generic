@@ -22,11 +22,17 @@ function joinValues() {
 	}).join(', ');
 }
 
-// 带宽值归一化：QModem 可能返回 "100" 或 "100 MHz"
+/*
+ * 带宽值归一化：QModem 可能返回 "100" 或 "100 MHz"。
+ * 部分模组在带宽字段未取到数值时只回传单位残值（实测 Fibocom FM350-GL 的
+ * DL/UL Bandwidth 均为 "M"），此时必须按"无数据"处理，否则页面会显示成裸的 "M"。
+ */
 function mhz(value) {
 	if (value == null || String(value).trim() === '')
 		return '';
 	var text = String(value).trim();
+	if (!/[0-9]/.test(text))
+		return '';
 	return /[a-zA-Z]/.test(text) ? text : text + ' MHz';
 }
 
@@ -174,7 +180,9 @@ return view.extend({
 		data.manufacturer = find(base, 'manufacturer') || '';
 		data.revision = find(base, 'revision') || '';
 		data.at_port = find(base, 'at_port') || '';
-		data.temperature = String(find(base, 'temperature') || '').replace(/[^0-9.\-]/g, '');
+		/* 温度：模组未上报时 QModem 会回填 "0°C"，先归一化掉无效值，
+		 * 再取出纯数字供仪表使用（有效温度恒 > 0）。 */
+		data.temperature = String(controls.normalizeTemperature(find(base, 'temperature')) || '').replace(/[^0-9.\-]/g, '');
 
 		data.rsrp = find(cell, 'RSRP') || '';
 		data.rsrq = find(cell, 'RSRQ') || '';
