@@ -3,6 +3,70 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-16] - 2026-09-27
+
+### 新增（异步化架构：后端任务不再阻塞页面加载）
+- **状态缓存层 `/tmp/qmodem-cache`**：按 `<section>/<domain>.json` 原子写入（临时文件 + `mv`），
+  每个域带 `{updated, stale, status, ttl, error, data}` 信封。文件缺失时立即合成
+  `missing/stale`，绝不去等采集。
+- **`qmodem-worker`（procd 常驻，周期 15 s）**：唯一允许访问 modem / AT / netifd 的进程。
+  所有外部调用带硬超时（`ubus -t`、`qmodem-at-probe -t`），串口访问经 `qm_lock` 串行化，
+  单实例（抢不到锁直接退出）。慢域（`qos` / `radio` 的 AT 探测）每 4 轮采一次。
+- **`qmodem-task` 任务队列**：`new` 立即返回 `task_id`，同 `(type, config_section)` 已有
+  `queued/running` 任务时直接复用（`deduplicated:true`）；`get` 回收「running 但已超时」的僵尸任务。
+  超时预算：`send_at` 20 s、`sync_support`/`collect_stats` 30 s、`action` 120 s、
+  `refresh` 90 s、`refresh_all` 180 s。
+- **`rpcd/qmodem_cache` 插件**：A 类快速读取（`snapshot` / `get_*` / `get_task` / `worker_status`，
+  纯文件 IO）+ B 类任务（`refresh` / `send_at` / `action` / `sync_support` / `collect_stats`）。
+  插件内不含 `ubus call qmodem`、tty 读写、`sleep`、`uqmi`/`mmcli`/`ifstatus`/`logread`。
+- **`qmodem-lib.sh` / `qmodem-at-probe`**：公共库与带超时的 AT 探测工具，供 worker 与任务队列复用。
+- **`tests/`**：后端 67 项（`run-backend-tests.sh`，dash 与 busybox sh 均通过）+
+  前端 94 项（`run-frontend-tests.js`，用 Node 加载真实的 `controls.js` 与 8 个视图驱动）。
+- **`docs/QMODEM_ASYNC_ARCHITECTURE.md`**：架构说明与 12 项验收结论。
+- **`tests/check-po.py`**：`msgfmt` 的最小替代（头部、成对性、转义、重复 msgid、占位符一致性、UTF-8）。
+
+### 变更
+- **`rpcd/qos`、`rpcd/qmodem_stats`、`rpcd/qmodem_support` 改为缓存读取器**：
+  原先 `qos_info` 同步跑 3 次 `tom_modem -t 8`（约 24 s）、`radio_info` 跑 2 次（约 16 s）、
+  `daily_stats` 同步跑采集器、`support.status/sync` 在 RPC 里做 awk + 文件锁。
+  现在只读缓存文件；`stats_reset` / `support.sync` 改为建任务。
+- **`controls.js` 全面异步化**：
+  - 新增 `bootstrap()`（uci + 一次 `snapshot`）/ `liveView()`（立即渲染 + 非重叠轮询 + 卸载自动停）
+    / `createPoller()` / `qmodemAction()` / `runTask()` / `withTimeout()`。
+  - 所有 getter 改为「缓存优先」（`cachedValue` / `cachedDomain`），缓存缺失时返回兜底值并
+    后台排队补采，绝不同步查 modem；旧的 `callXxx` 保留为缓存层不可用时的直连兜底。
+  - **全部 58 个 `rpc.declare` 加上 `nobatch: true`**：LuCI 的 `rpc.js` 会把同一 tick 内的调用
+    合并成一个 HTTP POST 并由 rpcd 顺序执行，一个慢方法会拖住同批次的**所有**请求（含其它页面）。
+    关掉批处理后快请求不再被慢请求劫持。
+  - 所有写操作（AT / 短信 / 模式 / IMEI / 锁频段 / 网络优选 / 卡槽 / 重启 / 拨号 / 清零 / 计划 /
+    支持库同步）改为「建任务 → 轮询 `get_task`」，签名与返回值保持不变。
+  - 快照并发去重（同 section 复用 in-flight Promise）+ 3 s TTL：一页多个 getter 只发 1 次 RPC。
+  - 轮询：`busy` 标志防堆叠、`document.hidden` 降频 4 倍、节点移出 DOM 或 `pagehide`/`beforeunload`
+    自动停止（登记表停掉全部活跃轮询器）、用户正在输入时跳过本轮重绘。
+- **8 个视图全部改造**：`load()` 只走 `bootstrap()`（0 次 modem 访问），原 `render` 拆为
+  `paintContent` 并由 `liveView` 驱动局部重绘。`settings.js`（CBI 表单）与 `terminal.js`
+  （AT 会话日志）**不轮询**，避免冲掉用户未保存的内容。
+- **`qmodem-stats-collect` / `-loop`**：采集结果同时写入缓存域，`get_stats` 只读。
+- **`uci-defaults`**：安装时 enable 并启动 `qmodem-worker`。
+- **ACL**：放行 `qmodem_cache` / `qmodem_stats` / `qmodem_support` / `qos`（读写）。
+- `Makefile`：`PKG_RELEASE` 15 → 16。
+- `po/zh_Hans`：补齐 24 条新增的任务/超时提示翻译。
+
+### 验证
+- 后端 `sh tests/run-backend-tests.sh` → **67 passed / 0 failed**；
+  `TEST_SH="busybox sh"` 同样 67/0。关键项：`qmodem_cache.snapshot < 200ms (83ms)`、
+  `get_status (30ms)`、`read-only RPCs issued 0 ubus calls`、
+  `rpcd snapshot still fast while modem dead (61ms)`、`concurrent refresh deduplicated`、
+  `no overlapping modem transactions`、`second worker exits (single instance)`、
+  `no lock dirs left behind`、`no orphaned task runners`、`dead-modem cycle bounded (3s <= 12s)`。
+- 前端 `sh tests/run-frontend-tests.sh` → **94 passed / 0 failed**。关键项：
+  8 个视图 `load()` 首屏 0–6 ms 且 `qmodem`/`qos`/`luci-rpc` 调用数均为 0、
+  `所有 rpc.declare 都声明了 nobatch (58/58)`、`慢 collect 不会堆叠`、
+  `pagehide 后第二个视图也停止`、缓存全空（模组离线）时 7 个视图仍能渲染。
+- 全部 JS 通过 `node --check`；ACL / menu.d / extra_modem_support.json 通过 `json.load`；
+  `po` 通过 `tests/check-po.py`（1212 条翻译，0 错误）。
+- 未能本地执行：`msgfmt` 与 `shellcheck` 在本环境缺失（已用 `tests/check-po.py` 等价替代 `msgfmt`）。
+
 ## [2.4.11-15] - 2026-09-20
 
 ### 修复

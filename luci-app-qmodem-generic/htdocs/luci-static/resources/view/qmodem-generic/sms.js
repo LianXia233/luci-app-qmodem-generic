@@ -150,27 +150,36 @@ return view.extend({
 		reader.onerror=function(){ui.addNotification(null,E('p',{},_('The selected history file could not be read.')),'danger');};reader.readAsText(file);
 	},
 
+	/*
+	 * 短信列表读取在部分模组上很慢，因此不进周期采集：
+	 * 首屏先渲染骨架（列表可能为空），同时后台排任务，轮询到数据后补上。
+	 */
+	DOMAINS: [ 'sms', 'sim', 'device' ],
+	POLL_INTERVAL: 4000,
+
 	load: function() {
 		var self = this;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
+
+	collect: function(ctx) {
+		var self = this;
 		var errors = [];
+		var section = ctx.section;
 
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
+		if (!section)
+			return { section: null, errors: errors };
 
-			if (!section)
-				return { section: null, errors: errors };
-
-			return Promise.all([
+		return Promise.all([
 				guard(controls.getSms(section), '读取短信失败', errors),
 				guard(controls.getSimInfo(section), '读取 SIM 信息失败', errors),
 				guard(controls.getAtCfg(section), '读取 AT 端口配置失败', errors)
 			]).then(function(results) {
 				return { section: section, sms: results[0], sim: results[1], atcfg: results[2], errors: errors };
 			});
-		}).catch(function(err) {
-			errors.push('读取 QModem 配置失败：' + ((err && err.message) || String(err)));
-			return { section: null, errors: errors };
-		});
 	},
 
 	styleNode: function(){return E('style',{},[
@@ -250,7 +259,16 @@ return view.extend({
 		}).catch(function(){});
 	},
 
-	render:function(res){
+	render: function(res) {
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		var self=this;
 		res=res||{};
 

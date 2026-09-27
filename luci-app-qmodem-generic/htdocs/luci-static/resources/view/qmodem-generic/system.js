@@ -27,22 +27,33 @@ function simStatusText(value) {
 }
 
 return view.extend({
+	/* SIM / IMEI / 卡槽都是 modem 查询 → 全部走后台采集 + 缓存读取 */
+	DOMAINS: [ 'sim', 'device', 'status' ],
+	POLL_INTERVAL: 8000,
+
 	load: function() {
 		var self = this;
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
-			if (!section)
-				return { section: null, errors: [] };
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
 
-			var errors = [];
-			function guard(promise, fallback, label) {
-				return promise.then(function(value) { return value; }, function(err) {
-					errors.push(label + ': ' + ((err && err.message) || String(err)));
-					return fallback;
-				});
-			}
+	collect: function(ctx) {
+		var self = this;
+		var section = ctx.section;
+		if (!section)
+			return { section: null, errors: [] };
 
-			return Promise.all([
+		var errors = [];
+		function guard(promise, fallback, label) {
+			return promise.then(function(value) { return value; }, function(err) {
+				errors.push(label + ': ' + ((err && err.message) || String(err)));
+				return fallback;
+			});
+		}
+
+		return Promise.all([
 				guard(controls.getSimInfo(section), [], _('SIM information')),
 				guard(controls.getBaseInfo(section), [], _('Module information')),
 				guard(controls.getImei(section), {}, 'IMEI'),
@@ -61,9 +72,6 @@ return view.extend({
 					errors: errors
 				};
 			});
-		}).catch(function(err) {
-			return { section: null, errors: [ (err && err.message) || String(err) ] };
-		});
 	},
 
 	styleNode: function() {
@@ -226,6 +234,15 @@ return view.extend({
 	},
 
 	render: function(res) {
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		var self = this;
 		res = res || {};
 

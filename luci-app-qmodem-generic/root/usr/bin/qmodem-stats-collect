@@ -15,12 +15,30 @@
 #   qmodem-stats-collect reset <config_section>  清零本地累计与分天记录（配合
 #                                                QModem 定时清零/手动清零使用）
 #
+# 阻塞约定（异步化改造后）：
+#   * `show`  纯文件读取，**绝不**访问 modem —— rpcd 的只读方法只允许调它；
+#   * `run`   会读一次模组计数器，只允许由后台服务/后台任务调用，
+#             且该读取带 STATS_UBUS_TIMEOUT 硬超时；
+#   * `reset` 同 `run`，需要读计数器建立新基准，因此由后台任务执行。
+#
 # 方向自动识别：正常模组 rx(下行) 远大于 tx(上行)。个别驱动把两个计数器接反，
 # 累计流量超过 50MB 且 tx > rx 时判定方向颠倒，输出中自动交换并以 swapped=1 标记。
 
 STATS_DIR="${QMODEM_STATS_DIR:-/etc/qmodem-stats}"
 KEEP_DAYS=90
 SWAP_MIN_BYTES=$((50 * 1024 * 1024))
+
+# 单次 modem 查询的硬超时（秒）。采样会调用 ubus qmodem get_stats，
+# 那是一次真正的 modem/AT 查询 —— 绝不允许无限等待，否则后台循环会被拖死。
+STATS_UBUS_TIMEOUT="${QMODEM_STATS_UBUS_TIMEOUT:-8}"
+
+# 公共库提供带超时的 ubus 封装（qm_ubus）；缺失时退化为裸 ubus call
+if [ -f /usr/lib/qmodem/qmodem-lib.sh ]; then
+	. /usr/lib/qmodem/qmodem-lib.sh
+	qm_stats_ubus() { qm_ubus "$1" "$2" "$3" "$STATS_UBUS_TIMEOUT"; }
+else
+	qm_stats_ubus() { ubus call "$1" "$2" "$3" 2>/dev/null; }
+fi
 
 # jshn（json_* 函数）：OpenWrt 固件自带；缺失时回退到内置的纯 shell JSON 生成器
 if [ -f /usr/share/libubox/jshn.sh ]; then
@@ -161,7 +179,9 @@ read_counters() {
 	config_section="$1"
 	cur_rx=''; cur_tx=''
 
-	resp=$(ubus call qmodem get_stats "{\"config_section\":\"$config_section\"}" 2>/dev/null)
+	# 带硬超时的 modem 查询：modem 失联时最多等 STATS_UBUS_TIMEOUT 秒即返回空，
+	# 由下面的 netdev 兜底路径继续工作
+	resp=$(qm_stats_ubus qmodem get_stats "{\"config_section\":\"$config_section\"}")
 	if [ -n "$resp" ]; then
 		if [ "$(jsonfilter -s "$resp" -e '@.available' 2>/dev/null)" = "true" ]; then
 			cur_rx=$(jsonfilter -s "$resp" -e '@.total_rx_bytes' 2>/dev/null)

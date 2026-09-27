@@ -1,0 +1,222 @@
+#!/bin/sh
+# qmodem_cache — QModem Generic 的「快速读取 + 后台任务」rpcd 插件
+#
+# 分层原则（本次异步化改造的核心）：
+#
+#   rpcd = API 层        只读缓存文件、只创建任务，毫秒级返回
+#   qmodem-worker = 工作层  唯一访问 modem / AT / netifd 的进程
+#   /tmp/qmodem-cache = 状态层  原子写入的 JSON 快照
+#
+# 本插件**绝不**出现下面这些调用：
+#   ubus call qmodem ...   cat /dev/ttyUSB*   tom_modem   uqmi   mmcli
+#   ifstatus   logread   sleep   任何 AT 指令
+# 因此即使 modem 完全失联、ttyUSB 不存在、QModem 正在 reset，
+# 这些方法也照样在几毫秒内返回（带 stale/offline 标记），LuCI 不会白屏。
+#
+# 缓存信封：
+#   { "updated":1780000000, "stale":false, "status":"ready|offline|error|missing",
+#     "ttl":90, "error":null, "data":{ ... } }
+#
+# 快速读取方法（A 类，只读缓存）：
+#   snapshot        { config_section, domains[] } → 一次拿回多个域（首屏一次 RPC）
+#   get_status / get_network / get_signal / get_registration / get_sim
+#   get_device / get_stats / get_qos / get_radio / get_sms
+#   get_task        { task_id }
+#   get_tasks       { config_section? }
+#   worker_status   {}
+#
+# 后台任务方法（B 类，立即返回 task_id，不等待执行）：
+#   refresh         { config_section, domains[]? }
+#   refresh_all     { domains[]? }
+#   send_at         { config_section, at, args? }
+#   action          { config_section, object?, method, args? }
+#   sync_support    { config_section }
+#   collect_stats   { config_section }
+#
+# 任务方法一律返回：
+#   { "success":true, "task_id":"t...", "state":"queued" }
+#   或（已有同类任务在跑，去重复用）：
+#   { "success":true, "running":true, "deduplicated":true, "task_id":"t..." }
+
+. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
+
+TASK_BIN="$QMODEM_BIN_DIR/qmodem-task"
+ALL_DOMAINS="status network signal registration sim device stats qos radio sms support"
+CACHE_DOMAINS="status network signal registration sim device stats qos radio sms"
+
+j_str() {
+	printf '"%s"' "$(printf '%s' "$1" | qm_json_escape)"
+}
+
+j_err() {
+	printf '{"success":false,"error":%s}\n' "$(j_str "$1")"
+}
+
+valid_section() {
+	case "$1" in
+		''|*[!A-Za-z0-9_-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+# 输入 JSON → 字段
+in_str() {
+	printf '%s' "$INPUT" | jsonfilter -e "@.$1" 2>/dev/null
+}
+
+# 输入 JSON 的数组字段 → 空格分隔
+in_list() {
+	printf '%s' "$INPUT" | jsonfilter -a -e "@.$1[*]" 2>/dev/null | tr '\n' ' '
+}
+
+# ---- 快照拼装（纯字符串拼接，不解析 JSON，因此极快） ----------------------
+
+# emit_domain <section> <domain>
+# 直接把缓存文件内容原样嵌入；缺失时给出 status=missing 的占位信封。
+emit_domain() {
+	_body=$(qm_read_domain "$1" "$2" 2>/dev/null)
+	if [ -n "$_body" ]; then
+		printf '%s' "$_body"
+	else
+		printf '{"updated":0,"stale":true,"status":"missing","ttl":0,"error":"no cache yet","data":{}}'
+	fi
+}
+
+do_snapshot() {
+	_sec=$(in_str config_section)
+	valid_section "$_sec" || { j_err "invalid config_section"; return 0; }
+
+	_doms=$(in_list domains)
+	[ -n "$_doms" ] || _doms="$CACHE_DOMAINS"
+
+	printf '{"config_section":%s,"now":%s,"domains":{' "$(j_str "$_sec")" "$(qm_now)"
+	_first=1
+	for _d in $_doms; do
+		case " $ALL_DOMAINS " in *" $_d "*) ;; *) continue ;; esac
+		[ "$_first" = 1 ] || printf ','
+		printf '"%s":' "$_d"
+		emit_domain "$_sec" "$_d"
+		_first=0
+	done
+	printf '},"worker":'
+	qm_read_heartbeat || printf '{"pid":0,"updated":0,"interval":0,"extra":{}}'
+	printf '}\n'
+}
+
+# do_get <domain>
+do_get() {
+	_d="$1"
+	_sec=$(in_str config_section)
+	valid_section "$_sec" || { j_err "invalid config_section"; return 0; }
+
+	_body=$(qm_read_domain "$_sec" "$_d" 2>/dev/null)
+	if [ -n "$_body" ]; then
+		printf '%s\n' "$_body"
+	else
+		printf '{"updated":0,"stale":true,"status":"missing","ttl":0,"error":"no cache yet","data":{}}\n'
+	fi
+}
+
+do_worker_status() {
+	printf '{"now":%s,"cache_dir":%s,"worker":' "$(qm_now)" "$(j_str "$QMODEM_CACHE_DIR")"
+	qm_read_heartbeat || printf '{"pid":0,"updated":0,"interval":0,"extra":{}}'
+	printf ',"domains":'
+	_first=1
+	printf '['
+	for _d in $ALL_DOMAINS; do
+		[ "$_first" = 1 ] || printf ','
+		printf '%s' "$(j_str "$_d")"
+		_first=0
+	done
+	printf ']}\n'
+}
+
+# ---- 任务 -----------------------------------------------------------------
+
+# run_task <type> [section]
+run_task() {
+	_type="$1"; _sec="$2"
+
+	if [ ! -f "$TASK_BIN" ]; then
+		j_err "qmodem-task missing ($TASK_BIN)"
+		return 0
+	fi
+
+	case "$_sec" in
+		'') ;;
+		*) valid_section "$_sec" || { j_err "invalid config_section"; return 0; } ;;
+	esac
+
+	sh "$TASK_BIN" new "$_type" "$_sec" "$INPUT" 2>/dev/null || j_err "failed to create task"
+}
+
+# ---- rpcd 入口 ------------------------------------------------------------
+
+case "$1" in
+	list)
+		cat <<'EOF'
+{
+  "snapshot":       { "config_section": "string", "domains": [ "string" ] },
+  "get_status":     { "config_section": "string" },
+  "get_network":    { "config_section": "string" },
+  "get_signal":     { "config_section": "string" },
+  "get_registration": { "config_section": "string" },
+  "get_sim":        { "config_section": "string" },
+  "get_device":     { "config_section": "string" },
+  "get_stats":      { "config_section": "string" },
+  "get_qos":        { "config_section": "string" },
+  "get_radio":      { "config_section": "string" },
+  "get_sms":        { "config_section": "string" },
+  "get_task":       { "task_id": "string" },
+  "get_tasks":      { "config_section": "string" },
+  "worker_status":  {},
+  "refresh":        { "config_section": "string", "domains": [ "string" ] },
+  "refresh_all":    { "domains": [ "string" ] },
+  "send_at":        { "config_section": "string", "at": "string" },
+  "action":         { "config_section": "string", "object": "string", "method": "string", "args": {} },
+  "sync_support":   { "config_section": "string" },
+  "collect_stats":  { "config_section": "string" }
+}
+EOF
+	;;
+	call)
+		read -r INPUT
+		[ -n "$INPUT" ] || INPUT='{}'
+		qm_init_dirs
+
+		case "$2" in
+			snapshot)          do_snapshot ;;
+			get_status)        do_get status ;;
+			get_network)       do_get network ;;
+			get_signal)        do_get signal ;;
+			get_registration)  do_get registration ;;
+			get_sim)           do_get sim ;;
+			get_device)        do_get device ;;
+			get_stats)         do_get stats ;;
+			get_qos)           do_get qos ;;
+			get_radio)         do_get radio ;;
+			get_sms)           do_get sms ;;
+			worker_status)     do_worker_status ;;
+
+			get_task)
+				_id=$(in_str task_id)
+				case "$_id" in
+					''|*[!A-Za-z0-9._-]*) j_err "invalid task_id" ;;
+					*) sh "$TASK_BIN" get "$_id" 2>/dev/null || j_err "task lookup failed" ;;
+				esac
+				;;
+			get_tasks)
+				sh "$TASK_BIN" list "$(in_str config_section)" 2>/dev/null || printf '{"tasks":[]}\n'
+				;;
+
+			refresh)       run_task refresh "$(in_str config_section)" ;;
+			refresh_all)   run_task refresh_all '' ;;
+			send_at)       run_task send_at "$(in_str config_section)" ;;
+			action)        run_task action "$(in_str config_section)" ;;
+			sync_support)  run_task sync_support "$(in_str config_section)" ;;
+			collect_stats) run_task collect_stats "$(in_str config_section)" ;;
+
+			*) j_err "unknown method: $2" ;;
+		esac
+	;;
+esac

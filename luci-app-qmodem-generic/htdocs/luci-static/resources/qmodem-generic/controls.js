@@ -133,71 +133,545 @@
 	}
 })();
 
-var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { } });
-var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { } });
-var callInfo = rpc.declare({ object: 'qmodem', method: 'info', params: ['config_section'], expect: { } });
-var callNetworkInfo = rpc.declare({ object: 'qmodem', method: 'network_info', params: ['config_section'], expect: { } });
-var callSimInfo = rpc.declare({ object: 'qmodem', method: 'sim_info', params: ['config_section'], expect: { } });
+var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { }, nobatch: true });
+var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { }, nobatch: true });
+var callInfo = rpc.declare({ object: 'qmodem', method: 'info', params: ['config_section'], expect: { }, nobatch: true });
+var callNetworkInfo = rpc.declare({ object: 'qmodem', method: 'network_info', params: ['config_section'], expect: { }, nobatch: true });
+var callSimInfo = rpc.declare({ object: 'qmodem', method: 'sim_info', params: ['config_section'], expect: { }, nobatch: true });
 
-var callGetAtCfg = rpc.declare({ object: 'qmodem', method: 'get_at_cfg', params: ['config_section'], expect: { } });
-var callGetImei = rpc.declare({ object: 'qmodem', method: 'get_imei', params: ['config_section'], expect: { } });
-var callGetMode = rpc.declare({ object: 'qmodem', method: 'get_mode', params: ['config_section'], expect: { } });
-var callGetLockband = rpc.declare({ object: 'qmodem', method: 'get_lockband', params: ['config_section'], expect: { } });
-var callGetNeighborcell = rpc.declare({ object: 'qmodem', method: 'get_neighborcell', params: ['config_section'], expect: { } });
-var callGetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'get_network_prefer', params: ['config_section'], expect: { } });
-var callGetDns = rpc.declare({ object: 'qmodem', method: 'get_dns', params: ['config_section'], expect: { } });
-var callGetSms = rpc.declare({ object: 'qmodem', method: 'get_sms', params: ['config_section'], expect: { } });
-var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disabled_features', params: ['config_section'], expect: { } });
-var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { } });
-var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { } });
-var callGetCurrentBand = rpc.declare({ object: 'qmodem', method: 'get_current_band', params: ['config_section'], expect: { } });
-var callGetCurrentBandCapabilities = rpc.declare({ object: 'qmodem', method: 'get_current_band_capabilities', params: ['config_section'], expect: { } });
-var callGetConnectStatus = rpc.declare({ object: 'qmodem', method: 'get_connect_status', params: ['config_section'], expect: { } });
-var callGetDialStatus = rpc.declare({ object: 'qmodem', method: 'dial_status', params: ['config_section'], expect: { } });
-var callGetDialLog = rpc.declare({ object: 'qmodem', method: 'get_dial_log', params: ['config_section'], expect: { } });
-var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', params: ['config_section'], expect: { } });
-var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { } });
-var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { } });
-var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_traffic_reset_schedule', params: ['config_section'], expect: { } });
+var callGetAtCfg = rpc.declare({ object: 'qmodem', method: 'get_at_cfg', params: ['config_section'], expect: { }, nobatch: true });
+var callGetImei = rpc.declare({ object: 'qmodem', method: 'get_imei', params: ['config_section'], expect: { }, nobatch: true });
+var callGetMode = rpc.declare({ object: 'qmodem', method: 'get_mode', params: ['config_section'], expect: { }, nobatch: true });
+var callGetLockband = rpc.declare({ object: 'qmodem', method: 'get_lockband', params: ['config_section'], expect: { }, nobatch: true });
+var callGetNeighborcell = rpc.declare({ object: 'qmodem', method: 'get_neighborcell', params: ['config_section'], expect: { }, nobatch: true });
+var callGetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'get_network_prefer', params: ['config_section'], expect: { }, nobatch: true });
+var callGetDns = rpc.declare({ object: 'qmodem', method: 'get_dns', params: ['config_section'], expect: { }, nobatch: true });
+var callGetSms = rpc.declare({ object: 'qmodem', method: 'get_sms', params: ['config_section'], expect: { }, nobatch: true });
+var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disabled_features', params: ['config_section'], expect: { }, nobatch: true });
+var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { }, nobatch: true });
+var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { }, nobatch: true });
+var callGetCurrentBand = rpc.declare({ object: 'qmodem', method: 'get_current_band', params: ['config_section'], expect: { }, nobatch: true });
+var callGetCurrentBandCapabilities = rpc.declare({ object: 'qmodem', method: 'get_current_band_capabilities', params: ['config_section'], expect: { }, nobatch: true });
+var callGetConnectStatus = rpc.declare({ object: 'qmodem', method: 'get_connect_status', params: ['config_section'], expect: { }, nobatch: true });
+var callGetDialStatus = rpc.declare({ object: 'qmodem', method: 'dial_status', params: ['config_section'], expect: { }, nobatch: true });
+var callGetDialLog = rpc.declare({ object: 'qmodem', method: 'get_dial_log', params: ['config_section'], expect: { }, nobatch: true });
+var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', params: ['config_section'], expect: { }, nobatch: true });
+var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { }, nobatch: true });
+var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { }, nobatch: true });
+var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_traffic_reset_schedule', params: ['config_section'], expect: { }, nobatch: true });
 // 持久化分天流量统计（/usr/libexec/rpcd/qmodem_stats 提供）：
 // daily_stats 采样一次并返回今日/历史/累计；stats_reset 清零本地分天记录
-var callDailyStats = rpc.declare({ object: 'qmodem_stats', method: 'daily_stats', params: ['config_section'], expect: { } });
-var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { } });
+var callDailyStats = rpc.declare({ object: 'qmodem_stats', method: 'daily_stats', params: ['config_section'], expect: { }, nobatch: true });
+var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { }, nobatch: true });
 
 // 模组支持库注入（/usr/libexec/rpcd/qmodem_support 提供）：
 // status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并
-var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { } });
-var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { } });
+var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { }, nobatch: true });
+var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { }, nobatch: true });
 
-var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { } });
-var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { } });
-var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { } });
-var callDeleteSms = rpc.declare({ object: 'qmodem', method: 'delete_sms', params: ['config_section', 'index'], expect: { } });
-var callSetMode = rpc.declare({ object: 'qmodem', method: 'set_mode', params: ['config_section', 'mode'], expect: { } });
-var callSetImei = rpc.declare({ object: 'qmodem', method: 'set_imei', params: ['config_section', 'imei'], expect: { } });
-var callSetLockband = rpc.declare({ object: 'qmodem', method: 'set_lockband', params: ['config_section', 'params'], expect: { } });
-var callSetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'set_network_prefer', params: ['config_section', 'params'], expect: { } });
-var callSetSimSlot = rpc.declare({ object: 'qmodem', method: 'set_sim_slot', params: ['config_section', 'slot'], expect: { } });
-var callDoReboot = rpc.declare({ object: 'qmodem', method: 'do_reboot', params: ['config_section', 'params'], expect: { } });
-var callClearDialLog = rpc.declare({ object: 'qmodem', method: 'clear_dial_log', params: ['config_section'], expect: { } });
-var callClearStats = rpc.declare({ object: 'qmodem', method: 'clear_stats', params: ['config_section'], expect: { } });
-var callSetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'set_traffic_reset_schedule', params: ['config_section', 'params'], expect: { } });
-var callSetNeighborCell = rpc.declare({ object: 'qmodem', method: 'set_neighborcell', params: ['config_section', 'params'], expect: { } });
-var callSetSmsStorage = rpc.declare({ object: 'qmodem', method: 'set_sms_storage', params: ['config_section', 'storage'], expect: { } });
-var callModemDial = rpc.declare({ object: 'qmodem', method: 'modem_dial', params: ['config_section'], expect: { } });
-var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params: ['config_section'], expect: { } });
-var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { } });
+var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { }, nobatch: true });
+var callDeleteSms = rpc.declare({ object: 'qmodem', method: 'delete_sms', params: ['config_section', 'index'], expect: { }, nobatch: true });
+var callSetMode = rpc.declare({ object: 'qmodem', method: 'set_mode', params: ['config_section', 'mode'], expect: { }, nobatch: true });
+var callSetImei = rpc.declare({ object: 'qmodem', method: 'set_imei', params: ['config_section', 'imei'], expect: { }, nobatch: true });
+var callSetLockband = rpc.declare({ object: 'qmodem', method: 'set_lockband', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'set_network_prefer', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSetSimSlot = rpc.declare({ object: 'qmodem', method: 'set_sim_slot', params: ['config_section', 'slot'], expect: { }, nobatch: true });
+var callDoReboot = rpc.declare({ object: 'qmodem', method: 'do_reboot', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callClearDialLog = rpc.declare({ object: 'qmodem', method: 'clear_dial_log', params: ['config_section'], expect: { }, nobatch: true });
+var callClearStats = rpc.declare({ object: 'qmodem', method: 'clear_stats', params: ['config_section'], expect: { }, nobatch: true });
+var callSetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'set_traffic_reset_schedule', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSetNeighborCell = rpc.declare({ object: 'qmodem', method: 'set_neighborcell', params: ['config_section', 'params'], expect: { }, nobatch: true });
+var callSetSmsStorage = rpc.declare({ object: 'qmodem', method: 'set_sms_storage', params: ['config_section', 'storage'], expect: { }, nobatch: true });
+var callModemDial = rpc.declare({ object: 'qmodem', method: 'modem_dial', params: ['config_section'], expect: { }, nobatch: true });
+var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params: ['config_section'], expect: { }, nobatch: true });
+var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { }, nobatch: true });
 
-var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], expect: { } });
+var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], expect: { }, nobatch: true });
 // 网络接口批量状态：netifd 的裸 network.interface 对象只提供 dump（status 需要具体的
 // network.interface.<name> 对象），因此这里统一用 dump 一次取回全部接口再按名匹配。
-var callInterfaceDump = rpc.declare({ object: 'network.interface', method: 'dump', expect: { 'interface': [] } });
+var callInterfaceDump = rpc.declare({ object: 'network.interface', method: 'dump', expect: { 'interface': [] }, nobatch: true });
 // 网络设备状态（用于获取网口链路速率，作为签约速率参考）
-var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { } });
+var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { }, nobatch: true });
 // QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
-var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', params: ['config_section'], expect: { } });
+var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', params: ['config_section'], expect: { }, nobatch: true });
 // 无线电调制信息（上下行调制 / MCS / MIMO 层数），同一 rpcd 插件提供
-var callRadioInfo = rpc.declare({ object: 'qos', method: 'radio_info', params: ['config_section'], expect: { } });
+var callRadioInfo = rpc.declare({ object: 'qos', method: 'radio_info', params: ['config_section'], expect: { }, nobatch: true });
+
+/* ================================================================== */
+/* 状态缓存层 —— 首屏与后台耗时任务彻底解耦                            */
+/* ================================================================== */
+/*
+ * 为什么必须解耦（LuCI rpc.js 的两个硬事实）
+ * ----------------------------------------
+ * 1) rpc.js 的 call() 会把「同一 tick 内发出的所有 rpc.declare 调用」合并成
+ *    一个 HTTP POST（rpcBaseURL + '/obj.method;obj.method;...'），rpcd 在同一个
+ *    ubus 请求里**顺序**执行。也就是说：一个慢方法会拖住同批次的**所有**请求，
+ *    包括其它页面的请求 —— 这就是「一个慢请求拖慢整个 LuCI」的根因。
+ * 2) rpc.declare 不支持按调用设置超时，整批共用 L.env.rpctimeout（默认 20 秒）。
+ *    20 秒一到，整批 promise 一起 reject，页面直接白屏。
+ *
+ * 改造后的数据链路：
+ *
+ *   浏览器 → LuCI 视图 load()
+ *              │  只读 UCI + qmodem_cache.snapshot（纯文件 IO，正常 < 50 ms）
+ *              ▼
+ *        立即渲染页面骨架 + 已有缓存数据
+ *              │
+ *              └── 后台：qmodem-worker 周期采集 / qmodem-task 执行按需任务
+ *                        （所有 ubus / AT / netifd 调用都在那里，带硬超时）
+ *              │
+ *              ▼
+ *        非重叠轮询 snapshot → 局部重绘
+ *
+ * 所有慢动作（refresh / send_at / 拨号 / 重启 / 改模式…）都改成
+ * 「创建任务 → 立即返回 task_id → 轮询 get_task」，rpcd 永不等待 modem。
+ */
+
+/* 快速读取（A 类）：只读 /tmp/qmodem-cache，绝不访问 modem */
+var callSnapshot = rpc.declare({ object: 'qmodem_cache', method: 'snapshot', params: ['config_section', 'domains'], expect: { }, nobatch: true });
+/* 后台任务（B 类）：立即返回 task_id */
+var callTaskGet = rpc.declare({ object: 'qmodem_cache', method: 'get_task', params: ['task_id'], expect: { }, nobatch: true });
+var callTaskRefresh = rpc.declare({ object: 'qmodem_cache', method: 'refresh', params: ['config_section', 'domains'], expect: { }, nobatch: true });
+var callTaskAction = rpc.declare({ object: 'qmodem_cache', method: 'action', params: ['config_section', 'object', 'method', 'args'], expect: { }, nobatch: true });
+var callTaskSendAt = rpc.declare({ object: 'qmodem_cache', method: 'send_at', params: ['config_section', 'at'], expect: { }, nobatch: true });
+/* stats_reset 已改为后台任务（需要读一次模组计数器建立新基准） */
+var callStatsResetTask = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { }, nobatch: true });
+
+/* 超时预算（毫秒）—— rpc 本身不提供按调用超时，必须在客户端兜住 */
+var CACHE_RPC_TIMEOUT = 6000;     /* 读缓存：正常 < 50 ms */
+var TASK_RPC_TIMEOUT = 8000;      /* 建任务 / 查任务：纯文件操作 */
+var DIRECT_RPC_TIMEOUT = 8000;    /* 缓存层不可用时的直连兜底 */
+var TASK_POLL_INTERVAL = 400;     /* 任务轮询间隔（request→完成→等待→下一次） */
+var SNAPSHOT_TTL = 3000;          /* 同一页面多个 getter 共享一次快照读取 */
+var REFRESH_DEDUP_MS = 15000;     /* 客户端侧刷新去重窗口 */
+var CACHE_RETRY_MS = 60000;       /* 缓存层不可用后的重试间隔 */
+
+/* 给 promise 加客户端超时：超时/失败都返回 fallback，**永不 reject**。
+ * 用于所有「读」路径 —— 读失败只该降级显示，不该让页面崩掉。 */
+function withTimeout(promise, ms, fallback) {
+	return new Promise(function(resolve) {
+		var settled = false;
+		var timer = window.setTimeout(function() {
+			if (settled) return;
+			settled = true;
+			resolve(fallback);
+		}, ms);
+
+		Promise.resolve(promise).then(function(v) {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timer);
+			resolve(v === undefined ? fallback : v);
+		}, function() {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timer);
+			resolve(fallback);
+		});
+	});
+}
+
+/* 与 withTimeout 相同，但失败时 reject —— 用于任务链路，
+ * 让 UI 能把「超时 / 失败」如实告诉用户而不是静默成功。 */
+function withTimeoutReject(promise, ms, message) {
+	return new Promise(function(resolve, reject) {
+		var settled = false;
+		var timer = window.setTimeout(function() {
+			if (settled) return;
+			settled = true;
+			reject(new Error(message || 'timeout'));
+		}, ms);
+
+		Promise.resolve(promise).then(function(v) {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timer);
+			resolve(v);
+		}, function(err) {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timer);
+			reject(err instanceof Error ? err : new Error((err && err.message) || String(err)));
+		});
+	});
+}
+
+var snapshotStore = {};      /* section -> { ts, snap } */
+var snapshotInflight = {};   /* section -> Promise（并发去重） */
+var refreshQueued = {};      /* section|domains -> ts（客户端侧刷新去重） */
+var cacheBrokenAt = 0;       /* 缓存层探测失败的时间戳 */
+
+function cacheLayerUsable() {
+	return !cacheBrokenAt || (Date.now() - cacheBrokenAt > CACHE_RETRY_MS);
+}
+
+function snapshotCovers(snap, domains) {
+	if (!snap || !snap.domains) return false;
+	if (!domains || !domains.length) return true;
+	for (var i = 0; i < domains.length; i++)
+		if (!snap.domains[domains[i]]) return false;
+	return true;
+}
+
+/* 让下一次读取重新拉取（写操作完成后调用） */
+function touch(section) {
+	if (section) delete snapshotStore[section];
+}
+
+/* 读取快照。永不 reject：缓存层不可用时返回 null，由调用方降级。 */
+function fetchSnapshot(section, domains, force) {
+	if (!section)
+		return Promise.resolve(null);
+
+	var now = Date.now();
+	var cached = snapshotStore[section];
+
+	if (!force && cached && (now - cached.ts) < SNAPSHOT_TTL && snapshotCovers(cached.snap, domains))
+		return Promise.resolve(cached.snap);
+	/* 并发去重：同一 section 的多个 getter 共用一次 RPC，避免请求堆积 */
+	if (!force && snapshotInflight[section])
+		return snapshotInflight[section];
+
+	var p = withTimeoutReject(callSnapshot(section, (domains && domains.length) ? domains : null),
+		CACHE_RPC_TIMEOUT, 'snapshot timeout').then(function(snap) {
+			cacheBrokenAt = 0;
+			snapshotStore[section] = { ts: Date.now(), snap: snap || null };
+			delete snapshotInflight[section];
+			return snap || null;
+		}, function() {
+			delete snapshotInflight[section];
+			if (!snapshotStore[section])
+				cacheBrokenAt = Date.now();
+			return snapshotStore[section] ? snapshotStore[section].snap : null;
+		});
+
+	snapshotInflight[section] = p;
+	return p;
+}
+
+/* 缓存信封访问：{ updated, stale, status, ttl, error, data } */
+function envelopeOf(snap, domain) {
+	return (snap && snap.domains && snap.domains[domain]) || null;
+}
+
+function domainData(snap, domain) {
+	var env = envelopeOf(snap, domain);
+	return (env && env.data && typeof env.data === 'object') ? env.data : {};
+}
+
+function domainMeta(snap, domain) {
+	var env = envelopeOf(snap, domain) || {};
+	var now = (snap && snap.now) ? Number(snap.now) : Math.floor(Date.now() / 1000);
+	var updated = Number(env.updated) || 0;
+	var age = updated ? (now - updated) : -1;
+	var status = env.status || 'missing';
+	return {
+		updated: updated,
+		age: age,
+		status: status,
+		error: env.error || '',
+		stale: env.stale === true || status === 'missing' || status === 'offline' ||
+			(env.ttl > 0 && age > Number(env.ttl))
+	};
+}
+
+/* 后台补采：只在缺失/过期时排队一次，客户端 + 服务端（任务去重）双重防重复 */
+function requestRefresh(section, domains, force) {
+	if (!section || !cacheLayerUsable())
+		return Promise.resolve(null);
+
+	var key = section + '|' + (domains || []).join(',');
+	var now = Date.now();
+	if (!force && refreshQueued[key] && (now - refreshQueued[key]) < REFRESH_DEDUP_MS)
+		return Promise.resolve(null);
+	refreshQueued[key] = now;
+
+	return withTimeout(callTaskRefresh(section, (domains && domains.length) ? domains : null),
+		TASK_RPC_TIMEOUT, null);
+}
+
+/*
+ * 统一的「缓存优先」读取。
+ *   命中缓存      → 直接返回（不产生任何 modem 访问）
+ *   缓存缺失/过期 → 返回旧值/兜底值 + 后台排队补采
+ *   缓存层不可用  → 退化为直连 QModem（带超时；调用方须传 nobatch 的声明）
+ */
+function cachedValue(section, domain, key, fallback, directFn, transform) {
+	var map = transform || function(v) { return v; };
+
+	return fetchSnapshot(section, [domain]).then(function(snap) {
+		if (snap) {
+			var data = domainData(snap, domain);
+			var meta = domainMeta(snap, domain);
+			if (meta.status === 'missing' || meta.stale)
+				requestRefresh(section, [domain]);
+			var v = data[key];
+			return map(v === undefined || v === null ? fallback : v, meta);
+		}
+
+		/* 没有缓存层（旧固件 / 服务未启用）：直连，但必须有超时上限 */
+		if (typeof directFn === 'function')
+			return withTimeout(directFn(), DIRECT_RPC_TIMEOUT, fallback).then(function(v) {
+				return map(v === undefined || v === null ? fallback : v, { status: 'direct', stale: false });
+			});
+
+		return map(fallback, { status: 'missing', stale: true });
+	});
+}
+
+/* ------------------------------------------------------------------ */
+/* 后台任务（异步动作）                                                */
+/* ------------------------------------------------------------------ */
+
+/* 轮询任务状态：request → 完成 → 等待 → 下一次 request，绝不重叠、绝不堆积 */
+function waitForTask(taskId, timeoutMs) {
+	var started = Date.now();
+	var budget = timeoutMs || 120000;
+
+	return new Promise(function(resolve, reject) {
+		function expired() {
+			return (Date.now() - started) > budget;
+		}
+		function retry() {
+			if (expired()) { reject(new Error(_('Task timed out'))); return; }
+			window.setTimeout(step, TASK_POLL_INTERVAL);
+		}
+		function step() {
+			withTimeoutReject(callTaskGet(taskId), TASK_RPC_TIMEOUT, 'get_task timeout').then(function(task) {
+				if (!task || task.state === 'missing') { reject(new Error(_('Task not found'))); return; }
+				if (task.state === 'success') { touch(task.config_section); resolve(task.result); return; }
+				if (task.state === 'failed') {
+					touch(task.config_section);
+					reject(new Error(task.error || _('Task failed')));
+					return;
+				}
+				retry();
+			}, retry);
+		}
+		window.setTimeout(step, 150);
+	});
+}
+
+/* createFn 立即返回 { task_id }，随后轮询直到 success/failed */
+function runTask(createFn, timeoutMs) {
+	return withTimeoutReject(createFn(), TASK_RPC_TIMEOUT, _('Failed to create task')).then(function(res) {
+		if (!res || !res.task_id)
+			return Promise.reject(new Error((res && res.error) || _('Task rejected by backend')));
+		return waitForTask(res.task_id, timeoutMs);
+	});
+}
+
+/*
+ * 把任意 QModem ubus 方法包装成后台任务执行。
+ * 对调用方保持与旧版一致的语义：返回一个最终 resolve 出 ubus 结果的 Promise，
+ * 但底层不再让 rpcd 同步等待 modem。缓存层不可用时自动退回直连。
+ */
+function qmodemAction(section, method, args, directFn, timeoutMs) {
+	if (!cacheLayerUsable())
+		return withTimeoutReject(directFn(), DIRECT_RPC_TIMEOUT, _('Modem request timed out'));
+
+	return runTask(function() {
+		return callTaskAction(section, 'qmodem', method, args || {});
+	}, timeoutMs || 150000).then(function(result) {
+		touch(section);
+		return result;
+	}, function(err) {
+		touch(section);
+		return Promise.reject(err);
+	});
+}
+
+/* ------------------------------------------------------------------ */
+/* 安全轮询（不产生请求堆积）                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * createPoller({ fn, interval, hiddenInterval, node })
+ *   fn               每次轮询执行的函数（返回 Promise）
+ *   interval         前台间隔（毫秒）
+ *   hiddenInterval   页面隐藏时的间隔（降频，默认 interval × 4）
+ *   node             关联的 DOM 节点；节点从文档移除后自动停止轮询
+ *
+ * 保证：
+ *   - 上一次 fn 未完成时绝不发起下一次（request→完成→等待→下一次）
+ *   - 页面隐藏时降频
+ *   - 节点被移除（LuCI 切换视图）后自动 stop，不留定时器
+ */
+function createPoller(opts) {
+	var timer = null;
+	var busy = false;
+	var stopped = false;
+	var interval = opts.interval || 5000;
+	var hiddenInterval = opts.hiddenInterval || (interval * 4);
+
+	function alive() {
+		if (stopped) return false;
+		if (opts.node && typeof document !== 'undefined' && document.body &&
+			!document.body.contains(opts.node)) {
+			stop();
+			return false;
+		}
+		return true;
+	}
+
+	function schedule() {
+		if (!alive()) return;
+		var iv = (typeof document !== 'undefined' && document.hidden) ? hiddenInterval : interval;
+		timer = window.setTimeout(tick, iv);
+	}
+
+	function tick() {
+		timer = null;
+		if (!alive()) return;
+		if (busy) { schedule(); return; }   /* 绝不重叠 */
+
+		busy = true;
+		Promise.resolve().then(function() {
+			return opts.fn();
+		}).catch(function() {
+			return null;                    /* 单次失败不影响后续轮询 */
+		}).then(function() {
+			busy = false;
+			schedule();
+		});
+	}
+
+	function start() {
+		if (stopped) return;
+		if (timer === null && !busy) schedule();
+	}
+	function stop() {
+		stopped = true;
+		if (timer !== null) { window.clearTimeout(timer); timer = null; }
+	}
+
+	return { start: start, stop: stop, isRunning: function() { return !stopped; } };
+}
+
+/*
+ * liveView —— 视图的通用 render：
+ *   1) 立即用 load() 拿到的数据画出完整页面（骨架 + 已有数据）
+ *   2) 启动安全轮询，后台数据到位后**局部重绘**（只替换本视图的子树）
+ *   3) 视图节点被移除 / 页面卸载时自动停止轮询
+ */
+function liveView(view, res, opts) {
+	opts = opts || {};
+	var holder = E('div', { 'class': 'qmodem-generic-live' });
+
+	/*
+	 * 用户正在编辑时跳过本轮重绘，避免轮询把用户还没提交的内容
+	 * （短信草稿、AT 命令输入、下拉框选择…）冲掉。
+	 * 判定方式：焦点在本视图的表单控件里，或任一控件的值与上次重绘后不同。
+	 */
+	var formState = null;
+
+	function snapshotForm() {
+		var out = [];
+		var nodes = holder.querySelectorAll('input, textarea, select');
+		for (var i = 0; i < nodes.length; i++) {
+			var n = nodes[i];
+			out.push((n.type === 'checkbox' || n.type === 'radio') ? n.checked : n.value);
+		}
+		return out;
+	}
+
+	function editing() {
+		if (opts.skipIfEditing === false)
+			return false;
+
+		var active = (typeof document !== 'undefined') ? document.activeElement : null;
+		if (active && holder.contains(active) &&
+			/^(input|textarea|select)$/i.test(active.tagName || ''))
+			return true;
+
+		var now = snapshotForm();
+		if (!formState) { formState = now; return false; }
+		if (now.length !== formState.length) { formState = now; return false; }
+		for (var i = 0; i < now.length; i++)
+			if (now[i] !== formState[i])
+				return true;
+		return false;
+	}
+
+	function paint(data) {
+		var node = null;
+		try {
+			node = opts.paint.call(view, data);
+		} catch (err) {
+			node = E('div', { 'class': 'alert-message danger' },
+				_('页面渲染失败：') + ((err && err.message) || String(err)));
+		}
+		while (holder.firstChild)
+			holder.removeChild(holder.firstChild);
+		if (node) holder.appendChild(node);
+		formState = snapshotForm();
+	}
+
+	paint(res);
+
+	if (res && res.section && opts.paint && opts.domains) {
+		if (view.poller && view.poller.stop) view.poller.stop();
+		view.poller = createPoller({
+			node: holder,
+			interval: opts.interval || 5000,
+			fn: function() {
+				return fetchSnapshot(res.section, opts.domains, true).then(function(snap) {
+					if (!snap) return null;
+					/* 用与 load() 完全相同的 collect() 重新组装数据，
+					 * 保证首屏与轮询走的是同一条代码路径 */
+					var next = opts.collect.call(view, {
+						section: res.section,
+						sections: res.sections || [],
+						snap: snap,
+						errors: []
+					});
+					return Promise.resolve(next).then(function(data) {
+						if (editing()) return data;   /* 用户正在输入，本轮不重绘 */
+						paint(data);
+						return data;
+					});
+				});
+			}
+		});
+		view.poller.start();
+	}
+
+	if (view.poller)
+		registerLivePoller(view.poller);
+
+	return holder;
+}
+
+/*
+ * 所有活跃轮询器的登记表 + 一次性注册的全局卸载钩子。
+ * 之前的写法用 liveView.bound 只绑一次 pagehide，闭包里捕获的是「第一个视图」，
+ * 于是切到第二个页面后 pagehide 停不掉它的轮询 —— 这里改成停掉全部。
+ */
+var livePollers = [];
+
+function registerLivePoller(poller) {
+	livePollers = livePollers.filter(function(p) { return p && p.isRunning && p.isRunning(); });
+	livePollers.push(poller);
+
+	if (typeof window === 'undefined' || window.__qmodemLiveBound)
+		return;
+	window.__qmodemLiveBound = true;
+
+	function stopAll() {
+		livePollers.forEach(function(p) {
+			try { p.stop(); } catch (e) { /* 忽略：卸载阶段不再抛错 */ }
+		});
+		livePollers = [];
+	}
+
+	/* pagehide 覆盖跳转/关闭；visibilitychange 覆盖切到后台标签页（降频由 poller 自己处理） */
+	if (window.addEventListener) {
+		window.addEventListener('pagehide', stopAll);
+		window.addEventListener('beforeunload', stopAll);
+	}
+}
 
 /* ------------------------------------------------------------------ */
 /* 通用辅助                                                            */
@@ -312,112 +786,399 @@ function evalConnectionStatus(opts) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 数据获取封装（返回 Promise）                                        */
+/* 数据获取封装（返回 Promise）—— 全部改为「缓存优先」                 */
 /* ------------------------------------------------------------------ */
+/*
+ * 每个 getter 的语义与旧版完全一致（返回同样的数据形状），但数据来源变了：
+ *
+ *   旧：直接 ubus call qmodem <method>   → 每次都是一次 modem/AT 查询，
+ *                                          首屏必须等它，modem 无响应就白屏
+ *   新：qmodem_cache.snapshot            → 只读 /tmp/qmodem-cache 的 JSON 快照
+ *                                          缺失/过期时后台补采，页面先显示旧值
+ *
+ * 只有在缓存层不可用（老固件没装 worker / rpcd 未重启）时，才退化为直连
+ * QModem，且那条路径带 DIRECT_RPC_TIMEOUT 上限、不参与 HTTP 批量。
+ */
+
+/* QModem 的信息类方法统一返回 { modem_info: [...] }，这里摊平成数组 */
+function modemInfo(v) {
+	return unwrapModemInfo(v);
+}
+function unwrapModemInfo(v) {
+	if (v && Array.isArray(v.modem_info)) return v.modem_info;
+	return Array.isArray(v) ? v : (v ? [v] : []);
+}
+
+/* 读取整个域名的 data（用于 qos / radio / support 这类「data 即结果」的域） */
+function cachedDomain(section, domain, fallback, directFn) {
+	return fetchSnapshot(section, [domain]).then(function(snap) {
+		if (snap) {
+			var env = envelopeOf(snap, domain);
+			var meta = domainMeta(snap, domain);
+			if (meta.status === 'missing' || meta.stale)
+				requestRefresh(section, [domain]);
+			if (!env || !env.data || typeof env.data !== 'object' || !Object.keys(env.data).length)
+				return fallback;
+			var out = {};
+			Object.keys(env.data).forEach(function(k) { out[k] = env.data[k]; });
+			out.cache_status = meta.status;
+			out.cache_age = meta.age;
+			out.cache_stale = meta.stale;
+			return out;
+		}
+		if (typeof directFn === 'function')
+			return withTimeout(directFn(), DIRECT_RPC_TIMEOUT, fallback);
+		return fallback;
+	});
+}
 
 function getBaseInfo(section) {
-	return callBaseInfo(section).then(function(r) { return (r && r.modem_info) ? r.modem_info : (r || []); });
+	return cachedValue(section, 'status', 'base_info', [], function() { return callBaseInfo(section); }, unwrapModemInfo);
 }
 function getInfo(section) {
-	return callInfo(section).then(function(r) { return (r && r.modem_info) ? r.modem_info : (r || []); });
+	return cachedValue(section, 'device', 'info', [], function() { return callInfo(section); }, unwrapModemInfo);
 }
 function getSimInfo(section) {
-	return callSimInfo(section).then(function(r) { return (r && r.modem_info) ? r.modem_info : (r || []); });
+	return cachedValue(section, 'sim', 'sim_info', [], function() { return callSimInfo(section); }, unwrapModemInfo);
 }
 function getNetworkInfo(section) {
-	return callNetworkInfo(section).then(function(r) { return (r && r.modem_info) ? r.modem_info : (r || []); });
+	return cachedValue(section, 'network', 'network_info', [], function() { return callNetworkInfo(section); }, unwrapModemInfo);
 }
 function getCellInfo(section) {
-	return callCellInfo(section).then(function(r) { return (r && r.modem_info) ? r.modem_info : (r || []); });
+	return cachedValue(section, 'signal', 'cell_info', [], function() { return callCellInfo(section); }, unwrapModemInfo);
 }
-function getAtCfg(section) { return callGetAtCfg(section); }
-function getImei(section) { return callGetImei(section); }
-function getMode(section) { return callGetMode(section); }
-function getLockBand(section) { return callGetLockband(section); }
-function getNeighborCell(section) { return callGetNeighborcell(section); }
-function getNetworkPrefer(section) { return callGetNetworkPrefer(section); }
-function getDns(section) { return callGetDns(section); }
-function getSms(section) { return callGetSms(section); }
-function getDisabledFeatures(section) { return callGetDisabledFeatures(section); }
-function getRebootCaps(section) { return callGetRebootCaps(section); }
-function getCopyright(section) { return callGetCopyright(section); }
-function getCurrentBand(section) {
-	return callGetCurrentBand(section).then(function(r) {
-		/* 部分模组返回 { status: "unsupported" }，统一为空载波列表 */
-		if (r && r.status === 'unsupported' && !Array.isArray(r.cells))
-			r = { cells: [], status: 'unsupported' };
-		return r;
+function getAtCfg(section) {
+	return cachedValue(section, 'device', 'at_cfg', {}, function() { return callGetAtCfg(section); });
+}
+function getImei(section) {
+	return cachedValue(section, 'sim', 'imei', {}, function() { return callGetImei(section); });
+}
+function getMode(section) {
+	return cachedValue(section, 'network', 'mode', {}, function() { return callGetMode(section); });
+}
+function getLockBand(section) {
+	return cachedValue(section, 'network', 'lockband', {}, function() { return callGetLockband(section); });
+}
+function getNeighborCell(section) {
+	return cachedValue(section, 'network', 'neighborcell', {}, function() { return callGetNeighborcell(section); });
+}
+function getNetworkPrefer(section) {
+	return cachedValue(section, 'network', 'network_prefer', {}, function() { return callGetNetworkPrefer(section); });
+}
+function getDns(section) {
+	return cachedValue(section, 'status', 'dns', {}, function() { return callGetDns(section); });
+}
+
+/*
+ * 短信列表不在 worker 的周期采集范围内（部分模组读短信很慢），
+ * 因此：缓存命中就直接用；没有缓存则后台排任务 + 先返回空列表，
+ * 由页面的轮询在数据到位后补上。绝不为了首屏去同步读 SIM。
+ */
+function getSms(section) {
+	return fetchSnapshot(section, ['sms']).then(function(snap) {
+		var env = envelopeOf(snap, 'sms');
+		if (snap && env && env.data && env.data.get_sms)
+			return env.data.get_sms;
+
+		if (!snap)
+			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
+
+		requestRefresh(section, ['sms'], true);
+		return {};
 	});
 }
-function getCurrentBandCapabilities(section) { return callGetCurrentBandCapabilities(section); }
+
+function getDisabledFeatures(section) {
+	return cachedValue(section, 'network', 'disabled_features', {}, function() { return callGetDisabledFeatures(section); });
+}
+function getRebootCaps(section) {
+	return cachedValue(section, 'device', 'reboot_caps', {}, function() { return callGetRebootCaps(section); });
+}
+function getCopyright(section) {
+	return cachedValue(section, 'device', 'copyright', {}, function() { return callGetCopyright(section); });
+}
+function getCurrentBand(section) {
+	return cachedValue(section, 'signal', 'current_band', {}, function() { return callGetCurrentBand(section); },
+		function(r) {
+			/* 部分模组返回 { status: "unsupported" }，统一为空载波列表 */
+			if (r && r.status === 'unsupported' && !Array.isArray(r.cells))
+				return { cells: [], status: 'unsupported' };
+			return r;
+		});
+}
+function getCurrentBandCapabilities(section) {
+	return cachedValue(section, 'network', 'current_band_capabilities', {}, function() { return callGetCurrentBandCapabilities(section); });
+}
+
 /* 兼容实机差异：部分 QModem 版本返回 connection_status 而非 connect_status */
 function getConnectStatus(section) {
-	return callGetConnectStatus(section).then(function(r) {
-		if (r && r.connection_status != null && r.connect_status == null)
-			r.connect_status = r.connection_status;
-		return r;
-	});
+	return cachedValue(section, 'status', 'connect_status', {}, function() { return callGetConnectStatus(section); },
+		function(r) {
+			if (r && r.connection_status != null && r.connect_status == null)
+				r.connect_status = r.connection_status;
+			return r;
+		});
 }
-function getDialStatus(section) { return callGetDialStatus(section); }
-function getDialLog(section) { return callGetDialLog(section); }
-function getSimSlot(section) { return callGetSimSlot(section); }
-function getSimSwitchCapabilities(section) { return callGetSimSwitchCapabilities(section); }
+function getDialStatus(section) {
+	return cachedValue(section, 'status', 'dial_status', {}, function() { return callGetDialStatus(section); });
+}
+
+/* 拨号日志体量大且只在用户点开时读取，不进周期缓存；直连但带超时 */
+function getDialLog(section) {
+	return withTimeout(callGetDialLog(section), DIRECT_RPC_TIMEOUT, {});
+}
+
+function getSimSlot(section) {
+	return cachedValue(section, 'sim', 'sim_slot', {}, function() { return callGetSimSlot(section); });
+}
+function getSimSwitchCapabilities(section) {
+	return cachedValue(section, 'sim', 'sim_switch_capabilities', {}, function() { return callGetSimSwitchCapabilities(section); });
+}
 function getUsageStats(section) {
-	return callGetUsageStats(section).catch(function() { return { available: 0 }; });
+	return cachedValue(section, 'stats', 'usage', { available: 0 }, function() { return callGetUsageStats(section); });
 }
 function getDailyStats(section) {
-	return callDailyStats(section).catch(function() { return null; });
+	return cachedValue(section, 'stats', 'daily', null, function() { return callDailyStats(section); });
 }
-function statsReset(section) { return callStatsReset(section); }
-function getTrafficResetSchedule(section) { return callGetTrafficResetSchedule(section); }
 
-// 模组支持库（/usr/share/qmodem/modem_support.json）注入状态与同步。
-// 该能力与具体模组无关，即使 QModem 尚未识别到任何模组也应可调用：
-// status 只读取，sync 会改写支持库（后端写入前自动备份，校验失败回滚）。
-function getSupportStatus() {
-	return callSupportStatus().catch(function() {
-		return { available: 0, path: '', added: [], skipped: [], missing: [],
-			error: 'qmodem_support 不可用（请确认 rpcd 已重启并已升级本插件）' };
+/* 清零需要读一次模组计数器建立新基准 → 走后台任务，不让 rpcd 同步等 modem */
+function statsReset(section) {
+	if (!cacheLayerUsable())
+		return withTimeout(callStatsReset(section), DIRECT_RPC_TIMEOUT, null);
+	return runTask(function() { return callStatsResetTask(section); }, 60000).then(function(res) {
+		touch(section);
+		refreshQueued = {};
+		return res;
 	});
 }
-function syncSupport() { return callSupportSync(); }
+function getTrafficResetSchedule(section) {
+	return cachedValue(section, 'stats', 'traffic_reset_schedule', {}, function() { return callGetTrafficResetSchedule(section); });
+}
+
+/*
+ * 模组支持库（/usr/share/qmodem/modem_support.json）注入状态与同步。
+ * 该能力与具体模组无关，即使 QModem 尚未识别到任何模组也应可调用。
+ * status 由 worker 周期写入缓存（内容是纯文件扫描结果）；
+ * sync 改为后台任务：仍然返回 { available, added, skipped, missing, error }，
+ * 调用方无需改动，但不再让 rpcd 同步执行文件合并。
+ */
+function getSupportStatus() {
+	return supportFromAnySection();
+}
+
+/* support 域与模组无关：从当前 section 的快照里取；拿不到再直连一次 */
+function supportFromAnySection() {
+	return resolveSection().then(function(section) {
+		if (!section)
+			return withTimeout(callSupportStatus(), DIRECT_RPC_TIMEOUT, supportUnavailable());
+		return fetchSnapshot(section, ['support']).then(function(snap) {
+			var env = envelopeOf(snap, 'support');
+			if (env && env.data && (env.data.available != null || env.data.path))
+				return env.data;
+			if (!snap)
+				return withTimeout(callSupportStatus(), DIRECT_RPC_TIMEOUT, supportUnavailable());
+			return withTimeout(callSupportStatus(), CACHE_RPC_TIMEOUT, supportUnavailable());
+		});
+	});
+}
+
+function supportUnavailable() {
+	return { available: 0, path: '', added: [], skipped: [], missing: [],
+		error: 'qmodem_support 不可用（请确认 rpcd 已重启并已升级本插件）' };
+}
+
+function syncSupport(section) {
+	var direct = function() { return withTimeout(callSupportSync(), DIRECT_RPC_TIMEOUT, supportUnavailable()); };
+	if (!cacheLayerUsable())
+		return direct();
+
+	var target = section || null;
+	return resolveSection().then(function(sec) {
+		target = section || sec || '';
+		return runTask(function() {
+			return callTaskAction(target, 'qmodem_support', 'sync', {});
+		}, 60000);
+	}).then(function(res) {
+		if (res && (res.available != null || res.added)) {
+			touch(target);
+			refreshQueued = {};
+			return res;
+		}
+		return direct();
+	}, direct);
+}
+
 
 /* ------------------------------------------------------------------ */
 /* 控制动作封装（写操作，返回 Promise）                                */
 /* ------------------------------------------------------------------ */
 
-// 发送 AT 命令（经 QModem ubus）。atPort 可为空，由 QModem 自行选择默认端口。
+/*
+ * 所有会碰 modem 的写操作都改为「后台任务」：
+ *   controls.xxx()  →  qmodem_cache.action（立即返回 task_id）
+ *                   →  qmodem-task 在持有 AT 互斥锁的子进程里执行 ubus call
+ *                   →  前端轮询 get_task，完成后 resolve 出 ubus 原始结果
+ * 对调用方来说签名和返回值都没变，但 rpcd 不再同步等待 modem，
+ * 而且同类任务自动去重（点两次「重启模组」不会真的重启两次）。
+ * 缓存层不可用时自动退回直连（带超时）。
+ */
+
+/* 发送 AT 命令。atPort 可为空，由 QModem 自行选择默认端口。 */
 function sendAt(section, atPort, command, useUbus) {
 	var params = { at: command };
 	if (atPort) params.port = atPort;
 	if (useUbus !== undefined && useUbus !== null) params.use_ubus = useUbus;
-	return callSendAt(section, params);
+	var direct = function() { return withTimeoutReject(callSendAt(section, params), DIRECT_RPC_TIMEOUT, _('AT command timed out')); };
+
+	if (!cacheLayerUsable())
+		return direct();
+
+	/* 无端口/无 use_ubus 时走 qmodem_cache.send_at（后端串行化 AT 通道） */
+	if (!atPort && (useUbus === undefined || useUbus === null)) {
+		return runTask(function() { return callTaskSendAt(section, command); }, 30000).then(function(res) {
+			touch(section);
+			return res;
+		}, direct);
+	}
+	return qmodemAction(section, 'send_at', params, direct, 30000);
 }
+
 function sendSms(section, phoneNumber, content) {
-	return callSendSms(section, { phone_number: phoneNumber, message_content: content });
+	var args = { phone_number: phoneNumber, message_content: content };
+	return qmodemAction(section, 'send_sms', args,
+		function() { return withTimeoutReject(callSendSms(section, args), DIRECT_RPC_TIMEOUT, _('Sending SMS timed out')); }, 60000);
 }
-function sendRawPdu(section, command) { return callSendRawPdu(section, command); }
-function deleteSms(section, index) { return callDeleteSms(section, index); }
-function setMode(section, mode) { return callSetMode(section, mode); }
-function setImei(section, imei) { return callSetImei(section, imei); }
-function setLockBand(section, params) { return callSetLockband(section, params); }
-function setNetworkPrefer(section, params) { return callSetNetworkPrefer(section, params); }
-function setSimSlot(section, slot) { return callSetSimSlot(section, slot); }
+function sendRawPdu(section, command) {
+	return qmodemAction(section, 'send_raw_pdu', { cmd: command },
+		function() { return withTimeoutReject(callSendRawPdu(section, command), DIRECT_RPC_TIMEOUT, _('PDU request timed out')); }, 60000);
+}
+function deleteSms(section, index) {
+	return qmodemAction(section, 'delete_sms', { index: index },
+		function() { return withTimeoutReject(callDeleteSms(section, index), DIRECT_RPC_TIMEOUT, _('Deleting SMS timed out')); }, 60000);
+}
+function setMode(section, mode) {
+	return qmodemAction(section, 'set_mode', { mode: mode },
+		function() { return withTimeoutReject(callSetMode(section, mode), DIRECT_RPC_TIMEOUT, _('Setting mode timed out')); }, 120000);
+}
+function setImei(section, imei) {
+	return qmodemAction(section, 'set_imei', { imei: imei },
+		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000);
+}
+function setLockBand(section, params) {
+	return qmodemAction(section, 'set_lockband', { params: params },
+		function() { return withTimeoutReject(callSetLockband(section, params), DIRECT_RPC_TIMEOUT, _('Locking band timed out')); }, 120000);
+}
+function setNetworkPrefer(section, params) {
+	return qmodemAction(section, 'set_network_prefer', { params: params },
+		function() { return withTimeoutReject(callSetNetworkPrefer(section, params), DIRECT_RPC_TIMEOUT, _('Setting network preference timed out')); }, 120000);
+}
+function setSimSlot(section, slot) {
+	return qmodemAction(section, 'set_sim_slot', { slot: slot },
+		function() { return withTimeoutReject(callSetSimSlot(section, slot), DIRECT_RPC_TIMEOUT, _('Switching SIM slot timed out')); }, 120000);
+}
 function doReboot(section, method) {
-	return callDoReboot(section, { method: method || 'soft' });
+	var args = { method: method || 'soft' };
+	return qmodemAction(section, 'do_reboot', args,
+		function() { return withTimeoutReject(callDoReboot(section, args), DIRECT_RPC_TIMEOUT, _('Reboot request timed out')); }, 180000);
 }
-function clearDialLog(section) { return callClearDialLog(section); }
-function clearStats(section) { return callClearStats(section); }
-function setTrafficResetSchedule(section, params) { return callSetTrafficResetSchedule(section, params); }
-function setNeighborCell(section, params) { return callSetNeighborCell(section, params); }
-function setSmsStorage(section, storage) { return callSetSmsStorage(section, storage); }
-function modemDial(section) { return callModemDial(section); }
-function modemHang(section) { return callModemHang(section); }
-function modemRedial(section) { return callModemRedial(section); }
-function rcList(name) { return callRcList(name); }
-function getDeviceStatus(name) { return callDeviceStatus(name); }
-function getQosInfo(section) { return callQosInfo(section).catch(function() { return { qci: 0, status: 'unavailable' }; }); }
-function getRadioInfo(section) { return callRadioInfo(section).catch(function() { return { status: 'unavailable' }; }); }
+function clearDialLog(section) {
+	return qmodemAction(section, 'clear_dial_log', {},
+		function() { return withTimeoutReject(callClearDialLog(section), DIRECT_RPC_TIMEOUT, _('Clearing log timed out')); }, 60000);
+}
+function clearStats(section) {
+	return qmodemAction(section, 'clear_stats', {},
+		function() { return withTimeoutReject(callClearStats(section), DIRECT_RPC_TIMEOUT, _('Clearing counters timed out')); }, 60000);
+}
+function setTrafficResetSchedule(section, params) {
+	return qmodemAction(section, 'set_traffic_reset_schedule', { params: params },
+		function() { return withTimeoutReject(callSetTrafficResetSchedule(section, params), DIRECT_RPC_TIMEOUT, _('Saving schedule timed out')); }, 60000);
+}
+function setNeighborCell(section, params) {
+	return qmodemAction(section, 'set_neighborcell', { params: params },
+		function() { return withTimeoutReject(callSetNeighborCell(section, params), DIRECT_RPC_TIMEOUT, _('Neighbour cell request timed out')); }, 120000);
+}
+function setSmsStorage(section, storage) {
+	return qmodemAction(section, 'set_sms_storage', { storage: storage },
+		function() { return withTimeoutReject(callSetSmsStorage(section, storage), DIRECT_RPC_TIMEOUT, _('Setting SMS storage timed out')); }, 60000);
+}
+function modemDial(section) {
+	return qmodemAction(section, 'modem_dial', {},
+		function() { return withTimeoutReject(callModemDial(section), DIRECT_RPC_TIMEOUT, _('Dial request timed out')); }, 180000);
+}
+function modemHang(section) {
+	return qmodemAction(section, 'modem_hang', {},
+		function() { return withTimeoutReject(callModemHang(section), DIRECT_RPC_TIMEOUT, _('Hangup request timed out')); }, 120000);
+}
+function modemRedial(section) {
+	return qmodemAction(section, 'modem_redial', {},
+		function() { return withTimeoutReject(callModemRedial(section), DIRECT_RPC_TIMEOUT, _('Redial request timed out')); }, 180000);
+}
+
+/* 与 modem 无关：直接调用即可 */
+function rcList(name) { return withTimeout(callRcList(name), DIRECT_RPC_TIMEOUT, {}); }
+function getDeviceStatus(name) { return withTimeout(callDeviceStatus(name), DIRECT_RPC_TIMEOUT, {}); }
+
+/*
+ * 物理网口状态：worker 已在 status 域里一并采好（network.device status），
+ * 视图应优先用这个缓存版本，避免为了拿一个 MTU 再发一次 RPC。
+ */
+function getDeviceStatusCached(section) {
+	return cachedValue(section, 'status', 'device', {}, function() { return Promise.resolve({}); });
+}
+
+/* QoS / 调制信息：AT 探测已搬到 qmodem-worker，这里只读缓存 */
+function getQosInfo(section) {
+	return cachedDomain(section, 'qos', { qci: 0, status: 'unavailable' },
+		function() { return callQosInfo(section); });
+}
+function getRadioInfo(section) {
+	return cachedDomain(section, 'radio', { status: 'unavailable' },
+		function() { return callRadioInfo(section); });
+}
+
+/*
+ * 把 worker 采集到的 { names: [...], entries: { name: <status> } } 合并成
+ * 单一接口视图。QModem 为同一模组生成的 IPv4 与 IPv6 地址分布在两个逻辑接口上，
+ * 这里把地址/前缀/DNS 等合并，UI 直接取字段展示即可。
+ */
+function mergeIfaceEntries(entries, names) {
+	var merged = {};
+	var list = [];
+
+	if (entries && typeof entries === 'object') {
+		Object.keys(entries).forEach(function(name) { list.push(entries[name]); });
+	} else if (Array.isArray(entries)) {
+		list = entries;
+	}
+
+	list.forEach(function(e) {
+		Object.keys(e || {}).forEach(function(k) {
+			switch (k) {
+				case 'ipv4-address':
+				case 'ipv6-address':
+				case 'ipv6-prefix':
+				case 'ipv6-prefix-assignment':
+				case 'dns-server':
+					merged[k] = (merged[k] || []).concat(Array.isArray(e[k]) ? e[k] : []);
+					break;
+				case 'uptime':
+					merged[k] = Math.max(merged[k] || 0, e[k] || 0);
+					break;
+				case 'up':
+					merged[k] = (merged[k] === true) || e[k] === true;
+					break;
+				default:
+					if (merged[k] == null && e[k] != null)
+						merged[k] = e[k];
+			}
+		});
+	});
+
+	if (!merged.interface && Array.isArray(names) && names.length)
+		merged.interface = names[0];
+
+	return merged;
+}
 
 /*
  * 解析某个模组配置节对应的 netifd 逻辑接口。
@@ -427,27 +1188,47 @@ function getRadioInfo(section) { return callRadioInfo(section).catch(function() 
  *   2) 回退：与配置节同名及 <section>v6 后缀的接口（兼容旧命名规则）
  *   3) 回退：三层设备等于 qmodem 配置中物理网口（network 选项）的接口
  * 返回 { names: [接口名...], entries: [各接口的 status 对象...] }
+ *
+ * 解析结果由 qmodem-worker 周期写入 status 域的 ifaces 字段，
+ * 这里优先读缓存；缓存层不可用时才回退到「uci.load('network') + interface dump」。
  */
 function getModemInterfaces(section) {
+	return fetchSnapshot(section, ['status']).then(function(snap) {
+		if (snap) {
+			var ifaces = domainData(snap, 'status').ifaces || {};
+			var names = Array.isArray(ifaces.names) ? ifaces.names : [];
+			var entries = [];
+			Object.keys(ifaces.entries || {}).forEach(function(n) { entries.push(ifaces.entries[n]); });
+			return { names: names, entries: entries };
+		}
+		return resolveModemInterfacesDirect(section);
+	});
+}
+
+/* 缓存层不可用时的原始解析路径（带超时，绝不无限等待） */
+function resolveModemInterfacesDirect(section) {
 	return Promise.all([
-		uci.load('network').catch(function() { return null; }),
-		callInterfaceDump().catch(function() { return []; })
+		withTimeout(uci.load('network'), DIRECT_RPC_TIMEOUT, null),
+		withTimeout(callInterfaceDump(), DIRECT_RPC_TIMEOUT, [])
 	]).then(function(res) {
 		var dump = Array.isArray(res[1]) ? res[1] : [];
 		var byName = {};
 		dump.forEach(function(e) { if (e && e.interface) byName[e.interface] = e; });
 
 		var names = [];
-		uci.sections('network', 'interface', function(s) {
-			if (s && s['.name'] && s.modem_config === section && byName[s['.name']])
-				names.push(s['.name']);
-		});
+		try {
+			uci.sections('network', 'interface', function(s) {
+				if (s && s['.name'] && s.modem_config === section && byName[s['.name']])
+					names.push(s['.name']);
+			});
+		} catch (e) { names = []; }
 
 		if (!names.length)
 			[section, section + 'v6'].forEach(function(n) { if (byName[n]) names.push(n); });
 
 		if (!names.length) {
-			var dev = uci.get('qmodem', section, 'network') || '';
+			var dev = '';
+			try { dev = uci.get('qmodem', section, 'network') || ''; } catch (e) { dev = ''; }
 			if (dev)
 				dump.forEach(function(e) {
 					if ((e.l3_device === dev || e.device === dev) && names.indexOf(e.interface) === -1)
@@ -460,35 +1241,22 @@ function getModemInterfaces(section) {
 }
 
 /*
- * 取模组数据接口的合并状态。QModem 为同一模组生成的 IPv4 与 IPv6 地址分布在两个
- * 逻辑接口上，这里把地址/前缀/DNS 等合并为一个视图，UI 直接取字段展示即可。
+ * 取模组数据接口的合并状态：优先用 worker 已采集好的 status.ifaces（纯缓存读），
+ * 缓存层不可用时才现场解析 netifd。
  */
 function getInterfaceStatus(section) {
-	return getModemInterfaces(section).then(function(r) {
-		var merged = {};
-		r.entries.forEach(function(e) {
-			Object.keys(e || {}).forEach(function(k) {
-				switch (k) {
-					case 'ipv4-address':
-					case 'ipv6-address':
-					case 'ipv6-prefix':
-					case 'ipv6-prefix-assignment':
-					case 'dns-server':
-						merged[k] = (merged[k] || []).concat(Array.isArray(e[k]) ? e[k] : []);
-						break;
-					case 'uptime':
-						merged[k] = Math.max(merged[k] || 0, e[k] || 0);
-						break;
-					case 'up':
-						merged[k] = (merged[k] === true) || e[k] === true;
-						break;
-					default:
-						if (merged[k] == null && e[k] != null)
-							merged[k] = e[k];
-				}
-			});
+	return fetchSnapshot(section, ['status']).then(function(snap) {
+		if (snap) {
+			var data = domainData(snap, 'status');
+			var ifaces = data.ifaces || {};
+			var merged = mergeIfaceEntries(ifaces.entries, ifaces.names);
+			if (!merged.l3_device && !merged.device && ifaces.netdev)
+				merged.l3_device = ifaces.netdev;
+			return merged;
+		}
+		return resolveModemInterfacesDirect(section).then(function(r) {
+			return mergeIfaceEntries(r.entries, r.names);
 		});
-		return merged;
 	});
 }
 
@@ -846,7 +1614,86 @@ function operatorInfo(name, mcc, mnc) {
 	return { name: name || _('Mobile Network'), logo: null };
 }
 
+/* ------------------------------------------------------------------ */
+/* 视图入口：首屏加载                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * bootstrap(domains) —— 所有视图 load() 的统一入口。
+ *
+ * 只做两件**都不会碰 modem** 的事：
+ *   1) uci.load('qmodem')         读配置（本地文件，毫秒级）
+ *   2) qmodem_cache.snapshot      读状态缓存（纯文件 IO，正常 < 50 ms）
+ * 两者都带客户端超时，且**永不 reject** —— 无论 QModem 是否已识别模组、
+ * modem 是否失联、worker 是否在跑，页面框架都能立刻渲染出来。
+ *
+ * 返回 { section, sections, snap, errors }。
+ * 若缓存缺失/过期，会自动排一个后台 refresh 任务，由页面的轮询补上数据。
+ */
+function bootstrap(domains) {
+	var ctx = { section: null, sections: [], snap: null, errors: [] };
+
+	return withTimeout(uci.load('qmodem'), CACHE_RPC_TIMEOUT, null).then(function() {
+		ctx.sections = getModemSectionsSync();
+		return resolveSection();
+	}).then(function(section) {
+		ctx.section = section || null;
+		if (!ctx.section)
+			return ctx;
+
+		return fetchSnapshot(ctx.section, domains).then(function(snap) {
+			ctx.snap = snap;
+			if (!snap || !snapshotCovers(snap, domains))
+				requestRefresh(ctx.section, domains, true);
+			return ctx;
+		});
+	}).then(function() {
+		return ctx;
+	}, function(err) {
+		ctx.errors.push((err && err.message) || String(err));
+		return ctx;
+	});
+}
+
+/*
+ * 缓存健康度汇总，供页面顶部显示「离线 / 数据过期」而不是白屏。
+ * 返回 { offline, stale, oldest, statuses: { domain: meta } }
+ */
+function dataStatus(snap, domains) {
+	var out = { offline: false, stale: false, oldest: -1, statuses: {}, available: !!snap };
+	(domains || []).forEach(function(d) {
+		var meta = domainMeta(snap, d);
+		out.statuses[d] = meta;
+		if (meta.status === 'offline') out.offline = true;
+		if (meta.stale) out.stale = true;
+		if (meta.age > out.oldest) out.oldest = meta.age;
+	});
+	return out;
+}
+
 return baseclass.extend({
+	/* ---- 异步化基础设施（视图直接复用，避免各自实现轮询/超时） ---- */
+	bootstrap: bootstrap,
+	dataStatus: dataStatus,
+	fetchSnapshot: fetchSnapshot,
+	snapshotCovers: snapshotCovers,
+	envelopeOf: envelopeOf,
+	domainData: domainData,
+	domainMeta: domainMeta,
+	requestRefresh: requestRefresh,
+	touch: touch,
+	cacheLayerUsable: cacheLayerUsable,
+	runTask: runTask,
+	waitForTask: waitForTask,
+	qmodemAction: qmodemAction,
+	createPoller: createPoller,
+	liveView: liveView,
+	withTimeout: withTimeout,
+	withTimeoutReject: withTimeoutReject,
+	mergeIfaceEntries: mergeIfaceEntries,
+	modemInfo: modemInfo,
+	getDeviceStatusCached: getDeviceStatusCached,
+
 	findEntry: findEntry,
 	entryList: entryList,
 	entryMap: entryMap,

@@ -10,7 +10,7 @@
  *
  * 本页编辑的是 QModem 的 UCI 配置 /etc/config/qmodem 中当前模组的
  * modem-device 配置节，不再使用旧版包专用的 /etc/config 配置节。
- * 配置节 id 由 controls.resolveSection() 解析（任意 QModem 支持的模组）。
+ * 配置节 id 由 controls.bootstrap() 解析（任意 QModem 支持的模组）。
  * 仅暴露 QModem 真实存在的选项，不再提供旧版私有的 host/port/timeout。
  */
 
@@ -20,25 +20,19 @@ function shown(value) {
 }
 
 return view.extend({
+	/*
+	 * 本页只编辑 UCI，完全不碰 modem，也不需要缓存域。
+	 * controls.bootstrap 会加载 uci('qmodem') 并解析当前配置节。
+	 * 不做轮询重绘：重绘 CBI 表单会丢掉用户未保存的编辑。
+	 */
+	DOMAINS: [],
+
 	load: function() {
 		var self = this;
-		var errors = [];
 
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
-
-			if (!section)
-				return { section: null, errors: errors };
-
-			return uci.load('qmodem').then(function() {
-				return { section: section, errors: errors };
-			}).catch(function(err) {
-				errors.push('读取 qmodem 配置失败：' + ((err && err.message) || String(err)));
-				return { section: section, errors: errors };
-			});
-		}).catch(function(err) {
-			errors.push('加载失败：' + ((err && err.message) || String(err)));
-			return { section: null, errors: errors };
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return { section: ctx.section, errors: ctx.errors };
 		});
 	},
 

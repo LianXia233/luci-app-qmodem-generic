@@ -3571,3 +3571,75 @@ msgstr "支持库已是最新，本次未做修改。"
 
 msgid "同步支持库失败：%s"
 msgstr "同步支持库失败：%s"
+
+msgid "AT command timed out"
+msgstr "AT 命令超时"
+
+msgid "Clearing counters timed out"
+msgstr "清零流量计数超时"
+
+msgid "Clearing log timed out"
+msgstr "清除日志超时"
+
+msgid "Deleting SMS timed out"
+msgstr "删除短信超时"
+
+msgid "Dial request timed out"
+msgstr "拨号请求超时"
+
+msgid "Failed to create task"
+msgstr "创建后台任务失败"
+
+msgid "Hangup request timed out"
+msgstr "挂断请求超时"
+
+msgid "Locking band timed out"
+msgstr "锁频段请求超时"
+
+msgid "Modem request timed out"
+msgstr "模组请求超时"
+
+msgid "Neighbour cell request timed out"
+msgstr "邻区查询请求超时"
+
+msgid "PDU request timed out"
+msgstr "PDU 请求超时"
+
+msgid "Reboot request timed out"
+msgstr "重启模组请求超时"
+
+msgid "Redial request timed out"
+msgstr "重新拨号请求超时"
+
+msgid "Saving schedule timed out"
+msgstr "保存流量清零计划超时"
+
+msgid "Sending SMS timed out"
+msgstr "发送短信超时"
+
+msgid "Setting IMEI timed out"
+msgstr "设置 IMEI 超时"
+
+msgid "Setting SMS storage timed out"
+msgstr "设置短信存储位置超时"
+
+msgid "Setting mode timed out"
+msgstr "设置网络模式超时"
+
+msgid "Setting network preference timed out"
+msgstr "设置网络优选超时"
+
+msgid "Switching SIM slot timed out"
+msgstr "切换 SIM 卡槽超时"
+
+msgid "Task failed"
+msgstr "后台任务执行失败"
+
+msgid "Task not found"
+msgstr "后台任务不存在或已过期"
+
+msgid "Task rejected by backend"
+msgstr "后台任务被拒绝"
+
+msgid "Task timed out"
+msgstr "后台任务超时"

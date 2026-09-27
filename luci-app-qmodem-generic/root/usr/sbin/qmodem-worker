@@ -1,0 +1,490 @@
+#!/bin/sh
+# qmodem-worker — QModem Generic 后台采集器（唯一允许访问 modem / AT / 网络的服务）
+#
+# 角色划分（本次异步化改造的核心）：
+#
+#   LuCI 页面/JS  →  rpcd（qmodem_cache 等）  →  状态缓存 /tmp/qmodem-cache
+#                                                        ▲
+#                                                        │ 后台写入
+#                                              qmodem-worker（本脚本）
+#                                                        │
+#                                                     Modem / AT / netifd
+#
+# rpcd 只做 API 层：读缓存、建任务，毫秒级返回，绝不碰 modem。
+# 本脚本是唯一的工作层：所有 ubus / AT / 网络查询都在这里执行，
+# 每次调用都有硬超时（`ubus -t`），串口访问串行化（qm_lock）。
+#
+# 用法：
+#   qmodem-worker run                        # 常驻循环（由 /etc/init.d/qmodem-worker 拉起）
+#   qmodem-worker collect <section> [domains]  # 采集一个模组（供任务队列按需调用）
+#   qmodem-worker collect-all [domains]      # 采集全部模组
+#   qmodem-worker status                     # 输出心跳 JSON（rpcd 只读文件，不用它）
+#   qmodem-worker domains                    # 列出所有缓存域名
+#
+# domains 为逗号分隔列表，留空表示「全部周期域名」。
+# sms 不在周期列表里（读取短信在部分模组上很慢），只能按需采集。
+#
+# 可选配置文件 /etc/qmodem-worker.conf（KEY=VALUE，全部可省略）：
+#   QMODEM_WORKER_INTERVAL=15     采集周期（秒）
+#   QMODEM_WORKER_TTL=90          缓存 stale 阈值（秒）
+#   QMODEM_UBUS_TIMEOUT=8         单次 ubus/AT 调用超时（秒）
+#   QMODEM_WORKER_CYCLE_TIMEOUT=60 单模组单轮采集的总超时（秒）
+#   QMODEM_WORKER_SLOW_EVERY=4    慢域名（qos/radio AT 探测）每 N 轮采一次
+
+. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
+
+CONF_FILE="${QMODEM_WORKER_CONF:-/etc/qmodem-worker.conf}"
+[ -f "$CONF_FILE" ] && . "$CONF_FILE" 2>/dev/null
+
+WORKER_INTERVAL="${QMODEM_WORKER_INTERVAL:-15}"
+WORKER_TTL="${QMODEM_WORKER_TTL:-$QMODEM_STALE_AFTER}"
+CYCLE_TIMEOUT="${QMODEM_WORKER_CYCLE_TIMEOUT:-60}"
+SLOW_EVERY="${QMODEM_WORKER_SLOW_EVERY:-4}"
+
+case "$WORKER_INTERVAL" in ''|*[!0-9]*) WORKER_INTERVAL=15 ;; esac
+[ "$WORKER_INTERVAL" -lt 5 ] && WORKER_INTERVAL=5
+case "$CYCLE_TIMEOUT" in ''|*[!0-9]*) CYCLE_TIMEOUT=60 ;; esac
+case "$SLOW_EVERY" in ''|*[!0-9]*) SLOW_EVERY=4 ;; esac
+[ "$SLOW_EVERY" -lt 1 ] && SLOW_EVERY=1
+
+# 周期采集的域名（不含 sms：按需触发）
+PERIODIC_DOMAINS="status network signal registration sim device stats qos radio support"
+ALL_DOMAINS="status network signal registration sim device stats qos radio support sms"
+
+qm_worker_log() {
+	[ -n "$WORKER_QUIET" ] && return 0
+	printf '[qmodem-worker] %s\n' "$*"
+	logger -t qmodem-worker "$*" 2>/dev/null || true
+}
+
+# ------------------------------------------------------------------ 原始采集
+# 每轮把 ubus 的原始 JSON 应答抓进变量，再拼装成各域名文件。
+# 同一次 ubus 应答可被多个域名复用（例如 network_info 同时喂 network/registration），
+# 避免为了「多域名」而重复打 AT。
+
+R_ERRORS=''
+R_OK=0
+R_FAIL=0
+
+# r_fetch <变量名> <object> <method> [args] [timeout]
+r_fetch() {
+	_var="$1"; _obj="$2"; _m="$3"; _a="$4"; _t="${5:-$QMODEM_UBUS_TIMEOUT}"
+	_r=$(qm_ubus "$_obj" "$_m" "$_a" "$_t")
+	if qm_is_json "$_r"; then
+		eval "$_var=\$_r"
+		R_OK=$(( R_OK + 1 ))
+		return 0
+	fi
+	eval "$_var='{}'"
+	R_FAIL=$(( R_FAIL + 1 ))
+	_e=$(printf '%s' "$_r" | head -c 80)
+	R_ERRORS="${R_ERRORS}\"$_m\":\"${_e:-timeout}\","
+	return 1
+}
+
+# r_wrap <原始应答> → 保证是合法 JSON（用于拼装）
+r_wrap() {
+	if qm_is_json "$1"; then printf '%s' "$1"; else printf '{}'; fi
+}
+
+r_errors_json() {
+	if [ -n "$R_ERRORS" ]; then
+		printf '{%s}' "${R_ERRORS%,}"
+	else
+		printf '{}'
+	fi
+}
+
+# ------------------------------------------------------------------ 网口解析
+# 与前端 controls.getModemInterfaces 相同的解析顺序，搬到后台执行：
+#   1) /etc/config/network 中 modem_config == <section> 的接口
+#   2) 回退：<section> 与 <section>v6
+#   3) 回退：l3_device/device == qmodem.<section>.network 的接口
+collect_ifaces() {
+	_sec="$1"
+	_netdev=$(uci -q get "qmodem.$_sec.network" 2>/dev/null)
+
+	# 1) /etc/config/network 里 modem_config 指向本配置节的接口
+	_names=$(uci show network 2>/dev/null \
+		| sed -n "s/^network\.\([A-Za-z0-9_][A-Za-z0-9_]*\)\.modem_config='$_sec'\$/\1/p")
+
+	# 2) 回退：与配置节同名 / <section>v6 后缀
+	if [ -z "$_names" ]; then
+		for _n in "$_sec" "${_sec}v6"; do
+			_st=$(qm_ubus "network.interface.$_n" status '{}' 3)
+			qm_is_json "$_st" && _names="$_names $_n"
+		done
+	fi
+
+	_entries=''
+	_found=''
+	for _n in $_names; do
+		case "$_n" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
+		_st=$(qm_ubus "network.interface.$_n" status '{}' 3)
+		qm_is_json "$_st" || continue
+		_entries="${_entries}\"$_n\":$(r_wrap "$_st"),"
+		_found="$_found $_n"
+	done
+
+	# 3) 回退：三层设备等于 qmodem.<section>.network 的接口
+	if [ -z "$_found" ] && [ -n "$_netdev" ]; then
+		_dump=$(qm_ubus network.interface dump '{}' 5)
+		if qm_is_json "$_dump"; then
+			_match=$(printf '%s' "$_dump" \
+				| jsonfilter -a -e '@[@.l3_device="'"$_netdev"'"].interface' \
+				              -e '@[@.device="'"$_netdev"'"].interface' 2>/dev/null | sort -u)
+			for _n in $_match; do
+				case "$_n" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
+				_st=$(qm_ubus "network.interface.$_n" status '{}' 3)
+				qm_is_json "$_st" || continue
+				_entries="${_entries}\"$_n\":$(r_wrap "$_st"),"
+				_found="$_found $_n"
+			done
+		fi
+	fi
+
+	_names_json=$(printf '%s' "$_found" | awk '{
+		for (i = 1; i <= NF; i++) printf "%s\"%s\"", (i > 1 ? "," : ""), $i
+	}')
+
+	printf '{"names":[%s],"entries":{%s},"netdev":"%s"}' \
+		"$_names_json" "${_entries%,}" "$(printf '%s' "$_netdev" | qm_json_escape)"
+}
+
+# 从 ifaces JSON 里取出物理设备名（供 network.device status 查询）
+ifaces_device() {
+	printf '%s' "$1" \
+		| jsonfilter -e '@.entries.*.l3_device' -e '@.entries.*.device' 2>/dev/null \
+		| head -n1
+}
+
+# ------------------------------------------------------------------ 域名采集
+
+want_domain() {
+	case " $COLLECT_LIST " in
+		*" $1 "*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+collect_support() {
+	# 纯文件操作（不碰 modem），失败也快速返回
+	if [ -f "$QMODEM_SBIN_DIR/qmodem-modem-support" ]; then
+		_out=$("$QMODEM_SBIN_DIR/qmodem-modem-support" --status 2>/dev/null)
+		if qm_is_json "$_out"; then
+			qm_write_domain "$SEC" support ready "$_out" '' "$WORKER_TTL"
+			return 0
+		fi
+	fi
+	qm_write_domain "$SEC" support error \
+		'{"available":0,"path":"/usr/share/qmodem/modem_support.json","added":[],"skipped":[],"missing":[]}' \
+		'qmodem-modem-support unavailable' "$WORKER_TTL"
+}
+
+collect_sms() {
+	r_fetch R_SMS qmodem get_sms "{\"config_section\":\"$SEC\"}" 20
+	qm_write_domain "$SEC" sms ready "{\"get_sms\":$(r_wrap "$R_SMS")}" '' "$WORKER_TTL"
+}
+
+collect_section() {
+	SEC="$1"
+	qm_valid_section "$SEC" || return 1
+	COLLECT_LIST="$2"
+	[ -n "$COLLECT_LIST" ] || COLLECT_LIST="$PERIODIC_DOMAINS"
+
+	R_ERRORS=''; R_OK=0; R_FAIL=0
+
+	qm_init_dirs
+
+	# ---- 非 modem 域名：不需要串口，先做，保证即使 modem 死了也有数据 ----
+	if want_domain support; then
+		collect_support
+	fi
+
+	# ---- 串口互斥：同一 AT 端口同一时刻只有一个采集者 ----
+	_lockname=$(qm_at_lock_name "$SEC")
+	if ! qm_lock "$_lockname" 10; then
+		qm_worker_log "$SEC: AT lock busy, skip this cycle"
+		return 2
+	fi
+	trap 'qm_unlock_all' EXIT INT TERM
+
+	# ---- 探针：base_info 失败即判定 modem 离线，立即快速失败 ----
+	# 这一步决定整轮的上界：modem 完全无响应时，一轮只花一个 ubus 超时，
+	# 而不是把十几条查询各等一遍超时。
+	MODEM_ONLINE=1
+	r_fetch R_BASE qmodem base_info "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT" || MODEM_ONLINE=0
+
+	if [ "$MODEM_ONLINE" = "0" ]; then
+		for _d in status network signal registration sim device qos radio; do
+			want_domain "$_d" || continue
+			qm_write_domain "$SEC" "$_d" offline '{}' 'modem not responding (ubus timeout)' "$WORKER_TTL"
+		done
+		# stats 的本地累计与分天记录不依赖 modem，仍然可用
+		want_domain stats && collect_stats_offline
+		qm_unlock "$_lockname"
+		trap - EXIT INT TERM
+		return 1
+	fi
+
+	# ---- status：基本信息 / 拨号状态 / DNS / netifd 接口与设备 ----
+	if want_domain status; then
+		r_fetch R_CONN qmodem get_connect_status "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_DIAL qmodem dial_status "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_DNS qmodem get_dns "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		R_IFACES=$(collect_ifaces "$SEC")
+		R_DEV='{}'
+		R_DEVNAME=$(ifaces_device "$R_IFACES")
+		if [ -n "$R_DEVNAME" ]; then
+			case "$R_DEVNAME" in
+				*[!A-Za-z0-9_.:-]*) ;;
+				*) r_fetch R_DEV network.device status "{\"name\":\"$R_DEVNAME\"}" 3 ;;
+			esac
+		fi
+		qm_write_domain "$SEC" status ready "{
+			\"base_info\":$(r_wrap "$R_BASE"),
+			\"connect_status\":$(r_wrap "$R_CONN"),
+			\"dial_status\":$(r_wrap "$R_DIAL"),
+			\"dns\":$(r_wrap "$R_DNS"),
+			\"ifaces\":$(r_wrap "$R_IFACES"),
+			\"device\":$(r_wrap "$R_DEV"),
+			\"device_name\":\"$(printf '%s' "$R_DEVNAME" | qm_json_escape)\",
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	# ---- network：网络信息 / 模式 / 优选 / 锁频段 / 邻区 / 能力 ----
+	# network_info 与 cell_info 各取一次，供 network / signal / registration 三个域名复用
+	if want_domain network || want_domain signal || want_domain registration; then
+		r_fetch R_NET qmodem network_info "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_CELL qmodem cell_info "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+	fi
+
+	if want_domain network; then
+		r_fetch R_MODE qmodem get_mode "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_PREFER qmodem get_network_prefer "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_LOCK qmodem get_lockband "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_NEIGH qmodem get_neighborcell "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_BANDCAPS qmodem get_current_band_capabilities "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_DISABLED qmodem get_disabled_features "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		qm_write_domain "$SEC" network ready "{
+			\"network_info\":$(r_wrap "$R_NET"),
+			\"cell_info\":$(r_wrap "$R_CELL"),
+			\"mode\":$(r_wrap "$R_MODE"),
+			\"network_prefer\":$(r_wrap "$R_PREFER"),
+			\"lockband\":$(r_wrap "$R_LOCK"),
+			\"neighborcell\":$(r_wrap "$R_NEIGH"),
+			\"current_band_capabilities\":$(r_wrap "$R_BANDCAPS"),
+			\"disabled_features\":$(r_wrap "$R_DISABLED"),
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	if want_domain signal; then
+		r_fetch R_CBAND qmodem get_current_band "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		qm_write_domain "$SEC" signal ready "{
+			\"cell_info\":$(r_wrap "$R_CELL"),
+			\"current_band\":$(r_wrap "$R_CBAND"),
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	if want_domain registration; then
+		qm_write_domain "$SEC" registration ready "{
+			\"network_info\":$(r_wrap "$R_NET"),
+			\"base_info\":$(r_wrap "$R_BASE"),
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	# ---- sim ----
+	if want_domain sim; then
+		r_fetch R_SIM qmodem sim_info "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_IMEI qmodem get_imei "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_SLOT qmodem get_sim_slot "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_SLOTCAPS qmodem get_sim_switch_capabilities "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		qm_write_domain "$SEC" sim ready "{
+			\"sim_info\":$(r_wrap "$R_SIM"),
+			\"imei\":$(r_wrap "$R_IMEI"),
+			\"sim_slot\":$(r_wrap "$R_SLOT"),
+			\"sim_switch_capabilities\":$(r_wrap "$R_SLOTCAPS"),
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	# ---- device ----
+	if want_domain device; then
+		r_fetch R_ATCFG qmodem get_at_cfg "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_INFO qmodem info "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_REBOOT qmodem get_reboot_caps "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		r_fetch R_COPYRIGHT qmodem get_copyright "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+		qm_write_domain "$SEC" device ready "{
+			\"at_cfg\":$(r_wrap "$R_ATCFG"),
+			\"info\":$(r_wrap "$R_INFO"),
+			\"reboot_caps\":$(r_wrap "$R_REBOOT"),
+			\"copyright\":$(r_wrap "$R_COPYRIGHT"),
+			\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+	fi
+
+	# ---- stats：模组计数 + 定时清零计划 + 本地持久化分天记录 ----
+	if want_domain stats; then
+		collect_stats_online
+	fi
+
+	# ---- qos / radio：AT 探测（慢），按 SLOW_EVERY 降频 ----
+	if want_domain qos || want_domain radio; then
+		_doslow=1
+		if [ -n "$WORKER_ROUND" ] && [ "$SLOW_EVERY" -gt 1 ]; then
+			[ $(( WORKER_ROUND % SLOW_EVERY )) -eq 0 ] || _doslow=0
+		fi
+		if [ "$_doslow" = 1 ]; then
+			if want_domain qos && [ -x "$QMODEM_LIB_DIR/qmodem-at-probe" ]; then
+				_out=$("$QMODEM_LIB_DIR/qmodem-at-probe" qos_info "$SEC" 2>/dev/null)
+				if qm_is_json "$_out"; then
+					qm_write_domain "$SEC" qos ready "$_out" '' "$WORKER_TTL"
+				else
+					qm_write_domain "$SEC" qos error '{"qci":0,"status":"unavailable"}' 'at probe failed' "$WORKER_TTL"
+				fi
+			fi
+			if want_domain radio && [ -x "$QMODEM_LIB_DIR/qmodem-at-probe" ]; then
+				_out=$("$QMODEM_LIB_DIR/qmodem-at-probe" radio_info "$SEC" 2>/dev/null)
+				if qm_is_json "$_out"; then
+					qm_write_domain "$SEC" radio ready "$_out" '' "$WORKER_TTL"
+				else
+					qm_write_domain "$SEC" radio error '{"status":"unavailable"}' 'at probe failed' "$WORKER_TTL"
+				fi
+			fi
+		fi
+	fi
+
+	if want_domain sms; then
+		collect_sms
+	fi
+
+	qm_unlock "$_lockname"
+	trap - EXIT INT TERM
+	return 0
+}
+
+# stats：本地累计（纯文件读）+ 模组计数（AT）
+collect_stats_online() {
+	r_fetch R_USAGE qmodem get_stats "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+	r_fetch R_SCHED qmodem get_traffic_reset_schedule "{\"config_section\":\"$SEC\"}" "$QMODEM_UBUS_TIMEOUT"
+	R_DAILY=$("$QMODEM_BIN_DIR/qmodem-stats-collect" show "$SEC" 2>/dev/null)
+	qm_is_json "$R_DAILY" || R_DAILY='{}'
+	qm_write_domain "$SEC" stats ready "{
+		\"usage\":$(r_wrap "$R_USAGE"),
+		\"traffic_reset_schedule\":$(r_wrap "$R_SCHED"),
+		\"daily\":$(r_wrap "$R_DAILY"),
+		\"_errors\":$(r_errors_json)}" '' "$WORKER_TTL"
+}
+
+# modem 离线时的 stats：只出本地累计，不碰 modem
+collect_stats_offline() {
+	R_DAILY=$("$QMODEM_BIN_DIR/qmodem-stats-collect" show "$SEC" 2>/dev/null)
+	qm_is_json "$R_DAILY" || R_DAILY='{}'
+	qm_write_domain "$SEC" stats offline "{
+		\"usage\":{\"available\":0},
+		\"traffic_reset_schedule\":{},
+		\"daily\":$(r_wrap "$R_DAILY")}" 'modem offline' "$WORKER_TTL"
+}
+
+# ------------------------------------------------------------------ 主循环
+
+collect_all_sections() {
+	_list="$1"
+	for _s in $(qm_enabled_sections); do
+		collect_section "$_s" "$_list" || true
+	done
+}
+
+run_loop() {
+	qm_init_dirs
+	qm_worker_log "starting: interval=${WORKER_INTERVAL}s cycle_timeout=${CYCLE_TIMEOUT}s"
+
+	# 单实例：已有 worker 在跑就直接退出（procd respawn 也不会叠出多个）
+	if ! qm_lock worker 0; then
+		qm_worker_log "another worker is already running, exiting"
+		exit 0
+	fi
+	trap 'qm_unlock_all; qm_worker_log "stopped"; exit 0' INT TERM
+	WORKER_ROUND=0
+
+	while :; do
+		WORKER_ROUND=$(( WORKER_ROUND + 1 ))
+		qm_heartbeat "$$" "$WORKER_INTERVAL" \
+			"{\"round\":$WORKER_ROUND,\"interval\":$WORKER_INTERVAL,\"cycle_timeout\":$CYCLE_TIMEOUT}"
+
+		for _s in $(qm_enabled_sections); do
+			# 单模组单轮的总超时看门狗：即使某条 AT 卡死（ubus -t 失效等极端情况），
+			# 也只是杀掉这一轮的子进程，worker 主循环继续跑，不会永久卡死。
+			_start=$(qm_now)
+			( collect_section "$_s" "$PERIODIC_DOMAINS" ) &
+			_pid=$!
+			_w=0
+			while kill -0 "$_pid" 2>/dev/null; do
+				_w=$(( $(qm_now) - _start ))
+				if [ "$_w" -ge "$CYCLE_TIMEOUT" ]; then
+					qm_worker_log "$_: cycle exceeded ${CYCLE_TIMEOUT}s, killing"
+					kill -TERM "$_pid" 2>/dev/null
+					sleep 1
+					kill -KILL "$_pid" 2>/dev/null
+					break
+				fi
+				sleep 1
+			done
+			wait "$_pid" 2>/dev/null
+			qm_heartbeat "$$" "$WORKER_INTERVAL" \
+				"{\"round\":$WORKER_ROUND,\"interval\":$WORKER_INTERVAL,\"cycle_timeout\":$CYCLE_TIMEOUT}"
+		done
+
+		sleep "$WORKER_INTERVAL"
+	done
+}
+
+# 域名列表归一化：入参是空格分隔（调用方已把逗号转成空格），
+# 用默认 IFS 分词 —— 之前在这里改 IFS=',' 会让带尾随空格的域名被判成非法，
+# 结果整个列表被丢弃、退化成「采集全部域名」，白白多打十几条 AT。
+normalize_domains() {
+	_in="$1"
+	_out=''
+	for _d in $_in; do
+		case "$_d" in
+			''|*[!A-Za-z0-9_-]*) continue ;;
+		esac
+		case " $ALL_DOMAINS " in
+			*" $_d "*)
+				case " $_out " in *" $_d "*) ;; *) _out="$_out $_d" ;; esac
+				;;
+		esac
+	done
+	printf '%s' "$_out"
+}
+
+case "$1" in
+	run)
+		shift
+		run_loop "$@"
+		;;
+	collect)
+		shift
+		_sec="$1"
+		_doms=$(normalize_domains "$(printf '%s' "$2" | tr ',' ' ')")
+		WORKER_ROUND=1
+		SLOW_EVERY=1	# 按需采集时不做降频
+		collect_section "$_sec" "$_doms"
+		;;
+	collect-all)
+		shift
+		_doms=$(normalize_domains "$(printf '%s' "${1:-}" | tr ',' ' ')")
+		WORKER_ROUND=1
+		SLOW_EVERY=1
+		collect_all_sections "$_doms"
+		;;
+	status)
+		qm_read_heartbeat || printf '{"pid":0,"updated":0,"interval":0,"extra":{}}\n'
+		printf '\n'
+		;;
+	domains)
+		printf '%s\n' $ALL_DOMAINS
+		;;
+	*)
+		echo "Usage: $0 {run|collect <section> [domains]|collect-all [domains]|status|domains}" >&2
+		exit 1
+		;;
+esac

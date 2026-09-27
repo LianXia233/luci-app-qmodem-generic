@@ -15,9 +15,25 @@
 #
 # 现在的处理顺序是：文件存在即先补权限 → 补不上（只读文件系统）就退化为
 # sh 解释执行 → 都不行才按缺失报错。这样已刷机的设备无需重刷即可自愈。
+#
+# ⚠️ 异步化改造
+# -------------
+# 合并/查询都是**纯文件操作**（awk 扫两个 JSON，不碰 modem、不碰网络），
+# 因此允许同步执行 —— 但必须带上硬超时，且结果写入状态缓存：
+#   * status：优先读 qmodem-worker 写好的缓存（纯 cat，毫秒级）；
+#             缓存缺失/过期才现场跑一次（有 timeout 上限），并回写缓存。
+#   * sync  ：保持同步语义（前端要拿 added/skipped 结果），带 timeout 上限，
+#             执行后刷新缓存。新增 sync_async 走后台任务，立即返回 task_id。
+# 这样即使支持库文件在慢速存储上卡住，也不会把 LuCI 拖死。
 
-SYNC_BIN=/usr/sbin/qmodem-modem-support
-SUPPORT_LIB=/usr/share/qmodem/modem_support.json
+. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
+
+SYNC_BIN="$QMODEM_SBIN_DIR/qmodem-modem-support"
+SUPPORT_LIB="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
+TASK_BIN="$QMODEM_BIN_DIR/qmodem-task"
+# 纯文件操作的上限：远小于 LuCI 的 20 秒 RPC 超时，卡住也能快速失败
+SUPPORT_TIMEOUT="${QMODEM_SUPPORT_TIMEOUT:-10}"
+SUPPORT_TTL="${QMODEM_SUPPORT_TTL:-120}"
 
 # 统一输出“不可用”结果；字段结构与同步脚本保持一致，前端无需改动
 unavailable() {
@@ -31,19 +47,70 @@ run_sync() {
 		chmod 755 "$SYNC_BIN" 2>/dev/null || true
 	fi
 
-	if [ -x "$SYNC_BIN" ]; then
-		"$SYNC_BIN" "$1"
+	# 一律套硬超时：ubus -t 用不上，这里用 busybox timeout（OpenWrt 自带）
+	if command -v timeout >/dev/null 2>&1; then
+		if [ -x "$SYNC_BIN" ]; then
+			timeout "$SUPPORT_TIMEOUT" "$SYNC_BIN" "$1" 2>/dev/null
+		else
+			timeout "$SUPPORT_TIMEOUT" sh "$SYNC_BIN" "$1" 2>/dev/null
+		fi
+		_rc=$?
 	else
-		sh "$SYNC_BIN" "$1"
+		if [ -x "$SYNC_BIN" ]; then
+			"$SYNC_BIN" "$1" 2>/dev/null
+		else
+			sh "$SYNC_BIN" "$1" 2>/dev/null
+		fi
+		_rc=$?
 	fi
+	[ "$_rc" = 124 ] && return 124
+	return "$_rc"
+}
+
+# 任意模组的 support 缓存都可用（内容与模组无关），取最新的一份
+read_support_cache() {
+	_best=''
+	_best_ts=0
+	for _f in "$QMODEM_CACHE_DIR"/*/support.json; do
+		[ -f "$_f" ] || continue
+		_o=$(cat "$_f" 2>/dev/null)
+		[ -n "$_o" ] || continue
+		_ts=$(printf '%s' "$_o" | jsonfilter -e '@.updated' 2>/dev/null)
+		case "$_ts" in ''|*[!0-9]*) _ts=0 ;; esac
+		if [ "$_ts" -gt "$_best_ts" ]; then
+			_best_ts="$_ts"; _best="$_o"
+		fi
+	done
+	[ -n "$_best" ] || return 1
+	printf '%s' "$_best"
+}
+
+cache_data() {
+	case "$1" in *'"data":'*) ;; *) return 1 ;; esac
+	printf '%s' "${1##*\"data\":}" | sed 's/}$//'
+}
+
+# 现场查询一次并回写所有模组的 support 缓存
+refresh_support_cache() {
+	_out=$(run_sync --status)
+	case "$_out" in \{*) ;; *) return 1 ;; esac
+	for _d in "$QMODEM_CACHE_DIR"/*/; do
+		[ -d "$_d" ] || continue
+		case "$_d" in */locks/|*/tasks/) continue ;; esac
+		qm_envelope ready "$_out" '' "$SUPPORT_TTL" | qm_atomic_write "${_d}support.json"
+	done
+	printf '%s' "$_out"
 }
 
 case "$1" in
 	list)
-		echo '{"status":{},"sync":{}}'
+		echo '{"status":{},"sync":{},"sync_async":{"config_section":"string"}}'
 		;;
 	call)
-		read input
+		read -r input
+		[ -n "$input" ] || input='{}'
+		qm_init_dirs
+
 		if [ ! -f "$SYNC_BIN" ]; then
 			unavailable "同步脚本缺失：$SYNC_BIN（请重新安装 luci-app-qmodem-generic）"
 			exit 0
@@ -55,8 +122,58 @@ case "$1" in
 		fi
 
 		case "$2" in
-			status) run_sync --status ;;
-			sync)   run_sync --json ;;
+			status)
+				_body=$(read_support_cache 2>/dev/null)
+				if [ -n "$_body" ]; then
+					_ts=$(printf '%s' "$_body" | jsonfilter -e '@.updated' 2>/dev/null)
+					case "$_ts" in ''|*[!0-9]*) _ts=0 ;; esac
+					_age=$(( $(qm_now) - _ts ))
+					if [ "$_age" -le "$SUPPORT_TTL" ]; then
+						_d=$(cache_data "$_body")
+						[ -n "$_d" ] && { printf '%s\n' "$_d"; exit 0; }
+					fi
+				fi
+				# 缓存缺失/过期：现场跑一次（纯文件，带 timeout），并回写缓存
+				_out=$(refresh_support_cache)
+				case "$_out" in
+					\{*) printf '%s\n' "$_out" ;;
+					*)   unavailable "查询支持库状态超时或失败（>${SUPPORT_TIMEOUT}s）" ;;
+				esac
+				;;
+
+			sync)
+				_out=$(run_sync --json)
+				_rc=$?
+				if [ "$_rc" = 124 ]; then
+					unavailable "同步超时（>${SUPPORT_TIMEOUT}s），请稍后在终端执行 /usr/sbin/qmodem-modem-support"
+					exit 0
+				fi
+				case "$_out" in
+					\{*)
+						printf '%s\n' "$_out"
+						# 同步后立即刷新缓存，页面下一次轮询即可看到新状态
+						for _d in "$QMODEM_CACHE_DIR"/*/; do
+							[ -d "$_d" ] || continue
+							case "$_d" in */locks/|*/tasks/) continue ;; esac
+							_s=$(run_sync --status)
+							case "$_s" in \{*) qm_envelope ready "$_s" '' "$SUPPORT_TTL" | qm_atomic_write "${_d}support.json" ;; esac
+						done
+						;;
+					*) unavailable "同步失败或无输出" ;;
+				esac
+				;;
+
+			sync_async)
+				_sec=$(printf '%s' "$input" | jsonfilter -e '@.config_section' 2>/dev/null)
+				case "$_sec" in ''|*[!a-zA-Z0-9_-]*) _sec='' ;; esac
+				if [ -f "$TASK_BIN" ]; then
+					sh "$TASK_BIN" new sync_support "$_sec" '{}' 2>/dev/null \
+						|| printf '{"success":false,"error":"failed to create task"}\n'
+				else
+					printf '{"success":false,"error":"qmodem-task missing"}\n'
+				fi
+				;;
+
 			*) unavailable "unknown method" ;;
 		esac
 		;;

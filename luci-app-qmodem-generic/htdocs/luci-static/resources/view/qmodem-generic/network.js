@@ -271,17 +271,30 @@ function modeLabel(key) {
 }
 
 return view.extend({
+	/*
+	 * 本页要读的缓存域。锁频段 / 邻区 / 当前载波等都是 modem 查询，
+	 * 一律由后台 worker 采集，首屏只读 /tmp/qmodem-cache。
+	 */
+	DOMAINS: [ 'network', 'signal', 'device' ],
+	POLL_INTERVAL: 8000,
+
 	load: function() {
 		var self = this;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
+
+	collect: function(ctx) {
+		var self = this;
 		var errors = [];
+		var section = ctx.section;
 
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
+		if (!section)
+			return { section: null, errors: errors };
 
-			if (!section)
-				return { section: null, errors: errors };
-
-			return Promise.all([
+		return Promise.all([
 				guard(controls.getMode(section), '网络/拨号模式', errors),
 				guard(controls.getNetworkPrefer(section), '网络优选', errors),
 				guard(controls.getLockBand(section), '锁频段', errors),
@@ -306,10 +319,6 @@ return view.extend({
 					errors: errors
 				};
 			});
-		}).catch(function(err) {
-			errors.push('加载失败：' + ((err && err.message) || String(err)));
-			return { section: null, errors: errors };
-		});
 	},
 
 	styleNode: function() {
@@ -775,6 +784,15 @@ return view.extend({
 	/* ---------------- 渲染 ---------------- */
 
 	render: function(res) {
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		res = res || {};
 		var errors = res.errors || [];
 		var warnings = errors.map(function(msg) {
