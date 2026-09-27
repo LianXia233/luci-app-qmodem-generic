@@ -60,12 +60,20 @@ function portList(raw) {
 }
 
 return view.extend({
+	/*
+	 * AT 终端只读缓存拿端口配置，首屏不碰 modem。
+	 * 本页**不做轮询重绘**：输出区是用户的 AT 会话日志，重绘会把它清掉。
+	 * AT 命令下发经 controls.sendAt → 后台任务队列（AT 通道串行化 + 超时）。
+	 */
+	DOMAINS: [ 'device', 'status' ],
+
 	load: function() {
 		var self = this;
 		var errors = [];
 
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			var section = ctx.section;
 
 			if (!section)
 				return { section: null, errors: errors };
@@ -83,9 +91,6 @@ return view.extend({
 					return { section: section, port: controls.findEntry(base, 'at_port') || '', ports: ports, errors: errors };
 				});
 			});
-		}).catch(function(err) {
-			errors.push('读取 QModem 配置失败：' + ((err && err.message) || String(err)));
-			return { section: null, errors: errors };
 		});
 	},
 

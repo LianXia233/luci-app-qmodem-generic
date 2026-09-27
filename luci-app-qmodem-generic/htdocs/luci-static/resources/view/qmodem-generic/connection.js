@@ -65,58 +65,66 @@ function cleanDns(v) {
 }
 
 return view.extend({
+	/*
+	 * 只声明本页需要的缓存域。load() 走 controls.bootstrap：
+	 * 只读 UCI + qmodem_cache.snapshot（纯文件 IO），绝不等待 modem。
+	 */
+	DOMAINS: [ 'status', 'network' ],
+	POLL_INTERVAL: 5000,
+
 	load: function() {
 		var self = this;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
+
+	/* 首屏与轮询共用：数据全部来自状态缓存，零 modem 访问 */
+	collect: function(ctx) {
+		var self = this;
 		var errors = [];
+		var section = ctx.section;
 
-		return controls.resolveSection().then(function(section) {
-			self.section = section;
-
-			if (!section)
-				return { section: null, errors: errors };
-
-			return uci.load('qmodem').catch(function(err) {
-				errors.push('读取 qmodem 配置失败：' + ((err && err.message) || String(err)));
-				return null;
-			}).then(function() {
-				/* 接口状态：由 controls 按 modem_config / 命名规则自动解析出
-				 * QModem 为本模组生成的 IPv4/IPv6 逻辑接口并合并地址视图 */
-				return Promise.all([
-					guard(controls.getConnectStatus(section), '连接状态', errors),
-					guard(controls.getBaseInfo(section), '模组信息', errors),
-					guard(controls.getDns(section), 'DNS', errors),
-					guard(controls.getMode(section), '拨号模式', errors),
-					guard(controls.getDialStatus(section), '拨号状态', errors),
-					guard(controls.getInterfaceStatus(section), '接口状态', errors)
-				]).then(function(results) {
-					var ifstat = results[5] || {};
-					var devName = ifstat.l3_device || ifstat.device || '';
-
-					/* MTU 不在接口 dump 里，从物理设备状态补齐 */
-					return guard(
-						devName ? controls.getDeviceStatus(devName) : Promise.resolve({}),
-						'设备状态', errors
-					).then(function(devstat) {
-						self.iface = ifstat.interface || uci.get('qmodem', section, 'network') || '--';
-
-						return {
-							section: section,
-							iface: self.iface,
-							conn: results[0],
-							base: results[1],
-							dns: results[2],
-							mode: results[3],
-							dial: results[4],
-							ifstat: ifstat,
-							devstat: devstat || {},
-							errors: errors
-						};
-					});
-				});
-			});
-		}).catch(function(err) {
-			errors.push('加载失败：' + ((err && err.message) || String(err)));
+		if (!section)
 			return { section: null, errors: errors };
+
+		/* 接口状态：worker 已按 modem_config / 命名规则解析出 QModem 为本模组
+		 * 生成的 IPv4/IPv6 逻辑接口并写入 status 域，这里只读缓存并合并地址视图 */
+		return Promise.all([
+			guard(controls.getConnectStatus(section), '连接状态', errors),
+			guard(controls.getBaseInfo(section), '模组信息', errors),
+			guard(controls.getDns(section), 'DNS', errors),
+			guard(controls.getMode(section), '拨号模式', errors),
+			guard(controls.getDialStatus(section), '拨号状态', errors),
+			guard(controls.getInterfaceStatus(section), '接口状态', errors)
+		]).then(function(results) {
+			var ifstat = results[5] || {};
+			var devName = ifstat.l3_device || ifstat.device || '';
+
+			/* MTU 不在接口 dump 里，物理设备状态同样已由 worker 采好 */
+			return guard(
+				devName ? controls.getDeviceStatusCached(section) : Promise.resolve({}),
+				'设备状态', errors
+			).then(function(devstat) {
+				var netdev = '';
+				try { netdev = uci.get('qmodem', section, 'network') || ''; } catch (e) { netdev = ''; }
+				self.iface = ifstat.interface || netdev || '--';
+
+				return {
+					section: section,
+					sections: ctx.sections || [],
+					iface: self.iface,
+					conn: results[0],
+					base: results[1],
+					dns: results[2],
+					mode: results[3],
+					dial: results[4],
+					ifstat: ifstat,
+					devstat: devstat || {},
+					errors: errors
+				};
+			});
 		});
 	},
 
@@ -251,6 +259,16 @@ return view.extend({
 	},
 
 	render: function(res) {
+		/* 立即渲染整页，随后非重叠轮询缓存做局部重绘（离开页面自动停止） */
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		var self = this;
 		res = res || {};
 

@@ -1,26 +1,55 @@
 #!/bin/sh
-# 首次安装时立即为 MT5700 系列模组注入 SIM 初始化命令（无需重启即可生效），
-# 并启用 /etc/init.d/qmodem-mt5700-fix，使其在每次开机时自动检查。
-# 真正的修复逻辑位于 /usr/sbin/qmodem-mt5700-fix。
+# 首次安装时的初始化钩子。
+#
+# 原则：**本脚本必须快速返回**。
+# 它在 opkg/apk 安装（以及首次开机 firstboot）过程中同步执行，
+# 任何耗时操作都会拖慢安装流程、进而拖慢 LuCI 可用时间。
+# 因此这里只做「补权限 + enable 服务」，真正耗时的模组支持库合并
+# 放到后台执行（&），modem 探测一律交给 qmodem-worker 后台服务。
 
+# ---- 权限：随镜像打包时 postinst 不执行，文件权限位以仓库为准，这里兜底 ----
+for f in \
+	/usr/libexec/rpcd/qos \
+	/usr/libexec/rpcd/qmodem_stats \
+	/usr/libexec/rpcd/qmodem_support \
+	/usr/libexec/rpcd/qmodem_cache \
+	/usr/bin/qmodem-stats-collect \
+	/usr/bin/qmodem-stats-loop \
+	/usr/bin/qmodem-task \
+	/usr/sbin/qmodem-mt5700-fix \
+	/usr/sbin/qmodem-modem-support \
+	/usr/sbin/qmodem-worker \
+	/usr/lib/qmodem/qmodem-at-probe \
+	/etc/init.d/qmodem-mt5700-fix \
+	/etc/init.d/qmodem-modem-support \
+	/etc/init.d/qmodem-stats-collect \
+	/etc/init.d/qmodem-worker
+do
+	[ -f "$f" ] && chmod 755 "$f" 2>/dev/null
+done
+
+mkdir -p /etc/qmodem-stats 2>/dev/null || true
+mkdir -p /tmp/qmodem-cache 2>/dev/null || true
+
+# ---- MT5700 系列 SIM 初始化：纯 UCI 改写，很快，同步执行一次 ----
 [ -x /usr/sbin/qmodem-mt5700-fix ] && /usr/sbin/qmodem-mt5700-fix
 /etc/init.d/qmodem-mt5700-fix enable 2>/dev/null || true
 
-# 模组支持库：把内置模组定义（例如 Quectel RG520N-CN）合并进 QModem 的
-# /usr/share/qmodem/modem_support.json，使 QModem 尚未收录的型号可被识别。
-# 真正的合并逻辑位于 /usr/sbin/qmodem-modem-support（幂等，写入前自动备份）。
-[ -x /usr/sbin/qmodem-modem-support ] && /usr/sbin/qmodem-modem-support
+# ---- 模组支持库合并：纯文件操作，但可能涉及较慢的 flash 写入，放后台 ----
+if [ -x /usr/sbin/qmodem-modem-support ]; then
+	( /usr/sbin/qmodem-modem-support >/dev/null 2>&1 & ) 2>/dev/null
+fi
 /etc/init.d/qmodem-modem-support enable 2>/dev/null || true
 
-# 流量统计后台采集服务：持久化分天流量（重启不丢失，中国时区分天）
+# ---- 后台服务 ----
+# 流量统计采样（周期 60 秒，写 /etc/qmodem-stats）
 /etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
+# 状态缓存采集（周期 15 秒，写 /tmp/qmodem-cache）—— LuCI 首屏数据的唯一来源
+/etc/init.d/qmodem-worker enable 2>/dev/null || true
 
-# rpcd 插件必须可执行，否则 rpcd 不会加载（qos/签约速率、流量统计面板将无数据）
-[ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
-[ -f /usr/libexec/rpcd/qmodem_stats ] && chmod 755 /usr/libexec/rpcd/qmodem_stats
-[ -f /usr/libexec/rpcd/qmodem_support ] && chmod 755 /usr/libexec/rpcd/qmodem_support
-[ -f /usr/bin/qmodem-stats-collect ] && chmod 755 /usr/bin/qmodem-stats-collect
-[ -f /usr/bin/qmodem-stats-loop ] && chmod 755 /usr/bin/qmodem-stats-loop
-mkdir -p /etc/qmodem-stats 2>/dev/null || true
+# 立即拉起采集服务，让第一次打开 LuCI 就有缓存可读。
+# start 本身只向 procd 注册实例、立刻返回，不会在这里做任何 modem 探测。
+/etc/init.d/qmodem-worker start 2>/dev/null || true
+/etc/init.d/qmodem-stats-collect start 2>/dev/null || true
 
 exit 0

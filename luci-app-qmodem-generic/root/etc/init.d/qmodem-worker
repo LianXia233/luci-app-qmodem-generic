@@ -1,0 +1,48 @@
+#!/bin/sh /etc/rc.common
+# QModem Generic 后台采集服务 —— 唯一允许访问 modem / AT / netifd 的常驻进程。
+#
+# 有了它，LuCI 的 rpcd 只需要读 /tmp/qmodem-cache 里的 JSON 快照，
+# 页面首屏不再等待任何 modem 查询（详见 docs/QMODEM_ASYNC_ARCHITECTURE.md）。
+#
+# 启动开销：start_service 只向 procd 注册一个实例并立即返回，
+# 不做任何 modem 探测，因此开机 / 重启本服务不会拖慢系统和 LuCI。
+# 真正的采集在 qmodem-worker 自己的循环里异步进行。
+
+START=95
+STOP=10
+USE_PROCD=1
+
+WORKER_BIN=/usr/sbin/qmodem-worker
+
+# 采集周期（秒）。可通过 /etc/qmodem-worker.conf 的
+# QMODEM_WORKER_INTERVAL 覆盖，无需改本文件。
+WORKER_INTERVAL="${QMODEM_WORKER_INTERVAL:-15}"
+
+start_service() {
+	# 随固件镜像打包时 postinst 不执行，脚本可能落地成 0644；
+	# procd 启动不可执行文件会静默失败，这里先补权限（与既有服务同一处理方式）。
+	if [ -f "$WORKER_BIN" ] && [ ! -x "$WORKER_BIN" ]; then
+		chmod 755 "$WORKER_BIN" 2>/dev/null || true
+	fi
+	[ -x /usr/lib/qmodem/qmodem-at-probe ] || chmod 755 /usr/lib/qmodem/qmodem-at-probe 2>/dev/null || true
+	[ -x /usr/bin/qmodem-task ] || chmod 755 /usr/bin/qmodem-task 2>/dev/null || true
+
+	mkdir -p /tmp/qmodem-cache 2>/dev/null || true
+
+	procd_open_instance qmodem_worker
+	procd_set_param command /bin/sh "$WORKER_BIN" run
+	procd_set_param env QMODEM_WORKER_INTERVAL="$WORKER_INTERVAL"
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	# 崩溃自动拉起；限流避免反复重启打爆 modem
+	procd_set_param respawn 3600 5 5
+	# 退出时确保清理自己持有的锁（worker 内部也有 trap 兜底）
+	procd_set_param term_timeout 5
+	procd_close_instance
+}
+
+# 说明：这里**故意不注册** procd_add_reload_trigger qmodem。
+# worker 每一轮都会重新枚举 /etc/config/qmodem 的 modem-device 配置节，
+# 新增/删除模组会在下一个采集周期（默认 15 秒）自动生效，
+# 不需要因为配置变更而重启服务 —— 否则任何一次 uci commit 都会
+# 打断正在进行的采集，反而放大「重复探测 modem」的问题。

@@ -65,8 +65,25 @@ function usageUpdated(value) {
 }
 
 return view.extend({
+	/*
+	 * 本页需要的缓存域。load() 只读这些域（qmodem_cache.snapshot，纯文件 IO），
+	 * 绝不等待 modem；缺失/过期时由 controls 自动排后台任务，轮询补上。
+	 */
+	DOMAINS: [ 'status', 'network', 'signal', 'sim', 'stats', 'qos', 'radio' ],
+	POLL_INTERVAL: 5000,
+
 	load: function() {
+		var self = this;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
+
+	/* 首屏与轮询共用的数据组装：全部来自状态缓存，不产生任何 modem 访问 */
+	collect: function(ctx) {
 		var self = this, errors = [];
+		var section = ctx.section;
 
 		function guard(promise, label, fallback) {
 			return Promise.resolve(promise).catch(function(err) {
@@ -75,22 +92,15 @@ return view.extend({
 			});
 		}
 
-		return controls.getModemSections().then(function(sections) {
-			self.modems = sections;
-			return controls.resolveSection();
-		}).catch(function(err) {
-			errors.push(_('QModem configuration') + ': ' + ((err && err.message) || String(err)));
-			return null;
-		}).then(function(section) {
-			self.section = section;
-			if (!section)
-				return { section: null, errors: errors };
+		self.modems = ctx.sections || [];
 
-			// resolveSection 内部已 uci.load('qmodem')
-			// 接口状态由 controls.getInterfaceStatus(section) 自动解析：按
-			// /etc/config/network 的 modem_config 关联找到 QModem 为本模组
-			// 生成的 IPv4/IPv6 逻辑接口（与模组型号无关，适配所有模组）
-			var apn = uci.get('qmodem', section, 'apn') || '';
+		if (!section)
+			return { section: null, errors: errors };
+
+		var apn = '';
+		try { apn = uci.get('qmodem', section, 'apn') || ''; } catch (e) { apn = ''; }
+
+		return (function() {
 
 			return Promise.all([
 				guard(controls.getBaseInfo(section), _('Module'), []),
@@ -111,8 +121,9 @@ return view.extend({
 				var iface = r[7] || {};
 				var ifname = iface.interface || '';
 				var devName = iface.l3_device || iface.device || '';
+				/* 物理网口状态（MTU / 速率）由 worker 一并采好，读缓存即可 */
 				var devPromise = devName
-					? guard(controls.getDeviceStatus(devName), _('Device rate'), {})
+					? guard(controls.getDeviceStatusCached(section), _('Device rate'), {})
 					: Promise.resolve({});
 				return devPromise.then(function(devStatus) {
 					// 合并 QModem 返回的全部 modem_info，用于"完整信息"面板（返回什么就显示什么）
@@ -140,7 +151,7 @@ return view.extend({
 					};
 				});
 			});
-		});
+		})();
 	},
 
 	// 把 QModem 的 modem_info 数组摊平成视图使用的扁平对象
@@ -776,6 +787,16 @@ return view.extend({
 	},
 
 	render: function(res) {
+		/* 立即画出完整页面，然后非重叠轮询缓存做局部重绘 */
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		res = res || {};
 
 		if (!res.section) {

@@ -19,6 +19,7 @@
 - [模组支持库自动注入（RG520N-CN 等）](#模组支持库自动注入rg520n-cn-等)
 - [自行编译](#自行编译)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
+- [页面加载与后台任务（异步化）](#页面加载与后台任务异步化)
 - [已知事项](#已知事项)
 - [相关文档](#相关文档)
 - [致谢](#致谢)
@@ -55,22 +56,31 @@
 /etc/
   config/qmodem                 # QModem 配置（本包读取的 modem-device 节）
   init.d/
+    qmodem-worker               # 后台采集 procd 服务（唯一访问 modem 的常驻进程）
     qmodem-stats-collect        # 流量采样 procd 服务（开机自启）
     qmodem-mt5700-fix           # MT5700 SIM 初始化开机服务（START=99）
     qmodem-modem-support        # 模组支持库同步开机服务（START=90，早于 QModem）
   uci-defaults/
     99_luci-app-qmodem-generic  # 首次安装：执行修复/同步并 enable 上述服务
   qmodem-stats/                 # 流量数据目录（overlay 持久分区，可直接备份）
+/tmp/qmodem-cache/              # 状态缓存（原子写入的 JSON 快照 + 任务 + 锁）
 /usr/
   bin/
+    qmodem-task                 # 后台任务队列（new/get/list/prune/_run，带去重与超时）
     qmodem-stats-collect        # 采样 / 落盘 / 输出 JSON / 清零（run/show/reset）
     qmodem-stats-loop           # 按间隔驱动采集器的常驻循环
   sbin/
+    qmodem-worker               # 后台采集器（周期采集所有缓存域，硬超时 + AT 串行化）
     qmodem-mt5700-fix           # SIM 初始化修复脚本（幂等）
     qmodem-modem-support        # 模组支持库合并脚本（幂等，写入前备份）
+  lib/qmodem/
+    qmodem-lib.sh               # 公共库：JSON 原子写、flock 互斥、带超时的 ubus 调用
+    qmodem-at-probe             # 带超时的 AT 探测工具（tom_modem / 直连 tty 两条路径）
   libexec/rpcd/
-    qmodem_stats                # rpcd 插件：daily_stats / stats_history / stats_reset
-    qmodem_support              # rpcd 插件：status / sync（模组支持库状态与同步）
+    qmodem_cache                # rpcd 插件：快速读取（snapshot/get_*）+ 后台任务（refresh/action/send_at）
+    qmodem_stats                # rpcd 插件：daily_stats / stats_history / stats_reset（只读缓存 / 建任务）
+    qmodem_support              # rpcd 插件：status / sync（只读缓存 / 建任务）
+    qos                         # rpcd 插件：qos_info / radio_info（只读缓存）
   share/
     qmodem-generic/
       extra_modem_support.json  # 本包内置的待注入模组定义（当前含 rg520n-cn）
@@ -228,16 +238,44 @@ make package/luci-app-qmodem-generic/compile V=s
 
 本包是 `LUCI_PKGARCH:=all` 的纯前端包，一个架构编译出的产物可用于所有架构。
 
+## 页面加载与后台任务（异步化）
+
+自 2.4.11-16 起，**LuCI 首屏不再等待任何 modem 查询**：
+
+- 页面 `load()` 只读 UCI + 一次 `qmodem_cache.snapshot`（纯文件 IO，实测 < 100 ms），
+  随后立即渲染整页；数据未就绪的字段显示 `--`，并标注「离线 / 数据过期」。
+- 所有慢活（模组探测、AT、SIM、IMEI、信号、注册、运营商、邻区、拨号、接口检查、
+  初始化、重启、流量统计）都在后台任务里执行，rpcd 只负责读缓存与建任务。
+- 写操作（AT 下发、改模式、锁频段、切卡槽、重启、清零、支持库同步…）立即返回
+  `task_id`，前端轮询进度；同类任务自动去重，连点两次不会真的执行两次。
+- 模组失联 / AT 口不存在 / 正在 reset 时页面照常打开，不会白屏。
+- 轮询不会堆叠，标签页切到后台时自动降频，离开页面自动停止。
+
+设计与 12 项验收结论见 [docs/QMODEM_ASYNC_ARCHITECTURE.md](docs/QMODEM_ASYNC_ARCHITECTURE.md)。
+
+本地验证：
+
+```sh
+sh tests/run-backend-tests.sh                  # 后端 67 项（dash / busybox sh 均可）
+TEST_SH="busybox sh" sh tests/run-backend-tests.sh
+sh tests/run-frontend-tests.sh                 # 前端 94 项（需要 node）
+python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
+```
+
 ## 已知事项
 
 - `po/zh_Hans/qmodem-generic.po` 已与当前 JavaScript UI 字符串同步；QModem 动态返回的未知字段会按 `full_name` 原样显示，内置字段使用中文标签映射。
 - 前端命名空间（资源目录、JS 模块、菜单路由、CSS 类名）已统一为 `qmodem-generic`，与具体模组型号彻底解耦。
 - **字段未上报时的降级显示**：部分模组不会上报全部字段，QModem 会以占位值回填（实测 Fibocom FM350-GL：温度回 `"0°C"`、上下行带宽回 `"M"`）。本包自 2.4.11-15 起对这类占位值做归一化，未上报字段统一显示 `--`，不会把占位值当成真实读数。
 - **上下行调制**：来自 `qos` 对象的 `radio_info`；模组/固件不支持时该方法返回 `{"status":"unavailable"}`，页面显示 `--` 属预期降级，不是故障。
-- **LuCI 26.x（Master 26.246+）**：该版本移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失时才注入，不覆盖已有实现），无需在设备上手工补丁。
+- **LuCI 26.x（Master 26.246+）**：该版本移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失才注入，不覆盖已有实现），无需在设备上手工补丁。
+- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重启，前端会在 60 s 冷却窗口内退回直连 QModem（带客户端超时）。此时首屏仍可能被慢 RPC 拖住 —— 升级后请执行 `/etc/init.d/rpcd restart` 与 `/etc/init.d/qmodem-worker restart`。
+- **短信列表按需采集**：读短信在部分模组上极慢，因此 `sms` 域不进周期采集；进入「短信」页时后台排队，数据到位后自动补上（首屏先显示空列表而不是卡住）。
+- **`settings` 与 `terminal` 页不做轮询重绘**：避免把用户未保存的表单内容 / AT 会话日志冲掉。
 
 ## 相关文档
 
+- [异步化架构（后端任务不阻塞页面加载）](docs/QMODEM_ASYNC_ARCHITECTURE.md)
 - [QModem 通用美化版 UI 重构与自我审查报告](docs/QMODEM_GENERIC_UI_REPORT.md)
 - [重构契约（数据层 API 约定）](docs/QMODEM_REFACTOR_CONTRACT.md)
 - [更新日志 CHANGELOG.md](CHANGELOG.md)

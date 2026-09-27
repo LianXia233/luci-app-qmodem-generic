@@ -1,0 +1,412 @@
+#!/bin/sh
+# qmodem-task — QModem Generic 后台任务管理器（任务队列 + 去重 + 超时 + 锁）
+#
+# 为什么需要它
+# ------------
+# rpcd 是 API 层，不能同步执行任何可能耗时的操作。所有「要碰 modem / AT /
+# 网络 / 文件写入」的动作都改成本脚本管理的后台任务：
+#
+#   LuCI  →  rpcd(qmodem_cache.refresh / send_at / action / ...)
+#                │  只做两件事：建任务、查任务（都是文件读写，毫秒级）
+#                ▼
+#        /tmp/qmodem-cache/tasks/<task_id>.json
+#                ▲
+#                │  detached 子进程执行，逐步更新状态
+#        qmodem-task _run  →  qmodem-worker collect / qmodem ubus / AT
+#
+# 关键保证：
+#   * 去重：同一 (type, config_section) 已有 queued/running 任务时，
+#           直接复用已有 task_id，绝不重复探测 modem、绝不并发抢串口。
+#   * 超时：每种任务都有 overall timeout，超时后置为 failed(timeout)。
+#           `get` 时还会兜底判定「running 但已超时」的僵尸任务。
+#   * 锁：涉及 AT 的任务统一先拿 qm_at_lock_name 互斥锁，串口访问串行化。
+#   * 快速失败：modem 不存在 / 端口不存在 / AT 超时 → 立即写 failed，不阻塞。
+#
+# 用法：
+#   qmodem-task new  <type> <config_section> [params-json]  → 建任务（立即返回 task_id）
+#   qmodem-task get  <task_id>                              → 查询任务（含结果）
+#   qmodem-task list [config_section]                       → 任务列表
+#   qmodem-task prune                                       → 清理过期任务
+#   qmodem-task _run <task_id> <type> <section> <params>    → 内部：实际执行体
+#
+# 任务类型与超时：
+#   refresh        90s   采集单个模组的缓存域
+#   refresh_all   180s   采集全部模组
+#   send_at        20s   下发一条 AT（经 QModem send_at）
+#   action        120s   代理任意 qmodem ubus 方法（拨号/重启/改模式…）
+#   sync_support   30s   同步模组支持库（纯文件操作）
+#   collect_stats  30s   流量采样落盘（写 /etc/qmodem-stats）
+#   collect_stats_reset 30s  清零本地流量记录并重建计数器基准
+
+. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
+
+SELF="$0"
+TASK_KEEP_SECONDS="${QMODEM_TASK_KEEP:-1800}"
+TASK_MAX_FILES=40
+
+QM_BIN_WORKER="$QMODEM_SBIN_DIR/qmodem-worker"
+QM_BIN_SUPPORT="$QMODEM_SBIN_DIR/qmodem-modem-support"
+QM_BIN_STATS="$QMODEM_BIN_DIR/qmodem-stats-collect"
+
+# ---- 任务超时表 -----------------------------------------------------------
+
+task_timeout() {
+	case "$1" in
+		refresh)       echo 90 ;;
+		refresh_all)   echo 180 ;;
+		send_at)       echo 20 ;;
+		action)        echo 120 ;;
+		sync_support)  echo 30 ;;
+		collect_stats) echo 30 ;;
+		collect_stats_reset) echo 30 ;;
+		*)             echo 60 ;;
+	esac
+}
+
+task_file() {
+	printf '%s\n' "$QMODEM_TASK_DIR/$1.json"
+}
+
+# ---- JSON 输出 ------------------------------------------------------------
+
+j_str() {
+	printf '"%s"' "$(printf '%s' "$1" | qm_json_escape)"
+}
+
+# t_emit <file> → 输出任务 JSON（缺失时输出一个 error 对象，绝不阻塞/报错）
+t_emit() {
+	_f="$1"
+	if [ -f "$_f" ] && [ -s "$_f" ]; then
+		cat "$_f" 2>/dev/null
+		printf '\n'
+		return 0
+	fi
+	printf '{"id":%s,"state":"missing","error":"task not found"}\n' "$(j_str "$(basename "$_f" .json)")"
+}
+
+# t_write <id> <state> <result-json> <error> <progress>
+t_write() {
+	_id="$1"; _st="$2"; _res="$3"; _err="$4"; _prog="$5"
+	[ -n "$_res" ] || _res='{}'
+	_f=$(task_file "$_id")
+	_now=$(qm_now)
+
+	_started=0; _created=0; _type=''; _sec=''; _pid=0; _to=60
+	if [ -f "$_f" ]; then
+		_o=$(cat "$_f" 2>/dev/null)
+		_v=$(printf '%s' "$_o" | jsonfilter -e '@.created' 2>/dev/null); [ -n "$_v" ] && _created="$_v"
+		_v=$(printf '%s' "$_o" | jsonfilter -e '@.started' 2>/dev/null); [ -n "$_v" ] && _started="$_v"
+		_v=$(printf '%s' "$_o" | jsonfilter -e '@.type' 2>/dev/null);   [ -n "$_v" ] && _type="$_v"
+		_v=$(printf '%s' "$_o" | jsonfilter -e '@.config_section' 2>/dev/null); [ -n "$_v" ] && _sec="$_v"
+		_v=$(printf '%s' "$_o" | jsonfilter -e '@.timeout' 2>/dev/null); [ -n "$_v" ] && _to="$_v"
+	fi
+
+	case "$_st" in
+		running) [ "$_started" = 0 ] && _started="$_now"; _pid=$$; _finished=0 ;;
+		success|failed) _finished="$_now"; _pid=0 ;;
+		*) _finished=0; _pid=0 ;;
+	esac
+
+	if [ -n "$_err" ]; then
+		_errj=$(j_str "$_err")
+	else
+		_errj='null'
+	fi
+	qm_is_json "$_res" || _res='{}'
+
+	qm_atomic_write "$_f" <<EOF
+{"id":$(j_str "$_id"),"type":$(j_str "$_type"),"config_section":$(j_str "$_sec"),"state":$(j_str "$_st"),"created":${_created:-$_now},"started":${_started:-0},"finished":${_finished:-0},"pid":$_pid,"timeout":$_to,"progress":$(j_str "$_prog"),"result":$_res,"error":$_errj,"updated":$_now}
+EOF
+}
+
+# ---- 去重 -----------------------------------------------------------------
+
+# t_find_running <type> <section> → 输出已存在的 task_id（无则空）
+t_find_running() {
+	_t="$1"; _s="$2"
+	for _f in "$QMODEM_TASK_DIR"/*.json; do
+		[ -f "$_f" ] || continue
+		_o=$(cat "$_f" 2>/dev/null)
+		[ -n "$_o" ] || continue
+		_st=$(printf '%s' "$_o" | jsonfilter -e '@.state' 2>/dev/null)
+		case "$_st" in queued|running) ;; *) continue ;; esac
+		_ty=$(printf '%s' "$_o" | jsonfilter -e '@.type' 2>/dev/null)
+		[ "$_ty" = "$_t" ] || continue
+		_se=$(printf '%s' "$_o" | jsonfilter -e '@.config_section' 2>/dev/null)
+		[ "$_se" = "$_s" ] || continue
+		# 已经超时的 queued/running 视为僵尸，不复用（下面顺手标记为失败）
+		_sd=$(printf '%s' "$_o" | jsonfilter -e '@.started' 2>/dev/null)
+		_to=$(printf '%s' "$_o" | jsonfilter -e '@.timeout' 2>/dev/null)
+		case "$_sd" in ''|*[!0-9]*) _sd=0 ;; esac
+		case "$_to" in ''|*[!0-9]*) _to=60 ;; esac
+		if [ "$_sd" -gt 0 ] && [ $(( $(qm_now) - _sd )) -gt $(( _to + 10 )) ]; then
+			t_write "$(basename "$_f" .json)" failed '{}' 'task timeout (reaped)' 'reaped'
+			continue
+		fi
+		basename "$_f" .json
+		return 0
+	done
+	return 1
+}
+
+# ---- 清理 -----------------------------------------------------------------
+
+t_prune() {
+	_now=$(qm_now)
+	_n=0
+	for _f in "$QMODEM_TASK_DIR"/*.json; do
+		[ -f "$_f" ] || continue
+		_o=$(cat "$_f" 2>/dev/null)
+		_fin=$(printf '%s' "$_o" | jsonfilter -e '@.finished' 2>/dev/null)
+		_upd=$(printf '%s' "$_o" | jsonfilter -e '@.updated' 2>/dev/null)
+		case "$_upd" in ''|*[!0-9]*) _upd=0 ;; esac
+		case "$_fin" in ''|*[!0-9]*) _fin=0 ;; esac
+		# 已结束且超过保留期，或长时间无任何更新（进程被 kill 的残骸）
+		if { [ "$_fin" -gt 0 ] && [ $(( _now - _fin )) -gt "$TASK_KEEP_SECONDS" ]; } ||
+		   { [ "$_fin" = 0 ] && [ "$_upd" -gt 0 ] && [ $(( _now - _upd )) -gt "$TASK_KEEP_SECONDS" ]; }; then
+			rm -f "$_f" 2>/dev/null
+			continue
+		fi
+		_n=$(( _n + 1 ))
+	done
+
+	# 数量上限：超出时按修改时间删最旧的
+	if [ "$_n" -gt "$TASK_MAX_FILES" ]; then
+		ls -1t "$QMODEM_TASK_DIR"/*.json 2>/dev/null | tail -n +$(( TASK_MAX_FILES + 1 )) \
+			| while read -r _f; do rm -f "$_f" 2>/dev/null; done
+	fi
+}
+
+# params.domains 既可能是数组（前端 rpc.declare 的声明形式）也可能是空格分隔
+# 字符串（脚本内部调用）。两种都要认，否则域名列表会静默变成「全部域名」。
+task_domains() {
+	_d=$(printf '%s' "$1" | jsonfilter -a -e '@.domains[*]' 2>/dev/null | tr '\n' ' ')
+	if [ -z "$_d" ]; then
+		_d=$(printf '%s' "$1" | jsonfilter -e '@.domains' 2>/dev/null)
+	fi
+	# 去掉首尾空白，避免下游把 " status " 判成非法域名
+	printf '%s' "$_d" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]][[:space:]]*/ /g'
+}
+
+# ---- 执行体 ---------------------------------------------------------------
+
+# 带总超时的执行，输出 stdout。临时文件放在独立目录并在 EXIT 时兜底清理，
+# 保证任务被 kill 也不会留下垃圾。
+TASK_TMP_DIR="$QMODEM_CACHE_DIR/.tasktmp"
+mkdir -p "$TASK_TMP_DIR" 2>/dev/null
+trap 'rm -f "$TASK_TMP_DIR/$$"* 2>/dev/null' EXIT
+
+run_limited_out() {
+	_t="$1"; shift
+	_out="$TASK_TMP_DIR/$$.$(qm_now)"
+	if qm_run_limited "$_t" "$_out" "$@"; then
+		cat "$_out" 2>/dev/null
+		rm -f "$_out" 2>/dev/null
+		return 0
+	fi
+	rm -f "$_out" 2>/dev/null
+	return 124
+}
+
+t_run() {
+	ID="$1"; TYPE="$2"; SEC="$3"; PARAMS="$4"
+	qm_init_dirs
+	t_write "$ID" running '{}' '' 'starting'
+	TO=$(task_timeout "$TYPE")
+
+	case "$TYPE" in
+		refresh)
+			_doms=$(task_domains "$PARAMS")
+			t_write "$ID" running '{}' '' 'collecting'
+			if [ -x "$QM_BIN_WORKER" ] || [ -f "$QM_BIN_WORKER" ]; then
+				_o=$(run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" "$_doms" 2>&1)
+				_rc=$?
+			else
+				_o=''; _rc=127
+			fi
+			;;
+		refresh_all)
+			_doms=$(task_domains "$PARAMS")
+			t_write "$ID" running '{}' '' 'collecting all'
+			_o=$(run_limited_out "$TO" sh "$QM_BIN_WORKER" collect-all "$_doms" 2>&1)
+			_rc=$?
+			;;
+		send_at)
+			_at=$(printf '%s' "$PARAMS" | jsonfilter -e '@.at' 2>/dev/null)
+			if [ -z "$_at" ]; then
+				t_write "$ID" failed '{}' 'missing parameter: at' 'done'
+				return 0
+			fi
+			_lock=$(qm_at_lock_name "$SEC")
+			if ! qm_lock "$_lock" 10; then
+				t_write "$ID" failed '{}' 'AT port busy' 'done'
+				return 0
+			fi
+			trap 'qm_unlock_all' EXIT INT TERM
+			t_write "$ID" running '{}' '' 'sending AT'
+			_args=$(printf '%s' "$PARAMS" | jsonfilter -e '@.args' 2>/dev/null)
+			qm_is_json "$_args" || _args=$(printf '{"config_section":"%s","params":{"at":%s}}' \
+				"$SEC" "$(j_str "$_at")")
+			_o=$(run_limited_out "$TO" ubus -t "$QMODEM_AT_TIMEOUT" call qmodem send_at "$_args")
+			_rc=$?
+			qm_unlock "$_lock"
+			trap - EXIT INT TERM
+			;;
+		action)
+			_obj=$(printf '%s' "$PARAMS" | jsonfilter -e '@.object' 2>/dev/null)
+			_m=$(printf '%s' "$PARAMS" | jsonfilter -e '@.method' 2>/dev/null)
+			_args=$(printf '%s' "$PARAMS" | jsonfilter -e '@.args' 2>/dev/null)
+			[ -n "$_obj" ] || _obj=qmodem
+			[ -n "$_m" ] || { t_write "$ID" failed '{}' 'missing parameter: method' 'done'; return 0; }
+			qm_is_json "$_args" || _args="{}"
+			_lock=$(qm_at_lock_name "$SEC")
+			qm_lock "$_lock" 10 || { t_write "$ID" failed '{}' 'AT port busy' 'done'; return 0; }
+			trap 'qm_unlock_all' EXIT INT TERM
+			t_write "$ID" running '{}' '' "$_obj.$_m"
+			_o=$(run_limited_out "$TO" ubus -t "$TO" call "$_obj" "$_m" "$_args")
+			_rc=$?
+			qm_unlock "$_lock"
+			trap - EXIT INT TERM
+			# 动作完成后刷新缓存，让页面下一次轮询立刻看到新状态
+			[ "$_rc" = 0 ] && run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" 'status network registration' >/dev/null 2>&1
+			;;
+		sync_support)
+			t_write "$ID" running '{}' '' 'merging support library'
+			if [ -f "$QM_BIN_SUPPORT" ]; then
+				_o=$(run_limited_out "$TO" sh "$QM_BIN_SUPPORT" --json 2>&1)
+				_rc=$?
+			else
+				_o=''; _rc=127
+			fi
+			[ "$_rc" = 0 ] && [ -n "$SEC" ] && \
+				run_limited_out 20 sh "$QM_BIN_WORKER" collect "$SEC" support >/dev/null 2>&1
+			;;
+		collect_stats)
+			t_write "$ID" running '{}' '' 'sampling traffic counters'
+			if [ -f "$QM_BIN_STATS" ]; then
+				_o=$(run_limited_out "$TO" sh "$QM_BIN_STATS" run "$SEC" 2>&1)
+				_rc=$?
+			else
+				_o=''; _rc=127
+			fi
+			[ "$_rc" = 0 ] && \
+				run_limited_out 20 sh "$QM_BIN_WORKER" collect "$SEC" stats >/dev/null 2>&1
+			;;
+		collect_stats_reset)
+			# 清零本地累计与分天记录，并保留当前计数器基准。
+			# 需要读一次模组计数器（ubus get_stats），因此必须走后台任务。
+			t_write "$ID" running '{}' '' 'resetting traffic counters'
+			if [ -f "$QM_BIN_STATS" ]; then
+				_o=$(run_limited_out "$TO" sh "$QM_BIN_STATS" reset "$SEC" 2>&1)
+				_rc=$?
+			else
+				_o=''; _rc=127
+			fi
+			[ "$_rc" = 0 ] && \
+				run_limited_out 20 sh "$QM_BIN_WORKER" collect "$SEC" stats >/dev/null 2>&1
+			;;
+		*)
+			t_write "$ID" failed '{}' "unknown task type: $TYPE" 'done'
+			return 0
+			;;
+	esac
+
+	qm_unlock_all
+
+	if [ "$_rc" = 124 ]; then
+		t_write "$ID" failed '{}' "timeout after ${TO}s" 'timeout'
+		return 0
+	fi
+	if [ "$_rc" != 0 ]; then
+		_e=$(printf '%s' "$_o" | head -c 300)
+		t_write "$ID" failed "$(qm_json_or "$_o" '{}')" "${_e:-command failed (rc=$_rc)}" 'failed'
+		return 0
+	fi
+
+	_res=$(qm_json_or "$_o" '{}')
+	t_write "$ID" success "$_res" '' 'done'
+	return 0
+}
+
+# ---- 建任务 ---------------------------------------------------------------
+
+t_new() {
+	TYPE="$1"; SEC="$2"; PARAMS="${3:-\{\}}"
+	qm_init_dirs
+	qm_is_json "$PARAMS" || PARAMS='{}'
+
+	case "$TYPE" in
+		refresh|refresh_all|send_at|action|sync_support|collect_stats|collect_stats_reset) ;;
+		*) printf '{"success":false,"error":"unknown task type"}\n'; return 0 ;;
+	esac
+
+	# 参数校验：section 必须安全（refresh_all 允许空）
+	if [ -n "$SEC" ] && ! qm_valid_section "$SEC"; then
+		printf '{"success":false,"error":"invalid config_section"}\n'
+		return 0
+	fi
+
+	t_prune
+
+	# ---- 去重：同类任务已在跑就直接复用，避免多页面并发打 modem ----
+	_dedup_sec="$SEC"
+	[ "$TYPE" = "refresh_all" ] && _dedup_sec='*'
+	_existing=$(t_find_running "$TYPE" "$_dedup_sec")
+	if [ -n "$_existing" ]; then
+		printf '{"success":true,"running":true,"deduplicated":true,"task_id":%s,"state":"running"}\n' \
+			"$(j_str "$_existing")"
+		return 0
+	fi
+
+	_id="t$(qm_now)$$"
+	_n=0
+	while [ -e "$(task_file "$_id")" ] && [ "$_n" -lt 100 ]; do
+		_id="t$(qm_now)$$-$_n"
+		_n=$(( _n + 1 ))
+	done
+
+	_f=$(task_file "$_id")
+	qm_atomic_write "$_f" <<EOF
+{"id":$(j_str "$_id"),"type":$(j_str "$TYPE"),"config_section":$(j_str "$_dedup_sec"),"state":"queued","created":$(qm_now),"started":0,"finished":0,"pid":0,"timeout":$(task_timeout "$TYPE"),"progress":"queued","result":{},"error":null,"updated":$(qm_now)}
+EOF
+
+	# 完全脱离父进程：重定向三个标准流，rpcd 不会等它的输出
+	( setsid sh "$SELF" _run "$_id" "$TYPE" "$SEC" "$PARAMS" </dev/null >/dev/null 2>&1 & ) 2>/dev/null ||
+		( sh "$SELF" _run "$_id" "$TYPE" "$SEC" "$PARAMS" </dev/null >/dev/null 2>&1 & )
+
+	printf '{"success":true,"running":false,"deduplicated":false,"task_id":%s,"state":"queued"}\n' \
+		"$(j_str "$_id")"
+}
+
+t_list() {
+	_filter="$1"
+	printf '{"tasks":['
+	_first=1
+	_n=0
+	for _f in $(ls -1t "$QMODEM_TASK_DIR"/*.json 2>/dev/null); do
+		[ "$_n" -ge 20 ] && break
+		_o=$(cat "$_f" 2>/dev/null)
+		[ -n "$_o" ] || continue
+		if [ -n "$_filter" ]; then
+			_se=$(printf '%s' "$_o" | jsonfilter -e '@.config_section' 2>/dev/null)
+			[ "$_se" = "$_filter" ] || [ "$_se" = '*' ] || continue
+		fi
+		[ "$_first" = 1 ] || printf ','
+		printf '%s' "$_o"
+		_first=0
+		_n=$(( _n + 1 ))
+	done
+	printf ']}\n'
+}
+
+case "$1" in
+	new)    shift; t_new "$@" ;;
+	get)    shift; t_emit "$(task_file "$1")" ;;
+	list)   shift; qm_init_dirs; t_list "$1" ;;
+	prune)  qm_init_dirs; t_prune; printf '{"pruned":true}\n' ;;
+	_run)   shift; t_run "$@" ;;
+	*)
+		echo "Usage: $0 {new <type> <section> [params]|get <id>|list [section]|prune}" >&2
+		exit 1
+		;;
+esac

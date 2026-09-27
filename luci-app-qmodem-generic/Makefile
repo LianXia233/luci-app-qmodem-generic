@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.4.11
-PKG_RELEASE:=15
+PKG_RELEASE:=16
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -35,25 +35,49 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # 的脚本会落地成 0644，rpcd 的 [ -x ] 判定与 procd 启动都会失败，「模组
 # 支持库」卡片会误报「未检测到 QModem 的模组支持库」。下面的 chmod 只是
 # 通过包管理器安装时的兜底，不能作为唯一保障。
+# postinst 必须快速返回：安装过程是同步的，任何耗时操作都会拖慢 opkg/apk
+# 以及紧随其后的 LuCI 可用性。因此这里只补权限 + enable 服务，
+# 模组支持库合并放后台，modem 探测完全交给 qmodem-worker 后台服务。
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
-[ -f /usr/libexec/rpcd/qos ] && chmod 755 /usr/libexec/rpcd/qos
-[ -f /usr/libexec/rpcd/qmodem_stats ] && chmod 755 /usr/libexec/rpcd/qmodem_stats
-[ -f /usr/libexec/rpcd/qmodem_support ] && chmod 755 /usr/libexec/rpcd/qmodem_support
-[ -f /usr/bin/qmodem-stats-collect ] && chmod 755 /usr/bin/qmodem-stats-collect
-[ -f /usr/bin/qmodem-stats-loop ] && chmod 755 /usr/bin/qmodem-stats-loop
-[ -f /etc/uci-defaults/99_luci-app-qmodem-generic ] && chmod 755 /etc/uci-defaults/99_luci-app-qmodem-generic
-[ -f /usr/sbin/qmodem-mt5700-fix ] && chmod 755 /usr/sbin/qmodem-mt5700-fix
-[ -f /etc/init.d/qmodem-mt5700-fix ] && chmod 755 /etc/init.d/qmodem-mt5700-fix
-[ -f /usr/sbin/qmodem-modem-support ] && chmod 755 /usr/sbin/qmodem-modem-support
-[ -f /etc/init.d/qmodem-modem-support ] && chmod 755 /etc/init.d/qmodem-modem-support
-# 立即同步一次模组支持库（幂等），并注册开机服务
-[ -x /usr/sbin/qmodem-modem-support ] && /usr/sbin/qmodem-modem-support
-/etc/init.d/qmodem-modem-support enable 2>/dev/null || true
-[ -f /etc/init.d/qmodem-stats-collect ] && chmod 755 /etc/init.d/qmodem-stats-collect
-/etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
+for f in \
+	/usr/libexec/rpcd/qos \
+	/usr/libexec/rpcd/qmodem_stats \
+	/usr/libexec/rpcd/qmodem_support \
+	/usr/libexec/rpcd/qmodem_cache \
+	/usr/bin/qmodem-stats-collect \
+	/usr/bin/qmodem-stats-loop \
+	/usr/bin/qmodem-task \
+	/usr/sbin/qmodem-mt5700-fix \
+	/usr/sbin/qmodem-modem-support \
+	/usr/sbin/qmodem-worker \
+	/usr/lib/qmodem/qmodem-at-probe \
+	/etc/init.d/qmodem-mt5700-fix \
+	/etc/init.d/qmodem-modem-support \
+	/etc/init.d/qmodem-stats-collect \
+	/etc/init.d/qmodem-worker \
+	/etc/uci-defaults/99_luci-app-qmodem-generic
+do
+	[ -f "$$f" ] && chmod 755 "$$f" 2>/dev/null
+done
+
 mkdir -p /etc/qmodem-stats 2>/dev/null || true
+mkdir -p /tmp/qmodem-cache 2>/dev/null || true
+
+# 模组支持库合并（幂等、纯文件操作）：放后台，不阻塞安装
+if [ -x /usr/sbin/qmodem-modem-support ]; then
+	( /usr/sbin/qmodem-modem-support >/dev/null 2>&1 & ) 2>/dev/null
+fi
+/etc/init.d/qmodem-modem-support enable 2>/dev/null || true
+
+/etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
+/etc/init.d/qmodem-worker enable 2>/dev/null || true
+
+# rpcd 需要重启才会加载新的 qmodem_cache 插件
 /etc/init.d/rpcd restart 2>/dev/null || true
+# 采集服务立即拉起（start 只向 procd 注册实例，不做任何 modem 探测）
+/etc/init.d/qmodem-worker start 2>/dev/null || true
+/etc/init.d/qmodem-stats-collect start 2>/dev/null || true
 exit 0
 endef
 

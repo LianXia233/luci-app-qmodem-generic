@@ -5,6 +5,7 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
+				"qmodem_cache": [ "*" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],
 				"qos": [ "*" ],
@@ -18,6 +19,7 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
+				"qmodem_cache": [ "*" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],
 				"qos": [ "*" ],

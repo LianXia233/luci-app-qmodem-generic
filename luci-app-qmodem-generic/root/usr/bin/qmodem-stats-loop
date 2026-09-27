@@ -1,6 +1,14 @@
 #!/bin/sh
 # QModem 流量统计采样循环 — 由 /etc/init.d/qmodem-stats-collect 拉起。
 # 用法: qmodem-stats-loop <config_section> [interval_seconds]
+#
+# 这是「统计完全后台化」的一环：采样只在这里发生，LuCI 的
+# qmodem_stats.daily_stats 只读结果，绝不在 RPC 里触发采样。
+#
+# 健壮性约定：
+#   * 采集器缺失 / 执行失败都不会让循环退出或空转（失败也照样 sleep）
+#   * 采集器内部对 modem 查询有硬超时，modem 失联时不会把本循环卡死
+#   * 单实例：同一配置节已有循环在跑就直接退出，避免 procd 重启叠加出多份
 
 config_section="$1"
 interval="${2:-60}"
@@ -11,11 +19,31 @@ esac
 case "$interval" in
 	''|*[!0-9]*) interval=60 ;;
 esac
+[ "$interval" -lt 5 ] && interval=5
+
+COLLECT=/usr/bin/qmodem-stats-collect
+LOCKDIR="/tmp/qmodem-stats-loop.$config_section.lock"
+
+mkdir -p /tmp 2>/dev/null || true
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+	# 已有实例：确认它真的还活着，死了就抢锁
+	_pid=$(cat "$LOCKDIR/pid" 2>/dev/null)
+	if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+		echo "qmodem-stats-loop[$config_section]: already running (pid $_pid), exiting"
+		exit 0
+	fi
+	rm -rf "$LOCKDIR" 2>/dev/null
+	mkdir "$LOCKDIR" 2>/dev/null || exit 0
+fi
+echo $$ > "$LOCKDIR/pid" 2>/dev/null
+trap 'rm -rf "$LOCKDIR" 2>/dev/null; exit 0' INT TERM EXIT
 
 # 启动先立即采一次，建立基准点
-/usr/bin/qmodem-stats-collect run "$config_section" >/dev/null 2>&1 || true
+[ -f "$COLLECT" ] && sh "$COLLECT" run "$config_section" >/dev/null 2>&1
 
 while :; do
 	sleep "$interval"
-	/usr/bin/qmodem-stats-collect run "$config_section" >/dev/null 2>&1 || true
+	# 采集器可能被卸载/升级：缺失时继续等待，不退出（procd 会认为服务崩溃并重启）
+	[ -f "$COLLECT" ] || continue
+	sh "$COLLECT" run "$config_section" >/dev/null 2>&1
 done

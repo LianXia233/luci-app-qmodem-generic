@@ -170,19 +170,33 @@ function featureLabel(name) {
 }
 
 return view.extend({
+	/*
+	 * 本页包含「模组支持库」注入状态与一堆 modem 能力查询，
+	 * 全部走缓存；支持库同步（syncSupport）改为后台任务。
+	 */
+	DOMAINS: [ 'network', 'device', 'status', 'support' ],
+	POLL_INTERVAL: 10000,
+
 	load: function() {
 		var self = this;
+		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+			self.section = ctx.section;
+			return self.collect(ctx);
+		});
+	},
+
+	collect: function(ctx) {
+		var self = this;
 		var errors = [];
+		var section = ctx.section;
 
 		// 模组支持库状态与具体模组无关：即使 QModem 还没识别到任何模组也必须可读，
 		// 否则「未识别到模组」时用户连手动注入支持库的入口都看不到。
 		var supportPromise = controls.getSupportStatus();
 
-		return Promise.all([ supportPromise, controls.resolveSection() ])
+		return Promise.all([ supportPromise ])
 		.then(function(rr) {
 			var support = rr[0] || {};
-			var section = rr[1];
-			self.section = section;
 
 			if (!section)
 				return { section: null, support: support, errors: errors };
@@ -660,6 +674,15 @@ return view.extend({
 	/* ---------------- 渲染 ---------------- */
 
 	render: function(res) {
+		return controls.liveView(this, res, {
+			domains: this.DOMAINS,
+			interval: this.POLL_INTERVAL,
+			paint: this.paintContent,
+			collect: this.collect
+		});
+	},
+
+	paintContent: function(res) {
 		var self = this;
 		res = res || {};
 		var warnings = (res.errors || []).map(function(msg) {
