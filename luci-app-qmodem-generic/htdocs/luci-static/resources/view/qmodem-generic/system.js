@@ -127,16 +127,6 @@ return view.extend({
 			'.mt-system-maintenance{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:16px}',
 			'.mt-system-maint-tools{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}',
 
-			/* 固件升级 (FOTA) 玻璃卡片 */
-			'.mt-system-fota{margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(254,249,235,0.7) 100%)}',
-			'.mt-system-fota-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}',
-			'.mt-system-state{padding:4px 12px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:11px;font-weight:700}',
-			'.mt-system-progress{height:8px;margin:16px 0 6px;border-radius:999px;background:#e2e8f0;overflow:hidden}',
-			'.mt-system-progress span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0072f5,#10b981)}',
-			'.mt-system-url{display:grid;grid-template-columns:1fr auto;gap:10px;margin-top:14px}',
-			'.mt-system-url input{background:rgba(255,255,255,0.9);border:1px solid rgba(203,213,225,0.8);border-radius:10px;padding:8px 14px;font-size:13px;width:100%;box-sizing:border-box}',
-			'.mt-system-url input:focus{border-color:#0072f5;box-shadow:0 0 0 3px rgba(0,114,245,0.15);outline:none}',
-
 			/* 技术细节折叠区 */
 			'.mt-system-details{margin-bottom:16px}',
 			'.mt-system-details summary{list-style:none;cursor:pointer;padding:16px 20px;font-size:13.5px;font-weight:750;color:#0f172a;display:flex;align-items:center;justify-content:space-between}',
@@ -148,7 +138,7 @@ return view.extend({
 
 			/* 响应式 */
 			'@media(max-width:980px){.mt-system-grid{grid-template-columns:1fr}.mt-system-card.wide{grid-column:auto}}',
-			'@media(max-width:680px){.mt-system-hero{flex-direction:column;align-items:flex-start}.mt-system-maintenance{flex-direction:column;align-items:flex-start}.mt-system-maint-tools{width:100%;justify-content:flex-start}.mt-system-url{grid-template-columns:1fr}.mt-system-thermal-form{grid-template-columns:1fr}}'
+			'@media(max-width:680px){.mt-system-hero{flex-direction:column;align-items:flex-start}.mt-system-maintenance{flex-direction:column;align-items:flex-start}.mt-system-maint-tools{width:100%;justify-content:flex-start}.mt-system-thermal-form{grid-template-columns:1fr}}'
 		].join(''));
 	},
 
@@ -385,7 +375,6 @@ return view.extend({
 
 		var ledSelect = controls.select([['1',_('开启')],['0',_('关闭')]], '1');
 		var simEnabled = controls.select([['1',_('已启用')],['0',_('已停用')]], '1');
-		var fotaUrl = E('input', { 'class': 'cbi-input-text', 'placeholder': 'http://server/path/' });
 
 		var raw = JSON.stringify({
 			config_section: res.section,
@@ -558,37 +547,8 @@ return view.extend({
 					E('a', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'href':L.url('admin/modem/qmodem-generic/settings') }, _('诊断')),
 					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showThermalManager(temperature); } }, _('热保护阈值')),
 					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('标识实验室')),
-					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click':function() { self.showFactoryReset(); } }, _('恢复出厂设置'))
-				])
-			]),
-
-			/* 固件在线升级 (FOTA) */
-			E('section', { 'class': 'mt-system-card mt-system-fota' }, [
-				E('div', { 'class': 'mt-system-fota-head' }, [
-					E('div', {}, [
-						E('div', { 'class': 'mt-card-title', 'style': 'margin-bottom:4px' }, [
-							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'),
-							_('固件在线升级（FOTA）')
-						]),
-						E('p', { 'style': 'margin:0;color:#64748b;font-size:12px' }, _('QModem 以 AT 指令发起升级请求，安装期间请勿断电。'))
-					]),
-					E('span', { 'class': 'mt-system-state' }, _('状态不可用'))
-				]),
-				E('div', { 'class': 'mt-system-progress' }, E('span', { 'style': 'width:0%' })),
-				E('div', { 'style': 'font-size:11px;color:#64748b;text-align:right' }, _('%d%% 完成').format(0)),
-				E('div', { 'class': 'mt-system-url' }, [
-					fotaUrl,
-					E('button', { 'class': 'mt-sys-btn mt-sys-btn-primary', 'click': function() {
-						if (!/^http:\/\//.test(fotaUrl.value || ''))
-							return ui.addNotification(null, E('p', {}, _('请输入有效的 HTTP 升级服务器地址。')), 'warning');
-						controls.confirmModal(_('开始固件下载'), _('模组将连接指定服务器，可能短暂消耗移动数据流量。'), function() {
-							return self.atRun('AT^FOTADL="' + fotaUrl.value.replace(/"/g, '') + '"', _('固件下载请求已接受。'));
-						}, false);
-					} }, _('下载并升级'))
-				]),
-				E('div', { 'style': 'display:flex;justify-content:flex-end;gap:10px;margin-top:14px' }, [
-					E('button', { 'class': 'mt-sys-btn mt-sys-btn-secondary', 'click': function() { window.location.reload(); } }, _('刷新状态')),
-					E('button', { 'class': 'mt-sys-btn mt-sys-btn-danger', 'click': function() {
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click':function() { self.showFactoryReset(); } }, _('恢复出厂设置')),
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click': function() {
 						controls.confirmModal(_('重启模组'), _('将重启模组并短暂中断移动连接。'), function() {
 							return controls.doReboot(self.section, 'soft').catch(function(err) {
 								ui.addNotification(null, E('p', {}, _('模组重启失败：%s').format((err && err.message) || String(err))), 'danger');

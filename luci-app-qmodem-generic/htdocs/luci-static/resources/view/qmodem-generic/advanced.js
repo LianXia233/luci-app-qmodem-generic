@@ -5,23 +5,13 @@
 'require qmodem-generic.controls as controls';
 
 /*
- * 高级设置（Advanced）
- *
+ * 高级设置（Advanced Settings）— 现代白色毛玻璃 (Glassmorphism) + 动态硬件总线 SVG 重构
  * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（由 qmodem-generic.controls 封装）：
- *   get_disabled_features / get_reboot_caps / get_at_cfg / get_copyright /
- *   base_info / get_mode / get_network_prefer / get_lockband
+ *    get_disabled_features / get_reboot_caps / get_at_cfg / get_copyright /
+ *    base_info / get_mode / get_network_prefer / get_lockband
  * 控制动作：do_reboot / set_mode / set_network_prefer / set_lockband / send_at。
- *
- * 旧的 AT 文本后端、旧 ubus 对象与所有 AT 文本正则解析已全部移除。
- * QModem 没有通用方法的模块专有能力（USB 模式、PCIe、SIM 热插拔、热保护阈值）
- * 只能经 QModem 的 send_at 做 AT 透传，属尽力而为，失败时给出告警而不回退旧后端。
  */
 
-/* ------------------------------------------------------------------ */
-/* 防御式取值辅助                                                       */
-/* ------------------------------------------------------------------ */
-
-/* 出错时不抛异常，记入 errors 数组，返回 null，避免白屏 */
 function guard(promise, label, errors) {
 	return Promise.resolve(promise).catch(function(err) {
 		errors.push(label + '：' + ((err && err.message) || String(err)));
@@ -29,7 +19,6 @@ function guard(promise, label, errors) {
 	});
 }
 
-/* 忽略大小写/空格/下划线的键查找，支持多个候选键名 */
 function ci(obj, names) {
 	if (!obj || typeof obj !== 'object')
 		return undefined;
@@ -44,7 +33,6 @@ function ci(obj, names) {
 	return undefined;
 }
 
-/* 取出 { <key>: {...} } 里的子对象，取不到时返回空对象 */
 function plainObject(raw, key) {
 	if (!raw || typeof raw !== 'object')
 		return {};
@@ -54,7 +42,6 @@ function plainObject(raw, key) {
 	return {};
 }
 
-/* 从字典里按多个候选键名取第一个有值的标量字段 */
 function pick(map, names) {
 	var v = ci(map, names);
 	if (v === undefined || v === null || typeof v === 'object')
@@ -62,12 +49,10 @@ function pick(map, names) {
 	return String(v).trim();
 }
 
-/* 显示值：空/未知一律显示 -- */
 function shown(value) {
 	return (value === undefined || value === null || value === '') ? '--' : String(value);
 }
 
-/* getDisabledFeatures → 归一化后的特性名数组 */
 function disabledSet(raw) {
 	var list = (raw && (ci(raw, [ 'disabled_features' ]) || raw)) || [];
 	if (!Array.isArray(list))
@@ -79,7 +64,6 @@ function isDisabled(list, name) {
 	return list.indexOf(String(name).toLowerCase().replace(/[\s_\-]/g, '')) !== -1;
 }
 
-/* send_at 返回值形态不固定，尽力取出文本 */
 function atText(raw) {
 	if (raw === undefined || raw === null)
 		return '';
@@ -98,7 +82,6 @@ function atText(raw) {
 	return String(raw);
 }
 
-/* lockband 的 lock_band / available_band 元素统一成 {id, name} */
 function bandItem(item) {
 	if (item === undefined || item === null)
 		return null;
@@ -120,7 +103,6 @@ function bandItems(list) {
 	return list.map(bandItem).filter(Boolean);
 }
 
-/* 频段类别中文名 */
 var BAND_CLASS_LABEL = {
 	GW: _('2G / 3G（GSM / WCDMA）'),
 	LTE: _('4G LTE'),
@@ -128,7 +110,6 @@ var BAND_CLASS_LABEL = {
 	NRSA: _('5G NR（SA 独立组网）')
 };
 
-/* 拨号/网络模式中文名 */
 var MODE_LABEL = {
 	auto: _('自动'), ecm: 'ECM', ncm: 'NCM', rndis: 'RNDIS',
 	mbim: 'MBIM', qmi: 'QMI', gobinet: 'GobiNet', ppp: 'PPP'
@@ -138,7 +119,6 @@ function modeLabel(key) {
 	return MODE_LABEL[String(key).toLowerCase()] || String(key).toUpperCase();
 }
 
-/* QModem 上报的被禁用特性名 → 中文说明 */
 var FEATURE_LABEL = {
 	lockband: _('频段锁定'),
 	neighborcell: _('邻区查询'),
@@ -169,11 +149,13 @@ function featureLabel(name) {
 	return FEATURE_LABEL[key] ? (FEATURE_LABEL[key] + '（' + name + '）') : String(name);
 }
 
+function svgNode(xmlString) {
+	var wrap = document.createElement('div');
+	wrap.innerHTML = xmlString.trim();
+	return wrap.firstElementChild;
+}
+
 return view.extend({
-	/*
-	 * 本页包含「模组支持库」注入状态与一堆 modem 能力查询，
-	 * 全部走缓存；支持库同步（syncSupport）改为后台任务。
-	 */
 	DOMAINS: [ 'network', 'device', 'status', 'support' ],
 	POLL_INTERVAL: 10000,
 
@@ -186,12 +168,9 @@ return view.extend({
 	},
 
 	collect: function(ctx) {
-		var self = this;
 		var errors = [];
 		var section = ctx.section;
 
-		// 模组支持库状态与具体模组无关：即使 QModem 还没识别到任何模组也必须可读，
-		// 否则「未识别到模组」时用户连手动注入支持库的入口都看不到。
 		var supportPromise = controls.getSupportStatus();
 
 		return Promise.all([ supportPromise ])
@@ -233,21 +212,101 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.mt-hardware{max-width:1120px;margin:0 auto}.mt-hardware-head{padding:22px 24px;border-radius:15px;background:linear-gradient(135deg,#263b59,#354d70);color:#fff;margin-bottom:16px}.mt-hardware-head h2{color:#fff;margin:0 0 7px;font-size:24px}.mt-hardware-head p{margin:0;opacity:.84;font-size:13px;line-height:1.55}',
-			'.mt-hardware-warning{margin-bottom:14px}.mt-hardware-details{margin-top:14px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:11px;overflow:hidden}.mt-hardware-details summary{cursor:pointer;padding:12px 14px;font-size:12px;font-weight:650}.mt-hardware-raw{margin:0;padding:14px;background:#17202a;color:#dce6ef;white-space:pre-wrap;word-break:break-word;font:11px/1.55 monospace;max-height:420px;overflow:auto}',
-			'.mt-hardware-tools{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-top:18px;padding:16px 18px}.mt-hardware-tools h3{margin:0 0 4px;font-size:14px}.mt-hardware-tools p{margin:0;color:var(--mt-ui-muted);font-size:10px;line-height:1.45}.mt-hardware-tool-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}',
-			'.mt-hardware-caps{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.mt-hardware-cap{padding:4px 10px;border-radius:999px;background:#fdecec;color:#a43e2c;font-size:11px;font-weight:650}.mt-hardware-cap.ok{background:#e0f5ed;color:#08775d}',
-			'.mt-hardware-bands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.mt-hardware-band{padding:17px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff)}.mt-hardware-band h4{margin:0 0 4px;font-size:14px}.mt-hardware-band p{margin:0 0 11px;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.45}',
-			'.mt-band-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.mt-band-option{display:flex;align-items:center;gap:9px;min-height:40px;padding:7px 10px;border:1px solid var(--border-color-low,#e8ecf0);border-radius:9px;background:var(--background-color-low,#f8fafb);cursor:pointer;font-size:12px}.mt-band-option:hover{border-color:#9cc5ee;background:#f1f7fd}.mt-band-option input{flex:0 0 auto;width:16px!important;height:16px;margin:0}.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
-			'.mt-hardware-at{display:flex;gap:8px;align-items:center;margin-top:12px}.mt-hardware-at .btn{border-radius:9px}',
-			'@media(max-width:760px){.mt-hardware-head{padding:20px}.mt-hardware-tools{display:block}.mt-hardware-tool-actions{justify-content:flex-start;margin-top:12px}.mt-hardware-bands{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(2,minmax(0,1fr))}}',
-			'@media(max-width:430px){.mt-band-options{grid-template-columns:1fr}}'
+			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
+			'.mt-hardware{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			/* 背景环境光晕 */
+			'.mt-adv-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mt-adv-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(14,165,233,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+
+			/* 白色毛玻璃卡片通用规则 */
+			'.mt-adv-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
+			'.mt-adv-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+
+			/* 顶部 Hero 玻璃卡片 */
+			'.mt-hardware-head{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
+			'.mt-hardware-head h2{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.mt-hardware-head p{font-size:13px;color:#64748b;line-height:1.5;margin:0}',
+
+			/* 动态 SVG 硬件总线拓扑 */
+			'.mt-adv-topo-card{padding:20px 24px;margin-bottom:16px}',
+			'.mt-adv-topo-svg{width:100%;height:100px;display:block}',
+			'@keyframes qmBusDash{to{stroke-dashoffset:-36}}',
+			'.qm-bus-stream{stroke-dasharray:7,5;animation:qmBusDash 1.4s linear infinite}',
+
+			/* 警告与提示卡片 */
+			'.mt-hardware-warning{margin-bottom:14px;color:#b45309;background:rgba(254,243,199,0.85);border:1px solid rgba(253,230,138,0.8);border-radius:14px;padding:12px 18px;font-size:12.5px;display:flex;align-items:center;gap:10px}',
+
+			/* 控制区域与标题 */
+			'.mt-control-section{margin-top:16px}',
+			'.mt-control-section-head{margin-bottom:14px}',
+			'.mt-control-section-head h3{font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px;display:flex;align-items:center;gap:8px}',
+			'.mt-control-section-head p{font-size:12px;color:#64748b;margin:0}',
+			'.mt-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}',
+
+			/* 特性标签胶囊 */
+			'.mt-hardware-caps{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}',
+			'.mt-hardware-cap{padding:3px 10px;border-radius:999px;background:rgba(254,242,242,0.85);color:#dc2626;font-size:10.5px;font-weight:700;border:1px solid rgba(254,202,202,0.8)}',
+			'.mt-hardware-cap.ok{background:rgba(236,253,245,0.85);color:#059669;border-color:rgba(167,243,208,0.8)}',
+
+			/* 频段锁定网格卡片 */
+			'.mt-hardware-bands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px}',
+			'.mt-hardware-band{padding:18px}',
+			'.mt-hardware-band h4{margin:0 0 4px;font-size:14.5px;font-weight:750;color:#0f172a}',
+			'.mt-hardware-band p{margin:0 0 12px;color:#64748b;font-size:11px;line-height:1.45}',
+			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}',
+			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid rgba(226,232,240,0.8);border-radius:10px;background:rgba(248,250,252,0.8);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
+			'.mt-band-option:hover{border-color:rgba(0,114,245,0.4);background:#fff}',
+			'.mt-band-option.checked{border-color:#0072f5;background:#eff6ff;color:#0072f5;box-shadow:inset 0 0 0 1px #0072f5}',
+			'.mt-band-option input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}',
+			'.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
+
+			/* 底部开发者工具条 */
+			'.mt-hardware-tools{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-top:18px}',
+			'.mt-hardware-tool-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}',
+
+			/* 终端输出视窗 (AT 控制台与详情) */
+			'.mt-hardware-raw{background:#0f172a;padding:16px;border-radius:14px;color:#38bdf8;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
+
+			/* 响应式 */
+			'@media(max-width:980px){.mt-control-grid,.mt-hardware-bands{grid-template-columns:1fr}}',
+			'@media(max-width:680px){.mt-hardware-head{flex-direction:column;align-items:flex-start}.mt-hardware-tools{flex-direction:column;align-items:flex-start}.mt-hardware-tool-actions{width:100%;justify-content:flex-start}}'
 		].join(''));
 	},
 
-	/* ---------------- AT 透传（无专用 QModem 方法时使用） ---------------- */
+	/* 动态 SVG 总线与硬件控制器拓扑 */
+	renderSvgBusTopo: function() {
+		var svgStr = [
+			'<svg class="mt-adv-topo-svg" viewBox="0 0 540 86">',
+			'  <!-- 节点 1: 主机处理器与总线 (Host Controller) -->',
+			'  <g transform="translate(15, 14)">',
+			'    <rect x="0" y="0" width="125" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
+			'    <rect x="12" y="16" width="24" height="24" rx="5" fill="#0072f5"/>',
+			'    <text x="44" y="27" font-size="12" font-weight="750" fill="#0f172a">Host Processor</text>',
+			'    <text x="44" y="42" font-size="10" fill="#64748b">PCIe / USB 3.0</text>',
+			'  </g>',
+			'  <!-- 动态总线通道 1 -->',
+			'  <line x1="140" y1="42" x2="215" y2="42" stroke="#0072f5" stroke-width="2.6" class="qm-bus-stream"/>',
+			'  <!-- 节点 2: QModem 硬件接入与控制中枢 -->',
+			'  <g transform="translate(215, 14)">',
+			'    <rect x="0" y="0" width="135" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
+			'    <circle cx="22" cy="28" r="6" fill="#10b981"/>',
+			'    <text x="36" y="27" font-size="12" font-weight="750" fill="#0f172a">QModem Bus Ctrl</text>',
+			'    <text x="36" y="42" font-size="10" fill="#64748b">AT &amp; Channel Mgr</text>',
+			'  </g>',
+			'  <!-- 动态总线通道 2 -->',
+			'  <line x1="350" y1="42" x2="415" y2="42" stroke="#10b981" stroke-width="2.6" class="qm-bus-stream" style="animation-duration:1.2s;"/>',
+			'  <!-- 节点 3: 模组端基带射频硬件 -->',
+			'  <g transform="translate(415, 14)">',
+			'    <rect x="0" y="0" width="115" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
+			'    <circle cx="20" cy="28" r="6" fill="#0ea5e9"/>',
+			'    <text x="34" y="27" font-size="12" font-weight="750" fill="#0f172a">Cellular Core</text>',
+			'    <text x="34" y="42" font-size="10" fill="#64748b">Hardware Target</text>',
+			'  </g>',
+			'</svg>'
+		].join('');
+		return svgNode(svgStr);
+	},
 
-	/* 下发 AT，失败或模组返回 ERROR 时仅告警，不回退旧后端 */
 	atRun: function(section, atPort, command, okMessage) {
 		return controls.sendAt(section, atPort, command).then(function(res) {
 			var text = atText(res);
@@ -264,9 +323,7 @@ return view.extend({
 		}).catch(function(err) { return Promise.reject(err); });
 	},
 
-	/* 读取当前值按钮：QModem 不上报这些模块私有参数，只能查询 AT 后回填下拉框 */
 	queryButton: function(section, atPort, command, re, target) {
-		var self = this;
 		return E('button', {
 			'type': 'button',
 			'class': 'btn',
@@ -289,7 +346,6 @@ return view.extend({
 		}, _('读取当前值'));
 	},
 
-	/* 一个「下拉框 + 读取 + 应用」的 AT 透传卡片 */
 	atCard: function(section, atPort, opts) {
 		var self = this;
 		var input = controls.select([ [ '', _('保持不变') ] ].concat(opts.options), '');
@@ -316,17 +372,6 @@ return view.extend({
 		], opts.wide);
 	},
 
-	/* ---------------- 模组支持库（内置型号注入） ---------------- */
-
-	/*
-	 * 部分 QModem 版本的 /usr/share/qmodem/modem_support.json 未收录某些型号
-	 * （例如 Quectel RG520N-CN）：未收录时 QModem 不会为其生成 modem-device，
-	 * 页面里也就看不到这个模组。本卡片显示内置型号的注入状态并支持一键同步，
-	 * 用来替代手工 vi 编辑支持库的做法。
-	 *
-	 * 数据与动作来自本包自带的 rpcd 插件 qmodem_support（status / sync），
-	 * 与具体模组无关 —— 即使一个模组都没识别到也照常显示。
-	 */
 	supportCard: function(support) {
 		var self = this;
 		support = support || {};
@@ -341,7 +386,7 @@ return view.extend({
 
 		if (!available) {
 			body.push(E('div', { 'class': 'mt-control-note' },
-				_('未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem，或在终端执行 /usr/sbin/qmodem-modem-support 查看原因。').format(path)));
+				_('未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem。').format(path)));
 		} else if (support.error) {
 			body.push(E('div', { 'class': 'mt-control-note' },
 				_('读取支持库失败：%s').format(support.error)));
@@ -351,7 +396,7 @@ return view.extend({
 			body.push(controls.state(_('已入库'), skipped.length ? skipped.join('、') : _('无')));
 			body.push(missing.length
 				? E('div', { 'class': 'mt-control-note' },
-					_('以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备，QModem 才会识别该模组。').format(missing.join('、')))
+					_('以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备。').format(missing.join('、')))
 				: E('div', { 'class': 'mt-control-note' },
 					_('内置型号均已存在于支持库中，无需同步。')));
 		}
@@ -370,11 +415,10 @@ return view.extend({
 		]));
 
 		return controls.card(_('模组支持库'),
-			_('把本插件内置的模组定义写入 QModem 的模组支持库，用于 QModem 版本尚未收录某些型号的场合（例如 Quectel RG520N-CN）。写入前自动备份，已存在的型号不会重复写入。'),
+			_('把本插件内置的模组定义写入 QModem 支持库，用于识别新收录的型号。写入前自动备份。'),
 			body, true);
 	},
 
-	/* 执行一次同步：由 rpcd qmodem_support.sync 完成写入，成功后刷新页面 */
 	supportSync: function() {
 		return controls.syncSupport().then(function(res) {
 			res = res || {};
@@ -382,7 +426,7 @@ return view.extend({
 
 			if (added.length)
 				ui.addNotification(null, E('p', {},
-					_('已写入支持库：%s。请重启 QModem（/etc/init.d/qmodem restart）或重启设备使其生效。').format(added.join('、'))));
+					_('已写入支持库：%s。请重启 QModem 或重启设备生效。').format(added.join('、'))));
 			else if (res.error)
 				ui.addNotification(null, E('p', {}, _('同步未生效：%s').format(res.error)), 'warning');
 			else
@@ -394,8 +438,6 @@ return view.extend({
 				_('同步支持库失败：%s').format((err && err.message) || String(err))), 'danger');
 		});
 	},
-
-	/* ---------------- 模组能力与重启 ---------------- */
 
 	capabilityCard: function(section, res, disabled) {
 		var caps = plainObject(res.rebootCaps, 'reboot_caps');
@@ -409,7 +451,7 @@ return view.extend({
 			: [ E('span', { 'class': 'mt-hardware-cap ok' }, _('QModem 未报告任何被禁用的特性')) ];
 
 		return controls.card(_('模组能力'),
-			_('由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性在本插件中已隐藏或降级为只读。'), [
+			_('由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性已隐藏或降级只读。'), [
 				controls.state(_('配置节'), section),
 				controls.state(_('软重启（AT 复位）'), soft ? _('支持') : _('不支持')),
 				controls.state(_('硬重启（断电复位）'), hard ? _('支持') : _('不支持')),
@@ -447,19 +489,17 @@ return view.extend({
 					rebootButton('soft', _('软重启模组'), 'cbi-button-action', soft,
 						_('模组将执行软复位并重新注册网络，移动数据会中断约 30 秒。')),
 					rebootButton('hard', _('硬重启模组'), 'cbi-button-negative', hard,
-						_('模组将断电复位。若模组供电受主板控制，可能同时影响 PCIe/USB 链路。'))
+						_('模组将断电复位。可能同时影响 PCIe/USB 链路。'))
 				]),
 				(!soft && !hard) ? E('div', { 'class': 'mt-control-note' },
-					_('本模组经 QModem 未上报任何可用的重启方式（reboot_caps 全为 0）。')) : null
+					_('本模组经 QModem 未上报任何可用的重启方式。')) : null
 			]);
 	},
-
-	/* ---------------- 有专用 QModem 方法的无线控制 ---------------- */
 
 	modeCard: function(section, modeRaw, disabled) {
 		if (isDisabled(disabled, 'setmode'))
 			return controls.card(_('网络模式'), _('模组对外呈现的拨号模式。'), [
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用拨号模式切换（disabled_features 含 "SetMode"）。'))
+				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用拨号模式切换。'))
 			]);
 
 		var mode = plainObject(modeRaw, 'mode');
@@ -499,7 +539,7 @@ return view.extend({
 	preferCard: function(section, preferRaw, disabled) {
 		if (isDisabled(disabled, 'networkprefer') || isDisabled(disabled, 'setnetworkprefer'))
 			return controls.card(_('网络优选'), _('选择模组允许驻网的制式。'), [
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用网络优选（disabled_features 含 "NetworkPrefer"）。'))
+				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用网络优选。'))
 			]);
 
 		var prefer = plainObject(preferRaw, 'network_prefer');
@@ -517,7 +557,11 @@ return view.extend({
 				'checked': String(prefer[k]) === '1' ? 'checked' : null
 			});
 			boxes[k] = box;
-			return E('label', { 'class': 'mt-band-option' }, [ box, E('span', {}, k) ]);
+			var lbl = E('label', { 'class': 'mt-band-option' + (String(prefer[k]) === '1' ? ' checked' : '') }, [ box, E('span', {}, k) ]);
+			box.addEventListener('change', function() {
+				lbl.classList[box.checked ? 'add' : 'remove']('checked');
+			});
+			return lbl;
 		});
 
 		return controls.card(_('网络优选'),
@@ -553,7 +597,7 @@ return view.extend({
 		if (!available.length) {
 			available = locked.slice();
 			if (!available.length)
-				return E('section', { 'class': 'mt-hardware-band mt-ui-card' }, [
+				return E('section', { 'class': 'mt-adv-card mt-hardware-band' }, [
 					E('h4', {}, label),
 					E('p', {}, _('本模组经 QModem 未上报该类别的可用频段。'))
 				]);
@@ -566,11 +610,15 @@ return view.extend({
 				'value': item.id,
 				'checked': lockedIds[item.id] ? 'checked' : null
 			});
+			var lbl = E('label', { 'class': 'mt-band-option' + (lockedIds[item.id] ? ' checked' : '') }, [ box, E('span', {}, item.name) ]);
+			box.addEventListener('change', function() {
+				lbl.classList[box.checked ? 'add' : 'remove']('checked');
+			});
 			boxes.push(box);
-			return E('label', { 'class': 'mt-band-option' }, [ box, E('span', {}, item.name) ]);
+			return lbl;
 		});
 
-		return E('section', { 'class': 'mt-hardware-band mt-ui-card' }, [
+		return E('section', { 'class': 'mt-adv-card mt-hardware-band' }, [
 			E('h4', {}, label),
 			E('p', {}, _('已锁定 %d 个频段，共 %d 个可用频段。不勾选任何频段表示解除锁定。')
 				.format(locked.length, available.length)),
@@ -578,11 +626,15 @@ return view.extend({
 			E('div', { 'class': 'mt-band-actions' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn',
-					'click': function() { boxes.forEach(function(b) { b.checked = false; }); }
+					'click': function() {
+						boxes.forEach(function(b) { b.checked = false; b.parentElement.classList.remove('checked'); });
+					}
 				}, _('清空')),
 				E('button', {
 					'type': 'button', 'class': 'btn',
-					'click': function() { boxes.forEach(function(b) { b.checked = true; }); }
+					'click': function() {
+						boxes.forEach(function(b) { b.checked = true; b.parentElement.classList.add('checked'); });
+					}
 				}, _('全选')),
 				E('button', {
 					'type': 'button', 'class': 'btn cbi-button-apply',
@@ -615,7 +667,7 @@ return view.extend({
 		if (isDisabled(disabled, 'lockband'))
 			return E('section', { 'class': 'mt-control-section' }, [
 				head,
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用频段锁定（disabled_features 含 "LockBand"），相关设置已隐藏。'))
+				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用频段锁定。'))
 			]);
 
 		var lockband = plainObject(lockRaw, 'lockband');
@@ -642,16 +694,13 @@ return view.extend({
 		]);
 	},
 
-	/* ---------------- AT 透传控制台（任意命令） ---------------- */
-
 	passthroughCard: function(section, atPort) {
-		var self = this;
 		var input = E('input', { 'class': 'cbi-input-text', 'placeholder': 'AT^SETMODE?' });
 		var output = E('pre', { 'class': 'mt-hardware-raw', 'style': 'margin-top:12px;max-height:220px' },
 			_('尚未下发命令。'));
 
-		return controls.card(_('AT 透传'),
-			_('经 QModem 的 send_at 向模组下发任意 AT 命令，用于本页未覆盖的模块私有设置。'), [
+		return controls.card(_('AT 透传控制台'),
+			_('经 QModem 的 send_at 向模组下发任意 AT 命令，用于模块私有设置与调试。'), [
 				controls.row(_('AT 命令'), input),
 				E('div', { 'class': 'mt-control-actions' }, E('button', {
 					'type': 'button', 'class': 'btn cbi-button-action',
@@ -671,8 +720,6 @@ return view.extend({
 			], true);
 	},
 
-	/* ---------------- 渲染 ---------------- */
-
 	render: function(res) {
 		return controls.liveView(this, res, {
 			domains: this.DOMAINS,
@@ -683,7 +730,6 @@ return view.extend({
 	},
 
 	paintContent: function(res) {
-		var self = this;
 		res = res || {};
 		var warnings = (res.errors || []).map(function(msg) {
 			return E('div', { 'class': 'alert-message warning mt-hardware-warning' }, msg);
@@ -696,13 +742,15 @@ return view.extend({
 		});
 
 		if (!res.section)
-			return E('div', { 'class': 'mt-hardware mt-ui-page' }, [].concat(
+			return E('div', { 'class': 'mt-hardware' }, [].concat(
 				[ this.styleNode(), controls.styleNode() ],
 				warnings,
 				[ modemBar,
-				E('section', { 'class': 'mt-hardware-head mt-ui-hero' }, [
-					E('h2', {}, _('高级设置')),
-					E('p', {}, _('模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。'))
+				E('section', { 'class': 'mt-adv-card mt-hardware-head' }, [
+					E('div', {}, [
+						E('h2', {}, _('高级设置')),
+						E('p', {}, _('模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。'))
+					])
 				]),
 				E('div', { 'class': 'alert-message warning mt-hardware-warning' },
 					_('未检测到模组（请确认 QModem 已识别该设备）。')),
@@ -741,17 +789,41 @@ return view.extend({
 			rawDump = _('无法序列化 QModem 返回数据。');
 		}
 
-		return E('div', { 'class': 'mt-hardware mt-ui-page' }, [
+		return E('div', { 'class': 'mt-hardware' }, [
 			this.styleNode(),
 			controls.styleNode(),
+			/* 背景环境光晕 */
+			E('div', { 'class': 'mt-adv-bg-glow1' }),
+			E('div', { 'class': 'mt-adv-bg-glow2' }),
+
 			modemBar,
-			E('section', { 'class': 'mt-hardware-head mt-ui-hero' }, [
-				E('h2', {}, _('高级设置')),
-				E('p', {}, _('模组能力、重启、无线策略与 AT 透传，供有经验的用户使用。日常使用无需修改本页设置。'))
+
+			/* 顶部 Hero 玻璃卡片 */
+			E('section', { 'class': 'mt-adv-card mt-hardware-head' }, [
+				E('div', {}, [
+					E('h2', {}, _('高级设置与硬件控制')),
+					E('p', {}, _('硬件总线模式、重启能力、驻网策略与底层 AT 透传调试。'))
+				])
 			])
 		].concat(warnings).concat([
-			E('div', { 'class': 'alert-message warning mt-hardware-warning' },
-				_('修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。')),
+			/* 动态 SVG 硬件总线拓扑 */
+			E('section', { 'class': 'mt-adv-card mt-adv-topo-card' }, [
+				E('div', { 'class': 'mt-control-section-head', 'style': 'margin-bottom:10px' }, [
+					E('h3', {}, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>'),
+						_('硬件总线与数据通路架构')
+					]),
+					E('p', {}, _('主机处理器、QModem 守护进程与模组蜂窝核心交互链路'))
+				]),
+				this.renderSvgBusTopo()
+			]),
+
+			E('div', { 'class': 'mt-hardware-warning' }, [
+				svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'),
+				_('修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。')
+			]),
+
+			/* 模组支持库 */
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模组支持库')),
@@ -761,6 +833,8 @@ return view.extend({
 					this.supportCard(res.support)
 				])
 			]),
+
+			/* 模组能力与重启 */
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模组能力与维护')),
@@ -771,6 +845,8 @@ return view.extend({
 					this.rebootCard(section, res)
 				])
 			]),
+
+			/* 无线策略 (模式与优选) */
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('无线策略')),
@@ -781,11 +857,15 @@ return view.extend({
 					this.preferCard(section, res.prefer, disabled)
 				])
 			]),
+
+			/* 频段锁定 */
 			this.lockBandSection(section, res.lockband, disabled),
+
+			/* 专有硬件设置 (AT 透传) */
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模块专有硬件设置（AT 透传）')),
-					E('p', {}, _('以下能力在 QModem 中没有通用方法，只能经 send_at 以模块私有 AT 命令下发；QModem 也无法回读，故默认显示「保持不变」，可点击「读取当前值」向模组查询。'))
+					E('p', {}, _('以下能力在 QModem 中没有通用方法，只能经 send_at 以模块私有 AT 命令下发；可点击「读取当前值」向模组查询。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
 					this.atCard(section, atPort, {
@@ -802,7 +882,7 @@ return view.extend({
 						command: function(v) { return 'AT^SETMODE=' + v; },
 						apply: _('应用 USB 模式'),
 						ok: _('USB 模式命令已被接受。'),
-						note: _('切换后 USB 网络接口会重新枚举，管理通道可能短暂中断。若已使用 QModem 的拨号模式（ECM/NCM），请优先使用上方「网络模式」。')
+						note: _('切换后 USB 接口会重新枚举，管理通道可能短暂中断。')
 					}),
 					this.atCard(section, atPort, {
 						title: _('PCIe 以太网控制器'),
@@ -825,7 +905,7 @@ return view.extend({
 						command: function(v) { return 'AT^TDPCIELANCFG=' + v; },
 						apply: _('应用 PHY 档位'),
 						ok: _('PHY 档位命令已被接受。'),
-						note: _('此处选择的是硬件 PHY 档位，不会强制以太网链路协商速率。')
+						note: _('此处选择的是硬件 PHY 档位。')
 					}),
 					this.atCard(section, atPort, {
 						title: _('SIM 热插拔'),
@@ -841,7 +921,7 @@ return view.extend({
 					}),
 					this.atCard(section, atPort, {
 						title: _('热保护轮询'),
-						desc: _('模组内置温度保护的轮询开关与周期。QModem 仅能读取温度，写入只能走 AT 透传。'),
+						desc: _('模组内置温度保护的轮询开关与周期。'),
 						label: _('轮询周期'),
 						options: [ [ '1', '1 s' ], [ '2', '2 s' ], [ '3', '3 s' ], [ '5', '5 s' ],
 							[ '10', '10 s' ], [ '30', '30 s' ], [ '60', '60 s' ] ],
@@ -856,10 +936,12 @@ return view.extend({
 					this.passthroughCard(section, atPort)
 				])
 			]),
-			E('section', { 'class': 'mt-hardware-tools mt-ui-card' }, [
+
+			/* 诊断与开发者工具 */
+			E('section', { 'class': 'mt-adv-card mt-hardware-tools' }, [
 				E('div', {}, [
-					E('h3', {}, _('诊断与开发者工具')),
-					E('p', {}, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
+					E('h3', { 'style': 'margin:0 0 4px;font-size:15px;font-weight:750;color:#0f172a' }, _('诊断与开发者工具')),
+					E('p', { 'style': 'margin:0;color:#64748b;font-size:12px' }, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
 				]),
 				E('div', { 'class': 'mt-hardware-tool-actions' }, [
 					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/settings') }, _('设备参数设置')),
@@ -870,16 +952,17 @@ return view.extend({
 					}, _('刷新状态'))
 				])
 			]),
-			E('details', { 'class': 'mt-hardware-details mt-ui-details' }, [
-				E('summary', {}, [
-					E('span', { 'class': 'mt-ui-summary-copy' }, [
-						E('span', { 'class': 'mt-ui-summary-title' }, _('技术细节（QModem 原始数据）')),
-						E('span', { 'class': 'mt-ui-summary-desc' },
-							_('AT 端口：%s　供应商：%s').format(shown(atPort), shown(cr.Vendor || baseMap['manufacturer'])))
+
+			/* 调试技术细节折叠栏 */
+			E('details', { 'class': 'mt-adv-card', 'style': 'margin-top:16px' }, [
+				E('summary', { 'style': 'cursor:pointer;font-size:13.5px;font-weight:750;color:#0f172a;list-style:none;display:flex;justify-content:space-between;align-items:center' }, [
+					E('span', { 'style': 'display:flex;align-items:center;gap:8px' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>'),
+						_('技术细节（QModem 原始数据）')
 					]),
-					E('span', { 'class': 'mt-ui-chevron', 'aria-hidden': 'true' }, '›')
+					E('span', { 'style': 'font-size:18px;color:#94a3b8;font-weight:700' }, '›')
 				]),
-				E('pre', { 'class': 'mt-hardware-raw mt-ui-details-body' }, rawDump || _('无响应。'))
+				E('pre', { 'class': 'mt-hardware-raw', 'style': 'margin-top:12px' }, rawDump || _('无响应。'))
 			])
 		]));
 	},

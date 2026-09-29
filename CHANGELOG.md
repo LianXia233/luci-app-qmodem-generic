@@ -29,6 +29,15 @@
 - **修复 connection 页一处 `this` 上下文 bug**：`buildApnForm().then(function(){ ... })` 普通
   回调内误用 `this.renderSvgDataTunnel(...)`（此处 `this` 非视图实例），导致整页渲染失败
   `Cannot read properties of undefined`；改为 `self.renderSvgDataTunnel(...)` 后页面正常。
+- **高级设置页 `advanced.js` 全面中文化**：硬件信息、IP 透传 / Post-Route / DMZ、模组支持库
+  同步、诊断控制台等约 30 处界面文案汉化。
+- **短信页 `sms.js` 全面中文化**：短信列表、发送表单、会话视图等界面文案汉化。
+- **设备参数页 `settings.js` 毛玻璃重构并中文化**：现代白色毛玻璃风格 + 动态 UCI 配置流
+  拓扑 SVG，展示 UCI 配置节、QModem 守护进程与硬件设备节点间的同步流向；全部表单文案中文化。
+- **模组与 SIM 页移除 FOTA 卡片**：删除固件在线升级（FOTA）卡片及其 CSS（升级地址输入、
+  进度条、状态徽标与 AT^FOTADL 逻辑）；卡片内独立的「重启模组」按钮保留并移入
+  「防护与维护」工具箱（诊断 / 热保护阈值 / 标识实验室 / 恢复出厂设置之后）。
+- **README 优化精简**：去除冗余与重复表述、压缩文件布局与各章节，全文不再使用 emoji 图标。
 
 ### 实机验证（ImmortalWrt SNAPSHOT / LuCI 26.261）
 - 8 个页面全部完整渲染、无 console/PAGEERROR、无渲染失败横幅；各页首屏约 0.25-0.44 s。
