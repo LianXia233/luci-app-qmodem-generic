@@ -3,6 +3,30 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-17] - 2026-09-30
+
+### 修复
+- **移动数据页崩溃（connection 页渲染失败）**：`controls.js` 的 `liveView.paint()` 直接
+  `appendChild(opts.paint(...))`，而移动数据页的 `paintContent` 借助 CBI `form.Map.render()` 返回
+  Promise，导致 `Uncaught TypeError: Failed to execute 'appendChild' ... not of type 'Node'`，
+  整页停在「正在载入视图…」并抛「页面渲染失败」红横幅。
+  现在 `paint()` 对 paint 回调统一 `Promise.resolve().then()` 再挂载，任意异步 paintContent 均安全。
+- **移动数据页每 5 s 重建整张 CBI 表单**：轮询每次都 `new form.Map().render()`，既是卡顿源也会打断
+  用户编辑焦点。现改为表单单例（`buildApnForm` 只构建一次并缓存渲染节点，轮询复用局部状态区），
+  `saveApn` 抽成独立方法，去掉轮询时的整表重建。
+
+### 变更
+- **`qmodem-worker`：support 域降频门控**。support（模组支持库 / 包可用性）近静态数据，原每轮
+  重复采集并刷屏日志；现引入 `SUPPORT_TTL`（默认 1 h，可被 `QMODEM_WORKER_SUPPORT_TTL` 覆盖，
+  最小 60 s）与 `qm_domain_stale()` 新鲜度门控，未过期即跳过本轮采集。
+
+### 实机验证（ImmortalWrt SNAPSHOT / LuCI 26.261）
+- 8 个页面全部完整渲染、无 console/PAGEERROR、无渲染失败横幅；各页首屏约 0.25-0.44 s。
+- 「移动数据」页 APN 表单 6 个字段（APN/pdp_type/auth/username/password/dns_list）与
+  拨号·挂断·重拨、保存按钮全部正常渲染，两轮轮询无崩溃。
+- 根因之一为实机残留多个孤儿 `qmodem-worker` 互相抢 AT 锁导致缓存过期、页面退化为慢速直连；
+  worker 已带单实例守卫，干净重启后缓存恢复新鲜。
+
 ## [2.4.11-16] - 2026-09-27
 
 ### 新增（异步化架构：后端任务不再阻塞页面加载）

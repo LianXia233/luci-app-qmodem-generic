@@ -47,6 +47,13 @@ case "$CYCLE_TIMEOUT" in ''|*[!0-9]*) CYCLE_TIMEOUT=60 ;; esac
 case "$SLOW_EVERY" in ''|*[!0-9]*) SLOW_EVERY=4 ;; esac
 [ "$SLOW_EVERY" -lt 1 ] && SLOW_EVERY=1
 
+# support 域名（模组支持库 / 包可用性）几乎是静态数据，且 --status 每次调用较贵，
+# 用很长的 TTL + staleness 门控，避免每轮重复采集造成日志刷屏。
+# 默认 1 小时，可用 QMODEM_WORKER_SUPPORT_TTL 覆盖。
+SUPPORT_TTL="${QMODEM_WORKER_SUPPORT_TTL:-3600}"
+case "$SUPPORT_TTL" in ''|*[!0-9]*) SUPPORT_TTL=3600 ;; esac
+[ "$SUPPORT_TTL" -lt 60 ] && SUPPORT_TTL=60
+
 # 周期采集的域名（不含 sms：按需触发）
 PERIODIC_DOMAINS="status network signal registration sim device stats qos radio support"
 ALL_DOMAINS="status network signal registration sim device stats qos radio support sms"
@@ -167,18 +174,33 @@ want_domain() {
 	esac
 }
 
+# qm_domain_stale <section> <domain> → 0=需要采集(缺失/过期)；1=仍新鲜，跳过
+# 与前端判定一致：now - updated >= ttl 视为过期。
+qm_domain_stale() {
+	_env=$(qm_read_domain "$1" "$2" 2>/dev/null)
+	[ -n "$_env" ] || return 0
+	_upd=$(printf '%s' "$_env" | jsonfilter -e '@.updated' 2>/dev/null)
+	_ttl=$(printf '%s' "$_env" | jsonfilter -e '@.ttl' 2>/dev/null)
+	case "$_upd" in ''|*[!0-9]*) return 0 ;; esac
+	case "$_ttl" in ''|*[!0-9]*) return 0 ;; esac
+	if [ $(( $(qm_now) - _upd )) -lt "$_ttl" ]; then
+		return 1
+	fi
+	return 0
+}
+
 collect_support() {
-	# 纯文件操作（不碰 modem），失败也快速返回
+	# 纯文件操作（不碰 modem），失败也快速返回；support 数据近静态，用长 TTL
 	if [ -f "$QMODEM_SBIN_DIR/qmodem-modem-support" ]; then
 		_out=$("$QMODEM_SBIN_DIR/qmodem-modem-support" --status 2>/dev/null)
 		if qm_is_json "$_out"; then
-			qm_write_domain "$SEC" support ready "$_out" '' "$WORKER_TTL"
+			qm_write_domain "$SEC" support ready "$_out" '' "$SUPPORT_TTL"
 			return 0
 		fi
 	fi
 	qm_write_domain "$SEC" support error \
 		'{"available":0,"path":"/usr/share/qmodem/modem_support.json","added":[],"skipped":[],"missing":[]}' \
-		'qmodem-modem-support unavailable' "$WORKER_TTL"
+		'qmodem-modem-support unavailable' "$SUPPORT_TTL"
 }
 
 collect_sms() {
@@ -197,7 +219,8 @@ collect_section() {
 	qm_init_dirs
 
 	# ---- 非 modem 域名：不需要串口，先做，保证即使 modem 死了也有数据 ----
-	if want_domain support; then
+	# support 近静态数据：已新鲜（未过 TTL）就跳过，避免每轮重复调用 --status。
+	if want_domain support && qm_domain_stale "$SEC" support; then
 		collect_support
 	fi
 

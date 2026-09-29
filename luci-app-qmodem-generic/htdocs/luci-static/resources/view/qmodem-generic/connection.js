@@ -311,57 +311,6 @@ return view.extend({
 
 		res.connected = connected;
 
-		/* ---- APN / 拨号参数（写入 /etc/config/qmodem 的当前配置节） ---- */
-		var m = new form.Map('qmodem', section);
-		var s, o;
-
-		s = m.section(form.NamedSection, section, 'modem-device');
-		s.anonymous = true;
-		s.addremove = false;
-
-		o = s.option(form.Value, 'apn', 'APN');
-		o.placeholder = _('留空使用运营商默认值');
-		o.rmempty = true;
-
-		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
-		o.value('IPV4V6', 'IPv4 / IPv6');
-		o.value('IPV4', 'IPv4');
-		o.value('IPV6', 'IPv6');
-		o.default = 'IPV4V6';
-		o.rmempty = false;
-
-		o = s.option(form.ListValue, 'auth', _('认证方式'));
-		o.value('none', _('无'));
-		o.value('pap', 'PAP');
-		o.value('chap', 'CHAP');
-		o.default = 'none';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'username', _('用户名'));
-		o.depends('auth', 'pap');
-		o.depends('auth', 'chap');
-		o.rmempty = true;
-
-		o = s.option(form.Value, 'password', _('密码'));
-		o.password = true;
-		o.depends('auth', 'pap');
-		o.depends('auth', 'chap');
-		o.rmempty = true;
-
-		o = s.option(form.DynamicList, 'dns_list', _('自定义 DNS'));
-		o.datatype = 'ipaddr';
-		o.description = _('留空则使用移动网络下发的 DNS。');
-
-		var saveApn = function() {
-			return m.save(null, true).then(function() {
-				return uci.commit('qmodem');
-			}).then(function() {
-				ui.addNotification(null, E('p', {}, _('APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。')));
-			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
-			});
-		};
-
 		/* ---- 拨号日志（QModem get_dial_log，展开时懒加载） ---- */
 		var logOutput = E('pre', { 'class': 'mt-ui-details-body' }, _('展开以读取拨号日志。'));
 		var logDetails = E('details', {
@@ -397,7 +346,7 @@ return view.extend({
 			])
 		]);
 
-		return m.render().then(function(formNode) {
+		return self.buildApnForm(section).then(function(formNode) {
 			return E('div', { 'class': 'mtconn-page mt-ui-page' }, [
 				self.styleNode(),
 				controls.styleNode(),
@@ -451,7 +400,7 @@ return view.extend({
 					E('div', { 'class': 'mt-control-actions' }, E('button', {
 						'type': 'button',
 						'class': 'btn cbi-button-apply',
-						'click': ui.createHandlerFn(self, saveApn)
+						'click': ui.createHandlerFn(self, function() { return self.saveApn(); })
 					}, _('保存 APN 设置')))
 				]),
 				E('details', { 'class': 'mtconn-advanced mt-ui-details' }, [
@@ -472,6 +421,77 @@ return view.extend({
 				controls.styleNode(),
 				E('div', { 'class': 'alert-message danger' }, _('页面渲染失败：') + ((err && err.message) || String(err)))
 			]);
+		});
+	},
+
+	/* APN 拨号表单：CBI form.Map 只构建一次，缓存渲染节点，轮询复用，
+	 * 避免每 5s 整张表单重建（重建既是卡顿源，也会在编辑时打断焦点）。 */
+	buildApnForm: function(section) {
+		var self = this;
+		if (self._apnFormNode)
+			return Promise.resolve(self._apnFormNode);
+
+		var m = new form.Map('qmodem', section);
+		var s, o;
+
+		s = m.section(form.NamedSection, section, 'modem-device');
+		s.anonymous = true;
+		s.addremove = false;
+
+		o = s.option(form.Value, 'apn', 'APN');
+		o.placeholder = _('留空使用运营商默认值');
+		o.rmempty = true;
+
+		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
+		o.value('IPV4V6', 'IPv4 / IPv6');
+		o.value('IPV4', 'IPv4');
+		o.value('IPV6', 'IPv6');
+		o.default = 'IPV4V6';
+		o.rmempty = false;
+
+		o = s.option(form.ListValue, 'auth', _('认证方式'));
+		o.value('none', _('无'));
+		o.value('pap', 'PAP');
+		o.value('chap', 'CHAP');
+		o.default = 'none';
+		o.rmempty = false;
+
+		o = s.option(form.Value, 'username', _('用户名'));
+		o.depends('auth', 'pap');
+		o.depends('auth', 'chap');
+		o.rmempty = true;
+
+		o = s.option(form.Value, 'password', _('密码'));
+		o.password = true;
+		o.depends('auth', 'pap');
+		o.depends('auth', 'chap');
+		o.rmempty = true;
+
+		o = s.option(form.DynamicList, 'dns_list', _('自定义 DNS'));
+		o.datatype = 'ipaddr';
+		o.description = _('留空则使用移动网络下发的 DNS。');
+
+		self._apnMap = m;
+		return m.render().then(function(formNode) {
+			self._apnFormNode = formNode;
+			return formNode;
+		}).catch(function(err) {
+			self._apnFormNode = E('div', { 'class': 'alert-message danger' },
+				_('拨号设置渲染失败：') + ((err && err.message) || String(err)));
+			return self._apnFormNode;
+		});
+	},
+
+	saveApn: function() {
+		var self = this;
+		if (!self._apnMap)
+			return Promise.resolve();
+		return self._apnMap.save(null, true).then(function() {
+			return uci.commit('qmodem');
+		}).then(function() {
+			ui.addNotification(null, E('p', {}, _('APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。')));
+		}).catch(function(err) {
+			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 		});
 	},
 

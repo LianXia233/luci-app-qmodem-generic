@@ -596,17 +596,24 @@ function liveView(view, res, opts) {
 	}
 
 	function paint(data) {
-		var node = null;
+		/* paint 回调可能同步返回节点，也可能（如 connection 借助 CBI
+		 * form.Map.render()）返回 Promise —— 统一 await，避免把 Promise
+		 * 直接 appendChild 到 DOM 抛 "not of type Node"。 */
+		var p;
 		try {
-			node = opts.paint.call(view, data);
+			p = opts.paint.call(view, data);
 		} catch (err) {
-			node = E('div', { 'class': 'alert-message danger' },
+			p = E('div', { 'class': 'alert-message danger' },
 				_('页面渲染失败：') + ((err && err.message) || String(err)));
 		}
-		while (holder.firstChild)
-			holder.removeChild(holder.firstChild);
-		if (node) holder.appendChild(node);
-		formState = snapshotForm();
+		return Promise.resolve(p).then(function(node) {
+			if (node) {
+				while (holder.firstChild)
+					holder.removeChild(holder.firstChild);
+				holder.appendChild(node);
+			}
+			formState = snapshotForm();
+		});
 	}
 
 	paint(res);
@@ -629,8 +636,7 @@ function liveView(view, res, opts) {
 					});
 					return Promise.resolve(next).then(function(data) {
 						if (editing()) return data;   /* 用户正在输入，本轮不重绘 */
-						paint(data);
-						return data;
+						return paint(data).then(function() { return data; });
 					});
 				});
 			}
