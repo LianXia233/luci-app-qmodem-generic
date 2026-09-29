@@ -19,6 +19,16 @@
 - **`qmodem-worker`：support 域降频门控**。support（模组支持库 / 包可用性）近静态数据，原每轮
   重复采集并刷屏日志；现引入 `SUPPORT_TTL`（默认 1 h，可被 `QMODEM_WORKER_SUPPORT_TTL` 覆盖，
   最小 60 s）与 `qm_domain_stale()` 新鲜度门控，未过期即跳过本轮采集。
+- **四个页面 UI 全面中文化**（`status.js` / `connection.js` / `network.js` / `system.js`）：
+  概览页（信号强度、载波聚合、网络信息、移动 IP 等卡片标题与信号等级）；移动数据页（拓扑图
+  节点 `蜂窝广域网`、IP 透传 / 后置路由 / DMZ 标题）；网络与小区页（制式 `4G 长期演进（LTE）`
+  与 `5G 新空口（NR）`、协议 ECM/NCM/RNDIS/MBIM/QMI/GobiNet/PPP 中文全称+缩写、信号指标
+  RSRP/RSRQ/SINR、PCI/MCC/MNC/EARFCN 等）；模组与 SIM 页（PIN/PUK 管理、热保护、标识实验室、
+  恢复出厂、FOTA、SIM 与射频控制等约 80 处文案）。保留 ubus 数据 key、枚举值、CSS/SVG 与
+  ICCID/IMEI/AT 等设备专名不变。
+- **修复 connection 页一处 `this` 上下文 bug**：`buildApnForm().then(function(){ ... })` 普通
+  回调内误用 `this.renderSvgDataTunnel(...)`（此处 `this` 非视图实例），导致整页渲染失败
+  `Cannot read properties of undefined`；改为 `self.renderSvgDataTunnel(...)` 后页面正常。
 
 ### 实机验证（ImmortalWrt SNAPSHOT / LuCI 26.261）
 - 8 个页面全部完整渲染、无 console/PAGEERROR、无渲染失败横幅；各页首屏约 0.25-0.44 s。

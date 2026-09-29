@@ -4,9 +4,8 @@
 'require qmodem-generic.controls as controls';
 
 /*
- * 通用模组概览页 — 显示的数据全部来自 QModem 的 `qmodem` ubus 对象，
- * 经 resources/qmodem-generic/controls.js 数据层读取；旧的文本后端已完全移除。
- * 本页对 QModem 管理的任意模组生效：顶部模组选择器可切换，下方按实际返回渲染。
+ * 通用模组概览页 — 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 仪表盘重构
+ * 数据来自 QModem ubus 状态缓存，经 controls.js 适配层处理。
  */
 
 function firstAddress(list) {
@@ -22,11 +21,6 @@ function joinValues() {
 	}).join(', ');
 }
 
-/*
- * 带宽值归一化：QModem 可能返回 "100" 或 "100 MHz"。
- * 部分模组在带宽字段未取到数值时只回传单位残值（实测 Fibocom FM350-GL 的
- * DL/UL Bandwidth 均为 "M"），此时必须按"无数据"处理，否则页面会显示成裸的 "M"。
- */
 function mhz(value) {
 	if (value == null || String(value).trim() === '')
 		return '';
@@ -36,8 +30,6 @@ function mhz(value) {
 	return /[a-zA-Z]/.test(text) ? text : text + ' MHz';
 }
 
-// 流量统计可用性判定：rpcd 文档返回布尔 true，重构契约与本地兜底返回 0/1，
-// 个别环境还会回传字符串 '1'/'true'。四种情况统一视为"已提供流量统计"。
 function isTrafficAvailable(usage) {
 	var a = usage && usage.available;
 	return a === true || a === 1 || a === '1' || a === 'true';
@@ -54,7 +46,7 @@ function sumBandwidth(carriers, key) {
 
 function usageUpdated(value) {
 	if (value == null || value === '')
-		return _('Waiting for data');
+		return _('等待数据');
 	var num = Number(value);
 	if (!isNaN(num) && num > 1000000000) {
 		var date = new Date(num * 1000);
@@ -64,11 +56,14 @@ function usageUpdated(value) {
 	return String(value);
 }
 
+// 安全渲染 SVG 节点 helper，规避部分老旧 LuCI 运行时 createElementNS 差异
+function svgNode(xmlString) {
+	var wrap = document.createElement('div');
+	wrap.innerHTML = xmlString.trim();
+	return wrap.firstElementChild;
+}
+
 return view.extend({
-	/*
-	 * 本页需要的缓存域。load() 只读这些域（qmodem_cache.snapshot，纯文件 IO），
-	 * 绝不等待 modem；缺失/过期时由 controls 自动排后台任务，轮询补上。
-	 */
 	DOMAINS: [ 'status', 'network', 'signal', 'sim', 'stats', 'qos', 'radio' ],
 	POLL_INTERVAL: 5000,
 
@@ -80,7 +75,6 @@ return view.extend({
 		});
 	},
 
-	/* 首屏与轮询共用的数据组装：全部来自状态缓存，不产生任何 modem 访问 */
 	collect: function(ctx) {
 		var self = this, errors = [];
 		var section = ctx.section;
@@ -100,71 +94,59 @@ return view.extend({
 		var apn = '';
 		try { apn = uci.get('qmodem', section, 'apn') || ''; } catch (e) { apn = ''; }
 
-		return (function() {
-
-			return Promise.all([
-				guard(controls.getBaseInfo(section), _('Module'), []),
-				guard(controls.getCellInfo(section), _('Radio and Cells'), []),
-				guard(controls.getSimInfo(section), _('SIM & Subscription'), []),
-				guard(controls.getConnectStatus(section), _('Connection'), []),
-				guard(controls.getDns(section), 'DNS', {}),
-				guard(controls.getUsageStats(section), _('Traffic Statistics'), { available: 0 }),
-				guard(controls.getCurrentBand(section), _('Carrier status'), {}),
-				guard(controls.getInterfaceStatus(section), _('Mobile IP'), {}),
-				guard(controls.getNetworkInfo(section), _('Network'), []),
-				guard(controls.getQosInfo(section), 'QOS', {}),
-				guard(controls.getTrafficResetSchedule(section), _('Traffic reset schedule'), {}),
-				guard(controls.getRadioInfo(section), _('Modulation'), {}),
-				guard(controls.getDailyStats(section), _('Daily traffic'), null)
-			]).then(function(r) {
-				// 从合并后的接口视图中取物理设备名，查询设备速率
-				var iface = r[7] || {};
-				var ifname = iface.interface || '';
-				var devName = iface.l3_device || iface.device || '';
-				/* 物理网口状态（MTU / 速率）由 worker 一并采好，读缓存即可 */
-				var devPromise = devName
-					? guard(controls.getDeviceStatusCached(section), _('Device rate'), {})
-					: Promise.resolve({});
-				return devPromise.then(function(devStatus) {
-					// 合并 QModem 返回的全部 modem_info，用于"完整信息"面板（返回什么就显示什么）
-					var allInfo = [].concat(r[0] || [], r[1] || [], r[2] || [], r[8] || []);
-					return {
-						section: section,
-						ifname: ifname,
-						apn: apn,
-						base: r[0],
-						cell: r[1],
-						sim: r[2],
-						conn: r[3],
-						dns: r[4],
-						usage: r[5],
-						trafficResetSchedule: r[10],
-						currentBand: r[6],
-						iface: r[7],
-						net: r[8],
-						qosInfo: r[9] || {},
-						radioInfo: r[11] || {},
-						daily: r[12] || null,
-						devStatus: devStatus,
-						allInfo: allInfo,
-						errors: errors
-					};
-				});
+		return Promise.all([
+			guard(controls.getBaseInfo(section), _('模组'), []),
+			guard(controls.getCellInfo(section), _('射频与小区'), []),
+			guard(controls.getSimInfo(section), _('SIM 与订阅'), []),
+			guard(controls.getConnectStatus(section), _('连接'), []),
+			guard(controls.getDns(section), 'DNS', {}),
+			guard(controls.getUsageStats(section), _('流量统计'), { available: 0 }),
+			guard(controls.getCurrentBand(section), _('载波聚合状态'), {}),
+			guard(controls.getInterfaceStatus(section), _('移动 IP'), {}),
+			guard(controls.getNetworkInfo(section), _('网络'), []),
+			guard(controls.getQosInfo(section), 'QOS', {}),
+			guard(controls.getTrafficResetSchedule(section), _('流量清零计划'), {}),
+			guard(controls.getRadioInfo(section), _('调制方式'), {}),
+			guard(controls.getDailyStats(section), _('每日流量'), null)
+		]).then(function(r) {
+			var iface = r[7] || {};
+			var ifname = iface.interface || '';
+			var devName = iface.l3_device || iface.device || '';
+			var devPromise = devName
+				? guard(controls.getDeviceStatusCached(section), _('设备速率'), {})
+				: Promise.resolve({});
+			return devPromise.then(function(devStatus) {
+				var allInfo = [].concat(r[0] || [], r[1] || [], r[2] || [], r[8] || []);
+				return {
+					section: section,
+					ifname: ifname,
+					apn: apn,
+					base: r[0],
+					cell: r[1],
+					sim: r[2],
+					conn: r[3],
+					dns: r[4],
+					usage: r[5],
+					trafficResetSchedule: r[10],
+					currentBand: r[6],
+					iface: r[7],
+					net: r[8],
+					qosInfo: r[9] || {},
+					radioInfo: r[11] || {},
+					daily: r[12] || null,
+					devStatus: devStatus,
+					allInfo: allInfo,
+					errors: errors
+				};
 			});
-		})();
+		});
 	},
 
-	// 把 QModem 的 modem_info 数组摊平成视图使用的扁平对象
 	parseStatus: function(res) {
-		var self = this;
 		var find = controls.findEntry;
 		var base = res.base || [], cell = res.cell || [], sim = res.sim || [],
 		    conn = res.conn || [], net = res.net || [];
 
-		/* QoS Level 与签约速率：优先使用 QModem 各信息源上报的数据
-		 * （network_info 等 vendor 脚本导出的 'AMBR UL'/'AMBR DL'，单位 Mbps；
-		 * 'QCI'/'5QI' 键在全部 modem_info 数组中查找），缺失时回退 AT 探测
-		 * 插件（rpcd qos qos_info：CGEQOSRDP / C5GQOSRDP / CGCONTRDP）的结果 */
 		var atQos = res.qosInfo || {};
 		function mbpsToKbps(v) {
 			var n = parseFloat(v);
@@ -186,20 +168,15 @@ return view.extend({
 		};
 
 		var data = {};
-
-		data.model = find(base, 'name') || find(base, 'model') || _('Modem');
+		data.model = find(base, 'name') || find(base, 'model') || _('模组');
 		data.manufacturer = find(base, 'manufacturer') || '';
 		data.revision = find(base, 'revision') || '';
 		data.at_port = find(base, 'at_port') || '';
-		/* 温度：模组未上报时 QModem 会回填 "0°C"，先归一化掉无效值，
-		 * 再取出纯数字供仪表使用（有效温度恒 > 0）。 */
 		data.temperature = String(controls.normalizeTemperature(find(base, 'temperature')) || '').replace(/[^0-9.\-]/g, '');
 
 		data.rsrp = find(cell, 'RSRP') || '';
 		data.rsrq = find(cell, 'RSRQ') || '';
 		data.sinr = find(cell, 'SINR') || '';
-		/* 接入技术：不同模组上报字段名不一（network_mode / Network Type /
-		 * Radio Access Technology），逐个尝试，全模组通用 */
 		data.sysmode_detail = this.cleanText(
 			find(cell, 'network_mode') ||
 			find(cell, 'Network Type') ||
@@ -215,42 +192,33 @@ return view.extend({
 		data.imsi = find(sim, 'IMSI') || '';
 		var rawIccid = find(sim, 'ICCID') || '';
 		data.iccid = rawIccid ? String(rawIccid).replace(/[\n\r]/g, '') : '--';
-		/* 电话号码：多数 SIM 不存储 MSISDN，仅当模组/网络上报时显示，否则 -- */
 		data.phone_number = this.cleanText(
 			find(sim, 'SIM Number') || find(sim, 'MSISDN') || find(sim, 'Phone Number') ||
 			find(net, 'SIM Number') || find(net, 'MSISDN') || '');
 
-		/* 运营商原始名称（清洗换行/控制字符后交由 operatorInfo 映射中文运营商） */
 		data.operator_name = this.cleanText(
 			find(sim, 'ISP') ||
 			find(sim, 'operator') || find(sim, 'Operator') ||
 			find(net, 'ISP') || find(net, 'operator') ||
 			find(cell, 'ISP') || '');
 
-		/* APN：配置值 → QoS 上报（AT+CGCONTRDP）→ 网络信息上报 */
 		data.active_apn = this.cleanText(
 			res.apn || qosInfo.apn ||
 			find(net, 'APN') || find(sim, 'APN') || '');
 		data.network_interface = res.ifname || '';
 		data.qosInfo = qosInfo;
 		data.reachable = base.length || cell.length ? '1' : '0';
-		/* 连接判定：多来源综合（接口有全局 IP > 模组自报 connect_status >
-		 * QModem 拨号状态）。ECM 等内置拨号模组 get_connect_status 恒为 No，
-		 * 但接口已获取地址、实际有网，必须判为已连接 */
 		data.connected = controls.evalConnectionStatus({
 			conn: conn, base: base, iface: (res.iface || {})
 		}).connected ? '1' : '0';
 		return data;
 	},
 
-	// 清洗模组上报文本中的换行/控制字符与首尾空白（如 ISP 常见 "\nCHINA MOBILE"）
 	cleanText: function(raw) {
 		if (raw == null) return '';
 		return String(raw).replace(/[\x00-\x1f\x7f]+/g, '').trim();
 	},
 
-	// 清洗 QModem get_dns 返回值：部分模组驱动会在 DNS IP 后追加换行+二进制垃圾，
-	// 仅取第一个控制字符前的有效 IP 段（split 按控制字符切分，取首个非空 token）。
 	cleanDns: function(raw) {
 		if (!raw) return '';
 		var str = String(raw);
@@ -262,7 +230,6 @@ return view.extend({
 		return '';
 	},
 
-	// 由 network.interface status + get_dns + connect_status 组装地址卡片数据
 	parseSession: function(res, connected) {
 		var self = this;
 		var iface = res.iface || {}, dns = (res.dns && res.dns.dns) || {};
@@ -270,12 +237,9 @@ return view.extend({
 		var v6 = firstAddress(iface['ipv6-address']);
 		if (!v6 && Array.isArray(iface['ipv6-prefix']) && iface['ipv6-prefix'][0])
 			v6 = iface['ipv6-prefix'][0].address ? iface['ipv6-prefix'][0].address + '/' + iface['ipv6-prefix'][0].mask : '';
-		// 若 network.interface status 没取到 IP（如设备刚上线、DHCP 未完成），
-		// 尝试从 network.device status 读取链路层状态作为辅助信息
 		var devIPs = {};
 		if (!v4 && !v6 && res.devStatus) {
 			var ds = res.devStatus;
-			// 部分 dongle 设备会在 devStatus 中携带 IP 信息
 			if (ds && typeof ds === 'object' && ds.ipv4) devIPs.v4 = String(ds.ipv4).trim();
 			if (ds && typeof ds === 'object' && ds.ipv6) devIPs.v6 = String(ds.ipv6).trim();
 		}
@@ -296,47 +260,131 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qmodem-generic-page{max-width:1120px;margin:0 auto;color:var(--text-color-high,#20242a)}',
-			'.qmodem-generic-hero{position:relative;overflow:hidden;display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 24px;margin-bottom:14px;border-radius:16px;background:linear-gradient(135deg,#1264d8 0%,#087eae 58%,#07988e 100%);color:#fff;box-shadow:0 10px 28px rgba(14,92,155,.16)}',
-			'.qmodem-generic-hero:after{content:"";position:absolute;width:210px;height:210px;right:-78px;top:-118px;border:42px solid rgba(255,255,255,.08);border-radius:50%}.qmodem-generic-hero-copy,.qmodem-generic-hero-side{position:relative;z-index:1}',
-			'.qmodem-generic-title{margin:0 0 6px;color:#fff;font-size:27px;line-height:1.2}.qmodem-generic-summary{font-size:13px;line-height:1.5;color:rgba(255,255,255,.84)}',
-			'.qmodem-generic-hero-meta{display:flex;flex-wrap:wrap;gap:7px 18px;margin-top:13px;font-size:11px;color:rgba(255,255,255,.72)}.qmodem-generic-hero-meta strong{margin-left:5px;color:#fff;font-weight:700}.qmodem-generic-hero-op{display:inline-flex;align-items:center;gap:6px;margin-left:0}.qmodem-generic-hero-op img{width:26px;height:26px;border-radius:4px;object-fit:contain;flex:none;background:transparent}.qmodem-generic-hero-op strong{margin-left:0;font-size:14px;font-weight:750;letter-spacing:.02em}',
-			'.qmodem-generic-hero-side{display:flex;flex-direction:row;align-items:center;gap:10px;flex-wrap:nowrap}.qmodem-generic-status{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:rgba(255,255,255,.16);font-size:12px;font-weight:700;white-space:nowrap}.qmodem-generic-dot{width:8px;height:8px;border-radius:50%;background:#ffcd57;box-shadow:0 0 0 4px rgba(255,205,87,.18)}.qmodem-generic-status.online .qmodem-generic-dot{background:#78f2b0;box-shadow:0 0 0 4px rgba(120,242,176,.18)}',
-			'.qmodem-generic-focus-grid{display:grid;grid-template-columns:1.12fr .88fr 1.18fr;gap:12px;margin-bottom:12px}.qmodem-generic-focus{display:flex;flex-direction:column;padding:17px 18px}.qmodem-generic-focus-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px}.qmodem-generic-focus-title{font-size:14px;font-weight:750}.qmodem-generic-focus-desc{margin-top:3px;color:var(--mt-ui-muted);font-size:10px;line-height:1.4}',
-			'.qmodem-generic-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:#eef2f6;color:#6b7480;font-size:10px;font-weight:750;white-space:nowrap}.qmodem-generic-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.qmodem-generic-badge.good,.qmodem-generic-badge.active{background:#e8f8f1;color:#087c60}.qmodem-generic-badge.fair{background:#fff5df;color:#9b6500}.qmodem-generic-badge.weak{background:#fff0ee;color:#b84035}',
-			'.qmodem-generic-signal-value{display:flex;align-items:baseline;gap:6px}.qmodem-generic-signal-value strong{font-size:31px;letter-spacing:-.04em}.qmodem-generic-signal-value span{font-size:11px;color:var(--mt-ui-muted)}.qmodem-generic-signal-bars{display:flex;align-items:flex-end;gap:3px;height:52px;margin:5px 0 13px}.qmodem-generic-signal-bar{flex:1;min-width:2px;border-radius:2px 2px 1px 1px;background:var(--mt-ui-border);opacity:.55}.qmodem-generic-signal-bar.on{background:#4b94df;opacity:1}.qmodem-generic-signal-bars.excellent .on{background:#13a979}.qmodem-generic-signal-bars.fair .on{background:#e4a23a}.qmodem-generic-signal-bars.weak .on{background:#db5b52}',
-			'.qmodem-generic-signal-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:auto}.qmodem-generic-mini{padding:8px 9px;border-radius:9px;background:var(--background-color-low,#f5f7f9)}.qmodem-generic-mini-top{display:flex;align-items:baseline;justify-content:space-between;gap:4px;margin-bottom:6px}.qmodem-generic-mini span{color:var(--mt-ui-muted);font-size:9px}.qmodem-generic-mini strong{font-size:12px;font-variant-numeric:tabular-nums}',
-			'.qmodem-generic-gauge-track{position:relative;height:6px;border-radius:999px;background:var(--mt-ui-border,#e3e8ee);overflow:hidden}.qmodem-generic-gauge-track i{display:block;height:100%;min-width:3px;border-radius:inherit;background:#4b94df;transition:width .35s ease}.qmodem-generic-gauge-track i.excellent{background:linear-gradient(90deg,#0fb783,#13a979)}.qmodem-generic-gauge-track i.good{background:linear-gradient(90deg,#4bb985,#3fa66f)}.qmodem-generic-gauge-track i.fair{background:linear-gradient(90deg,#f0b44f,#e4a23a)}.qmodem-generic-gauge-track i.weak{background:linear-gradient(90deg,#e8756c,#db5b52)}.qmodem-generic-gauge-track i.unknown{background:var(--mt-ui-border,#cfd6de)}.qmodem-generic-mini-scale{display:flex;justify-content:space-between;margin-top:3px;color:var(--mt-ui-muted);font-size:8px;opacity:.75}',
-			'.qmodem-generic-carrier-main{margin:2px 0 12px}.qmodem-generic-carrier-main strong{display:block;font-size:29px;line-height:1.15;letter-spacing:-.03em}.qmodem-generic-carrier-main span{display:block;margin-top:4px;color:var(--mt-ui-muted);font-size:11px}.qmodem-generic-band-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.qmodem-generic-band{padding:5px 8px;border-radius:8px;background:#edf5ff;color:#176bc1;font-size:10px;font-weight:700}.qmodem-generic-carrier-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:auto}.qmodem-generic-cc-list{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}.qmodem-generic-cc-row{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9);border:1px solid var(--mt-ui-border,#e8ecf0)}.qmodem-generic-cc-role{display:flex;align-items:center;gap:8px}.qmodem-generic-cc-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;font-size:9px;font-weight:750;white-space:nowrap}.qmodem-generic-cc-badge.primary{background:#e8f1ff;color:#176bc1}.qmodem-generic-cc-badge.secondary{background:#eef2f6;color:#6b7480}.qmodem-generic-cc-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.qmodem-generic-cc-detail{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:10px;color:var(--mt-ui-muted)}.qmodem-generic-cc-detail span{font-variant-numeric:tabular-nums}',
-			'.qmodem-generic-ip-list{display:grid;gap:9px}.qmodem-generic-ip-row{padding:10px 11px;border-radius:10px;background:var(--background-color-low,#f5f7f9)}.qmodem-generic-ip-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;font-size:10px;color:var(--mt-ui-muted)}.qmodem-generic-ip-state{font-weight:700;color:#9a6200}.qmodem-generic-ip-state.on{color:#087c60}.qmodem-generic-ip-value{font:600 12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}.qmodem-generic-ip-meta{display:flex;justify-content:space-between;gap:10px;margin-top:9px;color:var(--mt-ui-muted);font-size:10px}',
-			'.qmodem-generic-card-link{display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:12px;color:#176bc1;font-size:10px;font-weight:700;text-decoration:none}.qmodem-generic-card-link:after{content:"›";font-size:16px;line-height:10px}',
-			'.qmodem-generic-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.qmodem-generic-info{display:flex;flex-direction:column;padding:17px 18px}.qmodem-generic-info-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px}.qmodem-generic-info-title{font-size:14px;font-weight:750}.qmodem-generic-info-desc{margin-top:3px;color:var(--mt-ui-muted);font-size:10px;line-height:1.4}.qmodem-generic-info-list{display:flex;flex-direction:column;flex:1;justify-content:center}.qmodem-generic-info-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid var(--mt-ui-border-soft,#edf0f4);font-size:12px}.qmodem-generic-info-row:last-child{border-bottom:0}.qmodem-generic-info-row span{color:var(--mt-ui-muted)}.qmodem-generic-info-row strong{text-align:right;word-break:break-all;font-weight:600;font-variant-numeric:tabular-nums}',
-			'.qmodem-generic-traffic{padding:18px;margin-bottom:12px}.qmodem-generic-traffic-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}.qmodem-generic-traffic-head h3{margin:0 0 4px;font-size:16px}.qmodem-generic-traffic-head p{margin:0;color:var(--mt-ui-muted);font-size:10px}.qmodem-generic-traffic-side{text-align:right}.qmodem-generic-updated{color:var(--mt-ui-muted);font-size:10px;white-space:nowrap}.qmodem-generic-legend{display:flex;justify-content:flex-end;gap:10px;margin-top:5px;color:var(--mt-ui-muted);font-size:9px}.qmodem-generic-legend span:before{content:"";display:inline-block;width:7px;height:3px;margin-right:4px;border-radius:9px;background:#337de8;vertical-align:middle}.qmodem-generic-legend span:last-child:before{background:#16a085}',
-			'.qmodem-generic-traffic-layout{display:grid;grid-template-columns:repeat(3,minmax(0,.62fr)) minmax(300px,1.8fr);gap:10px}.qmodem-generic-traffic-stat{padding:13px;border-radius:11px;background:var(--background-color-low,#f5f7f9)}.qmodem-generic-traffic-label{font-size:10px;color:var(--mt-ui-muted);margin-bottom:6px}.qmodem-generic-traffic-value{font-size:18px;font-weight:750;letter-spacing:-.02em}.qmodem-generic-traffic-split{margin-top:5px;color:var(--mt-ui-muted);font-size:9px;line-height:1.45}',
-			'.qmodem-generic-days{display:flex;flex-direction:column;justify-content:center;gap:6px;padding:2px 0 2px 8px}.qmodem-generic-day{display:grid;grid-template-columns:42px minmax(80px,1fr) 112px;align-items:center;gap:8px;font-size:9px}.qmodem-generic-date{color:var(--mt-ui-muted);font-weight:650}.qmodem-generic-bars{display:flex;flex-direction:column;gap:2px}.qmodem-generic-bar{height:4px;border-radius:999px;background:var(--background-color-low,#eef1f5);overflow:hidden}.qmodem-generic-bar i{display:block;height:100%;min-width:2px;border-radius:inherit;background:#337de8}.qmodem-generic-bar.tx i{background:#16a085}.qmodem-generic-values{text-align:right;font-variant-numeric:tabular-nums;color:var(--mt-ui-muted)}',
-			'.qmodem-generic-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.qmodem-generic-shortcut{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;color:inherit;text-decoration:none}.qmodem-generic-shortcut strong{display:block;font-size:12px}.qmodem-generic-shortcut span{display:block;margin-top:3px;color:var(--mt-ui-muted);font-size:9px;line-height:1.4}.qmodem-generic-shortcut b{color:#176bc1;font-size:20px}.qmodem-generic-alert{margin-bottom:12px}',
-			'.qmodem-generic-refresh{border-color:rgba(255,255,255,.30)!important;background:rgba(255,255,255,.10)!important;color:#fff!important}',
-			'@media(max-width:900px){.qmodem-generic-focus-grid{grid-template-columns:1fr 1fr}.qmodem-generic-address-card{grid-column:1/-1;min-height:auto}.qmodem-generic-traffic-layout{grid-template-columns:repeat(3,1fr)}.qmodem-generic-days{grid-column:1/-1;padding:8px 0 0}}',
-			'@media(max-width:650px){.qmodem-generic-hero{display:block}.qmodem-generic-hero-side{flex-direction:row;flex-wrap:wrap;align-items:flex-start;margin-top:14px;gap:8px}.qmodem-generic-focus-grid,.qmodem-generic-shortcuts,.qmodem-generic-info-grid{grid-template-columns:1fr}.qmodem-generic-address-card{grid-column:auto}.qmodem-generic-focus{min-height:auto}.qmodem-generic-traffic-layout{grid-template-columns:1fr}.qmodem-generic-days{grid-column:auto}.qmodem-generic-day{grid-template-columns:38px 1fr}.qmodem-generic-values{grid-column:2;text-align:left}.qmodem-generic-traffic-head{display:block}.qmodem-generic-updated{margin-top:7px}}'
+			/* 全局毛玻璃与流动渐变底蕴 */
+			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
+			'.qmodem-glass-page{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:30px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			/* 背景环境氛围光球，烘托白色毛玻璃透光感 */
+			'.qmodem-glass-bg-glow{position:absolute;top:-40px;left:5%;width:420px;height:420px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.qmodem-glass-bg-glow2{position:absolute;top:280px;right:4%;width:380px;height:380px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(236,72,153,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+
+			/* 卡片通用白色毛玻璃效果 */
+			'.qm-glass-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:20px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
+			'.qm-glass-card:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(31,64,120,0.09),0 2px 6px rgba(0,0,0,0.04)}',
+
+			/* 顶部 Hero 玻璃卡片 */
+			'.qm-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
+			'.qm-hero-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.qm-hero-sub{font-size:13px;color:#64748b;line-height:1.5}',
+			'.qm-hero-meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin-top:14px;font-size:12px;color:#475569}',
+			'.qm-hero-op{display:inline-flex;align-items:center;gap:7px;padding:4px 10px;border-radius:10px;background:rgba(255,255,255,0.7);border:1px solid rgba(226,232,240,0.8);font-weight:700;color:#0f172a}',
+			'.qm-hero-op img{width:22px;height:22px;object-fit:contain}',
+			'.qm-pill-tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:rgba(241,245,249,0.75);font-size:11px;font-weight:600;color:#475569}',
+			'.qm-pill-tag strong{color:#0f172a}',
+
+			/* 状态指示徽章 & SVG 脉冲光圈 */
+			'.qm-hero-actions{display:flex;align-items:center;gap:12px}',
+			'.qm-status-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(255,255,255,0.8);border:1px solid rgba(226,232,240,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);font-size:12px;font-weight:700}',
+			'.qm-pulse-circle{width:10px;height:10px;border-radius:50%;background:#cbd5e1;position:relative}',
+			'.qm-status-badge.online{color:#065f46;background:rgba(236,253,245,0.85);border-color:rgba(167,243,208,0.8)}',
+			'.qm-status-badge.online .qm-pulse-circle{background:#10b981;box-shadow:0 0 0 0 rgba(16,185,129,0.6);animation:qmPulse 2s infinite}',
+			'@keyframes qmPulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.7)}70%{box-shadow:0 0 0 8px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}',
+			'.qm-refresh-btn{padding:8px 18px;border-radius:999px;border:1px solid rgba(203,213,225,0.8);background:rgba(255,255,255,0.8);color:#334155;font-weight:600;font-size:12px;cursor:pointer;transition:all .2s ease}',
+			'.qm-refresh-btn:hover{background:#fff;color:#0072f5;border-color:rgba(0,114,245,0.4);transform:scale(1.02)}',
+
+			/* 核心聚焦 3 列网格 */
+			'.qm-grid-3{display:grid;grid-template-columns:1.08fr 1.02fr 1fr;gap:16px;margin-bottom:16px}',
+			'.qm-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}',
+			'.qm-card-title{font-size:15px;font-weight:750;color:#0f172a;display:flex;align-items:center;gap:8px}',
+			'.qm-card-sub{font-size:11px;color:#64748b;margin-top:2px}',
+			'.qm-badge{padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}',
+			'.qm-badge.excellent{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}',
+			'.qm-badge.good{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}',
+			'.qm-badge.fair{background:#fffbeb;color:#d97706;border:1px solid #fde68a}',
+			'.qm-badge.weak{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}',
+			'.qm-badge.active{background:#eff6ff;color:#0072f5;border:1px solid #bfdbfe}',
+
+			/* 信号仪表盘 SVG 容器 */
+			'.qm-signal-dial-box{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px 0 10px}',
+			'.qm-signal-dial-svg{width:180px;height:120px;overflow:visible}',
+			'.qm-dial-value-text{position:absolute;top:62px;text-align:center}',
+			'.qm-dial-value-text strong{font-size:28px;font-weight:800;color:#0f172a;letter-spacing:-.03em}',
+			'.qm-dial-value-text span{display:block;font-size:10px;color:#64748b;margin-top:-2px}',
+
+			/* 信号小指标微卡片 */
+			'.qm-mini-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}',
+			'.qm-mini-item{padding:9px 10px;border-radius:12px;background:rgba(248,250,252,0.7);border:1px solid rgba(241,245,249,0.85);text-align:center}',
+			'.qm-mini-label{font-size:10px;color:#64748b;font-weight:600}',
+			'.qm-mini-val{font-size:13px;font-weight:750;color:#0f172a;margin:2px 0 4px;font-variant-numeric:tabular-nums}',
+			'.qm-mini-bar{height:4px;border-radius:999px;background:#e2e8f0;overflow:hidden}',
+			'.qm-mini-bar i{display:block;height:100%;border-radius:inherit;transition:width .4s ease}',
+
+			/* 载波聚合动态 SVG 拓扑 */
+			'.qm-carrier-topo-box{padding:6px 0 12px}',
+			'.qm-carrier-topo-svg{width:100%;height:105px;display:block}',
+			'@keyframes qmDashFlow{to{stroke-dashoffset:-36}}',
+			'.qm-flow-line{stroke-dasharray:6,4;animation:qmDashFlow 1.6s linear infinite}',
+			'.qm-cc-container{display:flex;flex-direction:column;gap:6px;max-height:175px;overflow-y:auto;padding-right:2px;margin:8px 0}',
+			'.qm-cc-card{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:12px;background:rgba(248,250,252,0.75);border:1px solid rgba(226,232,240,0.7)}',
+			'.qm-cc-left{display:flex;align-items:center;gap:8px}',
+			'.qm-cc-badge{padding:2px 6px;border-radius:6px;font-size:9px;font-weight:750}',
+			'.qm-cc-badge.pcc{background:#0072f5;color:#fff}',
+			'.qm-cc-badge.scc{background:#e2e8f0;color:#475569}',
+			'.qm-cc-band{font-size:12px;font-weight:700;color:#0f172a}',
+			'.qm-cc-metrics{font-size:10px;color:#64748b;display:flex;gap:8px;font-variant-numeric:tabular-nums}',
+
+			/* IP网络会话卡片 */
+			'.qm-ip-box{display:flex;flex-direction:column;gap:8px}',
+			'.qm-ip-row{padding:10px 12px;border-radius:12px;background:rgba(248,250,252,0.75);border:1px solid rgba(226,232,240,0.7)}',
+			'.qm-ip-header{display:flex;justify-content:space-between;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px}',
+			'.qm-ip-val{font:600 12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f172a;word-break:break-all}',
+			'.qm-ip-link{display:inline-flex;align-items:center;gap:4px;color:#0072f5;font-size:11px;font-weight:700;text-decoration:none;margin-top:auto;padding-top:10px}',
+
+			/* 双列信息网格 */
+			'.qm-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}',
+			'.qm-list-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(226,232,240,0.6);font-size:12px}',
+			'.qm-list-row:last-child{border-bottom:0}',
+			'.qm-list-row span{color:#64748b}',
+			'.qm-list-row strong{color:#0f172a;font-weight:600;text-align:right}',
+
+			/* 流量统计面板 & SVG 图表 */
+			'.qm-traffic-layout{display:grid;grid-template-columns:repeat(3,minmax(0,.7fr)) minmax(320px,1.9fr);gap:12px;margin-top:14px}',
+			'.qm-stat-card{padding:14px;border-radius:14px;background:rgba(248,250,252,0.85);border:1px solid rgba(226,232,240,0.8);display:flex;flex-direction:column;justify-content:center}',
+			'.qm-stat-label{font-size:11px;color:#64748b;font-weight:600;display:flex;align-items:center;gap:6px}',
+			'.qm-stat-val{font-size:20px;font-weight:800;color:#0f172a;margin:5px 0 2px;letter-spacing:-.02em}',
+			'.qm-stat-sub{font-size:10px;color:#94a3b8}',
+			'.qm-traffic-chart-box{background:rgba(248,250,252,0.7);border-radius:14px;border:1px solid rgba(226,232,240,0.8);padding:12px 14px}',
+			'.qm-traffic-chart-svg{width:100%;height:115px;display:block}',
+
+			/* 快捷导航 */
+			'.qm-shortcuts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}',
+			'.qm-shortcut-item{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;color:inherit;text-decoration:none}',
+			'.qm-shortcut-item strong{display:block;font-size:13px;color:#0f172a}',
+			'.qm-shortcut-item span{display:block;font-size:11px;color:#64748b;margin-top:3px}',
+			'.qm-shortcut-item i{font-style:normal;font-size:18px;color:#0072f5;font-weight:700}',
+
+			/* 响应式适配 */
+			'@media(max-width:980px){.qm-grid-3{grid-template-columns:1fr 1fr}.qm-address-card{grid-column:1/-1}.qm-traffic-layout{grid-template-columns:repeat(3,1fr)}.qm-traffic-chart-box{grid-column:1/-1}}',
+			'@media(max-width:680px){.qm-hero{flex-direction:column;align-items:flex-start}.qm-hero-actions{width:100%;justify-content:space-between}.qm-grid-3,.qm-grid-2,.qm-shortcuts,.qm-traffic-layout{grid-template-columns:1fr}.qm-address-card,.qm-traffic-chart-box{grid-column:auto}}'
 		].join(''));
 	},
 
 	signalQuality: function(kind, value) {
 		var percentage, levels, index;
 		if (isNaN(value))
-			return { label:_('No data'), cls:'unknown', percentage:0 };
+			return { label:_('暂无数据'), cls:'unknown', percentage:0, strokeColor:'#94a3b8' };
 		if (kind === 'rsrp') { percentage = (value + 120) * 2.5; levels = [ -80, -90, -100 ]; }
 		else if (kind === 'rsrq') { percentage = (value + 25) * 4; levels = [ -10, -15, -20 ]; }
 		else { percentage = (value + 10) * 2.5; levels = [ 20, 13, 0 ]; }
 		index = value >= levels[0] ? 0 : value >= levels[1] ? 1 : value >= levels[2] ? 2 : 3;
+		var colors = [ '#10b981', '#0072f5', '#f59e0b', '#ef4444' ];
 		return {
-			label:[ _('Excellent'), _('Good'), _('Fair'), _('Weak') ][index],
+			label:[ _('优'), _('良'), _('中'), _('差') ][index],
 			cls:[ 'excellent', 'good', 'fair', 'weak' ][index],
-			percentage:Math.max(0, Math.min(100, percentage))
+			percentage: Math.max(0, Math.min(100, percentage)),
+			strokeColor: colors[index]
 		};
 	},
 
-	// 载波信息：主载波取自 cell_info，成分载波（CA）取自 get_current_band 的 cells
 	carrierInfo: function(res) {
 		var find = controls.findEntry;
 		var cell = res.cell || [];
@@ -344,9 +392,6 @@ return view.extend({
 		var mode = raw.network_mode || find(cell, 'network_mode') || '';
 		var cells = Array.isArray(raw.cells) ? raw.cells : [];
 
-		/* 上下行调制：来自 rpcd radio_info（Fibocom AT+GTCAINFO? 的 PCC 行 /
-		 * Quectel AT+QNWCFG="nr5g_csi"），RAT 缺失时按网络模式推断，
-		 * 组合为 "NR · MCS 20 · 64QAM" 形式的展示文案 */
 		var ri = res.radioInfo || {};
 		var stripCtl = function(v) { return v == null ? '' : String(v).replace(/[\x00-\x1f\x7f]+/g, '').trim(); };
 		var rat = stripCtl(ri.rat);
@@ -377,7 +422,6 @@ return view.extend({
 			};
 		}).filter(function(item) { return item.band || item.arfcn; });
 
-		// 无 current_band 数据时，用 cell_info 组一条主载波
 		if (!carriers.length) {
 			var single = {
 				role: 'PCC',
@@ -409,105 +453,207 @@ return view.extend({
 		};
 	},
 
-	// Small colour-coded horizontal gauge for a single scalar metric.
-	// kind: 'rsrq' | 'sinr' | 'temp' — decides the good/fair/weak thresholds.
-	metricGauge: function(label, kind, rawValue, unit, scaleLow, scaleHigh) {
-		var num = parseFloat(rawValue), has = !isNaN(num), pct = 0, cls = 'unknown';
+	/* 动态 SVG 信号仪表圆盘组件 */
+	renderSvgSignalDial: function(quality, rsrp) {
+		var radius = 64;
+		var totalArcLen = Math.PI * radius; // 180度半圆弧长约 201
+		var activeLen = (quality.percentage / 100) * totalArcLen;
+		var color = quality.strokeColor || '#0072f5';
+
+		var svgStr = [
+			'<svg class="qm-signal-dial-svg" viewBox="0 0 160 95">',
+			'  <defs>',
+			'    <linearGradient id="qmDialGrad" x1="0%" y1="0%" x2="100%" y2="0%">',
+			'      <stop offset="0%" stop-color="#0072f5"/>',
+			'      <stop offset="60%" stop-color="#10b981"/>',
+			'      <stop offset="100%" stop-color="' + color + '"/>',
+			'    </linearGradient>',
+			'    <filter id="qmDialGlow" x="-20%" y="-20%" width="140%" height="140%">',
+			'      <feGaussianBlur stdDeviation="3" result="blur"/>',
+			'      <feComposite in="SourceGraphic" in2="blur" operator="over"/>',
+			'    </filter>',
+			'  </defs>',
+			'  <!-- 底轨圆弧 -->',
+			'  <path d="M 16 80 A 64 64 0 0 1 144 80" fill="none" stroke="rgba(226,232,240,0.8)" stroke-width="10" stroke-linecap="round"/>',
+			'  <!-- 动态指示圆弧 -->',
+			'  <path d="M 16 80 A 64 64 0 0 1 144 80" fill="none" stroke="url(#qmDialGrad)" stroke-width="10" stroke-linecap="round"',
+			'        stroke-dasharray="' + activeLen.toFixed(1) + ' ' + totalArcLen.toFixed(1) + '"',
+			'        filter="url(#qmDialGlow)" style="transition: stroke-dasharray .6s cubic-bezier(.2,.8,.4,1);"/>',
+			'</svg>'
+		].join('');
+
+		return E('div', { 'class': 'qm-signal-dial-box' }, [
+			svgNode(svgStr),
+			E('div', { 'class': 'qm-dial-value-text' }, [
+				E('strong', {}, isNaN(parseFloat(rsrp)) ? '--' : String(rsrp)),
+				E('span', {}, 'RSRP · dBm')
+			])
+		]);
+	},
+
+	metricGauge: function(label, kind, rawValue, unit) {
+		var num = parseFloat(rawValue), has = !isNaN(num), pct = 0, color = '#94a3b8';
 		if (has) {
-			if (kind === 'rsrq') { pct = (num + 25) * 4; cls = num >= -10 ? 'excellent' : num >= -15 ? 'good' : num >= -20 ? 'fair' : 'weak'; }
-			else if (kind === 'sinr') { pct = (num + 10) * 2.5; cls = num >= 20 ? 'excellent' : num >= 13 ? 'good' : num >= 0 ? 'fair' : 'weak'; }
-			else { pct = (num - 20) / 60 * 100; cls = num < 45 ? 'excellent' : num < 55 ? 'good' : num < 65 ? 'fair' : 'weak'; }
-			pct = Math.max(4, Math.min(100, pct));
+			if (kind === 'rsrq') { pct = (num + 25) * 4; color = num >= -10 ? '#10b981' : num >= -15 ? '#0072f5' : num >= -20 ? '#f59e0b' : '#ef4444'; }
+			else if (kind === 'sinr') { pct = (num + 10) * 2.5; color = num >= 20 ? '#10b981' : num >= 13 ? '#0072f5' : num >= 0 ? '#f59e0b' : '#ef4444'; }
+			else { pct = (num - 20) / 60 * 100; color = num < 45 ? '#10b981' : num < 55 ? '#0072f5' : num < 65 ? '#f59e0b' : '#ef4444'; }
+			pct = Math.max(5, Math.min(100, pct));
 		}
-		return E('div', { 'class':'qmodem-generic-mini' }, [
-			E('div', { 'class':'qmodem-generic-mini-top' }, [ E('span', {}, label), E('strong', {}, has ? (String(rawValue) + (unit || '')) : '--') ]),
-			E('div', { 'class':'qmodem-generic-gauge-track' }, [ E('i', { 'class':cls, 'style':'width:' + (has ? pct : 0) + '%' }) ]),
-			E('div', { 'class':'qmodem-generic-mini-scale' }, [ E('span', {}, scaleLow || ''), E('span', {}, scaleHigh || '') ])
+		return E('div', { 'class': 'qm-mini-item' }, [
+			E('div', { 'class': 'qm-mini-label' }, label),
+			E('div', { 'class': 'qm-mini-val' }, has ? (String(rawValue) + (unit || '')) : '--'),
+			E('div', { 'class': 'qm-mini-bar' }, [
+				E('i', { 'style': 'width:' + (has ? pct : 0) + '%;background:' + color })
+			])
 		]);
 	},
 
 	signalCard: function(data) {
 		var rsrp = parseFloat(data.rsrp);
-		var quality = this.signalQuality('rsrp', rsrp), active = isNaN(rsrp) ? 0 : Math.max(1, Math.round(quality.percentage / 100 * 14));
-		var bars = [], i;
-		for (i = 0; i < 14; i++)
-			bars.push(E('span', { 'class':'qmodem-generic-signal-bar' + (i < active ? ' on' : ''), 'style':'height:%dpx'.format(8 + i * 3) }));
-		return E('section', { 'class':'qmodem-generic-focus mt-ui-card' }, [
-			E('div', { 'class':'qmodem-generic-focus-head' }, [
-				E('div', {}, [ E('div', { 'class':'qmodem-generic-focus-title' }, _('Signal')), E('div', { 'class':'qmodem-generic-focus-desc' }, _('Current radio quality at a glance')) ]),
-				E('span', { 'class':'qmodem-generic-badge ' + quality.cls }, quality.label)
+		var quality = this.signalQuality('rsrp', rsrp);
+		return E('section', { 'class': 'qm-glass-card' }, [
+			E('div', { 'class': 'qm-card-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'qm-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M2 20h.01"/><path d="M7 20v-4"/><path d="M12 20v-8"/><path d="M17 20V8"/><path d="M22 20V4"/></svg>'),
+						_('信号')
+					]),
+					E('div', { 'class': 'qm-card-sub' }, _('射频与信道环境质量'))
+				]),
+				E('span', { 'class': 'qm-badge ' + quality.cls }, quality.label)
 			]),
-			E('div', { 'class':'qmodem-generic-signal-value' }, [ E('strong', {}, isNaN(rsrp) ? '--' : String(data.rsrp)), E('span', {}, 'RSRP · dBm') ]),
-			E('div', { 'class':'qmodem-generic-signal-bars ' + quality.cls, 'aria-hidden':'true' }, bars),
-			E('div', { 'class':'qmodem-generic-signal-meta' }, [
-				this.metricGauge('RSRQ', 'rsrq', data.rsrq, ' dB', '-25', '-3'),
-				this.metricGauge('SINR', 'sinr', data.sinr, ' dB', '-10', '30'),
-				this.metricGauge(_('Temperature'), 'temp', data.temperature, '°C', '20', '80')
+			this.renderSvgSignalDial(quality, data.rsrp),
+			E('div', { 'class': 'qm-mini-grid' }, [
+				this.metricGauge('RSRQ', 'rsrq', data.rsrq, ' dB'),
+				this.metricGauge('SINR', 'sinr', data.sinr, ' dB'),
+				this.metricGauge(_('温度'), 'temp', data.temperature, '°C')
 			])
 		]);
 	},
 
+	/* 动态 SVG 载波拓扑图 */
+	renderSvgCarrierTopo: function(info) {
+		var hasCa = info.carriers && info.carriers.length > 1;
+		var lineStroke1 = hasCa ? '#0072f5' : '#64748b';
+		var lineStroke2 = '#10b981';
+
+		var svgStr = [
+			'<svg class="qm-carrier-topo-svg" viewBox="0 0 320 85">',
+			'  <defs>',
+			'    <linearGradient id="qmTowerGlow" x1="0%" y1="0%" x2="100%" y2="100%">',
+			'      <stop offset="0%" stop-color="#0072f5"/>',
+			'      <stop offset="100%" stop-color="#60a5fa"/>',
+			'    </linearGradient>',
+			'  </defs>',
+			'  <!-- 基站塔 -->',
+			'  <g transform="translate(20, 14)">',
+			'    <path d="M16 2 L22 46 L10 46 Z" fill="none" stroke="url(#qmTowerGlow)" stroke-width="2.2" stroke-linejoin="round"/>',
+			'    <line x1="8" y1="20" x2="24" y2="20" stroke="#0072f5" stroke-width="1.8"/>',
+			'    <line x1="11" y1="32" x2="21" y2="32" stroke="#0072f5" stroke-width="1.8"/>',
+			'    <circle cx="16" cy="2" r="3.5" fill="#0072f5"/>',
+			'    <path d="M10 -2 A 8 8 0 0 1 22 -2" fill="none" stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"/>',
+			'    <text x="16" y="58" font-size="9" fill="#64748b" text-anchor="middle" font-weight="600">gNB/eNB</text>',
+			'  </g>',
+			'  <!-- 动态传输波束连线 -->',
+			'  <path d="M 52 26 C 110 10, 160 18, 240 22" fill="none" stroke="' + lineStroke1 + '" stroke-width="2" class="qm-flow-line"/>',
+			hasCa ? '  <path d="M 52 32 C 110 48, 160 42, 240 38" fill="none" stroke="' + lineStroke2 + '" stroke-width="2" class="qm-flow-line" style="animation-duration:1.2s;"/>' : '',
+			'  <!-- 终端/模组汇聚 -->',
+			'  <g transform="translate(244, 12)">',
+			'    <rect x="0" y="4" width="48" height="34" rx="8" fill="rgba(241,245,249,0.9)" stroke="#94a3b8" stroke-width="1.6"/>',
+			'    <text x="24" y="21" font-size="10" font-weight="700" fill="#0f172a" text-anchor="middle">' + (hasCa ? info.count + 'CA' : '1CC') + '</text>',
+			'    <text x="24" y="32" font-size="8" font-weight="600" fill="#64748b" text-anchor="middle">' + (info.carriers[0] ? (info.carriers[0].band || 'Modem') : 'Modem') + '</text>',
+			'  </g>',
+			'</svg>'
+		].join('');
+		return svgNode(svgStr);
+	},
+
 	carrierCard: function(info, devStatus) {
 		var active = info.active || info.dual;
-		var badge = !info.available ? _('Unavailable') : info.active ? _('Aggregating') : info.dual ? _('Dual connectivity') : _('Single carrier');
-		var headline = !info.available ? '--' : info.active ? info.count + 'CA' : info.dual ? (info.mode || 'EN-DC') : (info.carriers[0] ? info.carriers[0].band : _('Single carrier'));
-		// Expand every component carrier when more than one is active so the
-		// serving cell (PCell + SCells) is fully listed (not just a summary).
-		var ccList = null;
-		if (info.carriers.length > 1) {
-			ccList = E('div', { 'class':'qmodem-generic-cc-list' }, info.carriers.map(function(item, idx) {
-				var role = /^(pcc|pcell|primary)$/i.test(item.role) ? _('PCell')
-					: (item.role && !/^(scc|scell|secondary)$/i.test(item.role)) ? item.role
-					: (idx === 0 ? _('PCell') : _('SCell %d').format(idx));
-				return E('div', { 'class':'qmodem-generic-cc-row' }, [
-					E('div', { 'class':'qmodem-generic-cc-role' }, [
-						E('span', { 'class':'qmodem-generic-cc-badge ' + (idx === 0 ? 'primary' : 'secondary') }, role),
-						E('span', { 'class':'qmodem-generic-cc-band' }, joinValues(item.radio, item.band).replace(', ', ' · ') || '--')
-					]),
-					E('div', { 'class':'qmodem-generic-cc-detail' }, [
-						item.arfcn ? E('span', {}, (item.channelType || 'ARFCN') + ' ' + item.arfcn) : null,
-						item.pci ? E('span', {}, 'PCI ' + item.pci) : null,
-						E('span', {}, _('DL') + ' ' + (mhz(item.dlBandwidth) || '--')),
-						E('span', {}, _('UL') + ' ' + (mhz(item.ulBandwidth) || '--')),
-						item.scs ? E('span', {}, 'SCS ' + item.scs) : null
-					].filter(Boolean))
-				]);
-			}));
+		var badge = !info.available ? _('不可用') : info.active ? _('载波聚合中') : info.dual ? _('双连接') : _('单载波');
+
+		var ccElements = info.carriers.map(function(item, idx) {
+			var isPcc = idx === 0 || /^(pcc|pcell|primary)$/i.test(item.role);
+			return E('div', { 'class': 'qm-cc-card' }, [
+				E('div', { 'class': 'qm-cc-left' }, [
+					E('span', { 'class': 'qm-cc-badge ' + (isPcc ? 'pcc' : 'scc') }, isPcc ? 'PCC' : 'SCC' + idx),
+					E('span', { 'class': 'qm-cc-band' }, joinValues(item.radio, item.band).replace(', ', ' · ') || '--')
+				]),
+				E('div', { 'class': 'qm-cc-metrics' }, [
+					item.pci ? E('span', {}, 'PCI ' + item.pci) : null,
+					E('span', {}, 'DL ' + (mhz(item.dlBandwidth) || '--')),
+					E('span', {}, 'UL ' + (mhz(item.ulBandwidth) || '--'))
+				].filter(Boolean))
+			]);
+		});
+
+		var speedItem = null;
+		if (devStatus && devStatus.speed) {
+			var m = String(devStatus.speed).match(/^(\d+)/);
+			var linkSpeed = m ? parseInt(m[1], 10) : 0;
+			var linkLabel = linkSpeed >= 1000
+				? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
+				: linkSpeed + ' Mbps';
+			speedItem = E('div', { 'class': 'qm-mini-item', 'style': 'grid-column:1/-1;text-align:left;display:flex;justify-content:space-between;align-items:center' }, [
+				E('span', { 'class': 'qm-mini-label' }, _('USB 链路速率')),
+				E('strong', { 'style': 'font-size:12px;color:#0072f5' }, linkLabel)
+			]);
 		}
-		return E('section', { 'class':'qmodem-generic-focus mt-ui-card' }, [
-			E('div', { 'class':'qmodem-generic-focus-head' }, [
-				E('div', {}, [ E('div', { 'class':'qmodem-generic-focus-title' }, _('Carrier status')), E('div', { 'class':'qmodem-generic-focus-desc' }, _('Carrier aggregation and bandwidth')) ]),
-				E('span', { 'class':'qmodem-generic-badge' + (active ? ' active' : '') }, badge)
+
+		return E('section', { 'class': 'qm-glass-card' }, [
+			E('div', { 'class': 'qm-card-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'qm-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>'),
+						_('载波聚合状态')
+					]),
+					E('div', { 'class': 'qm-card-sub' }, info.mode || _('移动网络'))
+				]),
+				E('span', { 'class': 'qm-badge' + (active ? ' active' : '') }, badge)
 			]),
-			E('div', { 'class':'qmodem-generic-carrier-main' }, [ E('strong', {}, headline || '--'), E('span', {}, info.mode || _('Mobile network')) ]),
-			E('div', { 'class':'qmodem-generic-band-list' }, info.carriers.length ? info.carriers.map(function(item) {
-				return E('span', { 'class':'qmodem-generic-band' }, joinValues(item.radio, item.band).replace(', ', ' · ') || '--');
-			}) : E('span', { 'class':'qmodem-generic-focus-desc' }, _('Current carrier information is unavailable.'))),
-			ccList,
-			E('div', { 'class':'qmodem-generic-carrier-stats' }, [
-				E('div', { 'class':'qmodem-generic-mini' }, [ E('span', {}, _('Downlink bandwidth')), E('strong', {}, mhz(info.dlBandwidth) || '--') ]),
-				E('div', { 'class':'qmodem-generic-mini' }, [ E('span', {}, _('Uplink bandwidth')), E('strong', {}, mhz(info.ulBandwidth) || '--') ]),
-				E('div', { 'class':'qmodem-generic-mini' }, [ E('span', {}, _('Downlink modulation')), E('strong', {}, info.dlModulation || '--') ]),
-				E('div', { 'class':'qmodem-generic-mini' }, [ E('span', {}, _('Uplink modulation')), E('strong', {}, info.ulModulation || '--') ])
+			E('div', { 'class': 'qm-carrier-topo-box' }, [ this.renderSvgCarrierTopo(info) ]),
+			E('div', { 'class': 'qm-cc-container' }, ccElements),
+			E('div', { 'class': 'qm-mini-grid', 'style': 'grid-template-columns:1fr 1fr' }, [
+				E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('下行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.dlBandwidth) || '--') ]),
+				E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('上行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.ulBandwidth) || '--') ]),
+				speedItem
+			].filter(Boolean)),
+			E('a', { 'class': 'qm-ip-link', 'href': L.url('admin/modem/qmodem-generic/network') }, [ _('射频与小区详情'), ' →' ])
+		]);
+	},
+
+	addressCard: function(session) {
+		var active = session.connected || session.ipv4Connected || session.ipv6Connected;
+		return E('section', { 'class': 'qm-glass-card qm-address-card' }, [
+			E('div', { 'class': 'qm-card-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'qm-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>'),
+						_('移动 IP')
+					]),
+					E('div', { 'class': 'qm-card-sub' }, joinValues(session.device, session.proto) || _('已分配地址'))
+				]),
+				E('span', { 'class': 'qm-badge' + (active ? ' excellent' : ' weak') }, active ? _('已激活') : _('已断开'))
 			]),
-			(function() {
-				var items = [];
-				// 签约速率（USB 链路速率参考）
-				if (devStatus && devStatus.speed) {
-					var speedStr = String(devStatus.speed);
-					var m = speedStr.match(/^(\d+)/);
-					var linkSpeed = m ? parseInt(m[1], 10) : 0;
-					var linkLabel = linkSpeed >= 1000
-						? (linkSpeed / 1000).toFixed(linkSpeed % 1000 === 0 ? 0 : 1) + ' Gbps'
-						: linkSpeed + ' Mbps';
-					items.push(E('div', { 'class':'qmodem-generic-mini', 'style':'grid-column:1/-1' }, [
-						E('span', {}, _('USB 链路速率')),
-						E('strong', {}, linkLabel)
-					]));
-				}
-				return items.length ? E('div', { 'class':'qmodem-generic-carrier-stats', 'style':'margin-top:7px' }, items) : null;
-			})(),
-			E('a', { 'class':'qmodem-generic-card-link', 'href':L.url('admin/modem/qmodem-generic/network') }, _('View radio and cell details'))
+			E('div', { 'class': 'qm-ip-box' }, [
+				E('div', { 'class': 'qm-ip-row' }, [
+					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'IPv4'), E('span', { 'style': 'color:' + (session.ipv4Connected ? '#10b981' : '#94a3b8') }, session.ipv4Connected ? _('已连接') : _('未分配')) ]),
+					E('div', { 'class': 'qm-ip-val' }, session.ipv4Address || '--')
+				]),
+				E('div', { 'class': 'qm-ip-row' }, [
+					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'IPv6'), E('span', { 'style': 'color:' + (session.ipv6Connected ? '#10b981' : '#94a3b8') }, session.ipv6Connected ? _('已连接') : _('未分配')) ]),
+					E('div', { 'class': 'qm-ip-val' }, session.ipv6Address || '--')
+				]),
+				E('div', { 'class': 'qm-ip-row' }, [
+					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'DNS 服务器') ]),
+					E('div', { 'class': 'qm-ip-val' }, joinValues(session.dns4, session.dns6) || '--')
+				])
+			]),
+			E('div', { 'style': 'display:flex;justify-content:space-between;margin-top:10px;font-size:11px;color:#64748b' }, [
+				E('span', {}, 'MTU: ' + (session.mtu || '--')),
+				E('span', {}, session.up ? '接口已启用' : '接口已停用')
+			]),
+			E('a', { 'class': 'qm-ip-link', 'href': L.url('admin/modem/qmodem-generic/connection') }, [ _('连接详情'), ' →' ])
 		]);
 	},
 
@@ -515,20 +661,16 @@ return view.extend({
 		qosInfo = qosInfo || {};
 		if (qosInfo.status !== 'ok')
 			return '';
-
 		var down = Number(qosInfo.downlink_rate_kbps != null ? qosInfo.downlink_rate_kbps : (qosInfo.downlink_rate != null ? qosInfo.downlink_rate : qosInfo.rx_data_rate_max));
 		var up = Number(qosInfo.uplink_rate_kbps != null ? qosInfo.uplink_rate_kbps : (qosInfo.uplink_rate != null ? qosInfo.uplink_rate : qosInfo.tx_data_rate_max));
 		if (!down && !up)
 			return '';
-
-		return _('Down %s / Up %s').format(
+		return _('下行 %s / 上行 %s').format(
 			down ? controls.formatRate(down * 1000) : '--',
 			up ? controls.formatRate(up * 1000) : '--'
 		);
 	},
 
-	// QCI (QoS Class Identifier) — 3GPP 定义的承载 QoS 等级，决定网络资源优先级
-	// GBR = 保证比特率（语音 / 视频等实时业务），Non-GBR = 非保证比特率（互联网数据）
 	qciExplain: function(qosInfo) {
 		var qci = qosInfo ? parseInt(qosInfo.qci, 10) : 0;
 		if (!qosInfo || qosInfo.status !== 'ok' || !qci)
@@ -546,62 +688,35 @@ return view.extend({
 			65: { label: 'QCI 65', desc: _('GBR · 关键任务语音') },
 			66: { label: 'QCI 66', desc: _('GBR · 关键任务 PTT') },
 			69: { label: 'QCI 69', desc: _('Non-GBR · 关键任务信令') },
-			70: { label: 'QCI 70', desc: _('GBR · 关键任务数据') },
-			79: { label: 'QCI 79', desc: _('GBR · 车联网 V2X 消息') },
-			80: { label: 'QCI 80', desc: _('Non-GBR · 车联网 V2X 数据') }
+			70: { label: 'QCI 70', desc: _('GBR · 关键任务数据') }
 		};
-		var info = map[qci];
-		return info ? info : { label: 'QCI ' + qci, desc: _('自定义承载') };
-	},
-
-	addressCard: function(session) {
-		var active = session.connected || session.ipv4Connected || session.ipv6Connected;
-		return E('section', { 'class':'qmodem-generic-focus qmodem-generic-address-card mt-ui-card' }, [
-			E('div', { 'class':'qmodem-generic-focus-head' }, [
-				E('div', {}, [ E('div', { 'class':'qmodem-generic-focus-title' }, _('Mobile IP')), E('div', { 'class':'qmodem-generic-focus-desc' }, _('Addresses assigned by the mobile network')) ]),
-				E('span', { 'class':'qmodem-generic-badge' + (active ? ' active' : '') }, active ? _('Active') : _('Disconnected'))
-			]),
-			E('div', { 'class':'qmodem-generic-ip-list' }, function() {
-					var rows = [
-						E('div', { 'class':'qmodem-generic-ip-row' }, [ E('div', { 'class':'qmodem-generic-ip-head' }, [ E('span', {}, 'IPv4'), E('span', { 'class':'qmodem-generic-ip-state' + (session.ipv4Connected ? ' on' : '') }, session.ipv4Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'qmodem-generic-ip-value' }, session.ipv4Address || '--') ]),
-						E('div', { 'class':'qmodem-generic-ip-row' }, [ E('div', { 'class':'qmodem-generic-ip-head' }, [ E('span', {}, 'IPv6'), E('span', { 'class':'qmodem-generic-ip-state' + (session.ipv6Connected ? ' on' : '') }, session.ipv6Connected ? _('Connected') : _('Not assigned')) ]), E('div', { 'class':'qmodem-generic-ip-value' }, session.ipv6Address || '--') ])
-					];
-					if (session.dns4) rows.push(E('div', { 'class':'qmodem-generic-ip-row' }, [ E('div', { 'class':'qmodem-generic-ip-head' }, [ E('span', {}, 'DNS (IPv4)') ]), E('div', { 'class':'qmodem-generic-ip-value' }, session.dns4) ]));
-					if (session.dns6) rows.push(E('div', { 'class':'qmodem-generic-ip-row' }, [ E('div', { 'class':'qmodem-generic-ip-head' }, [ E('span', {}, 'DNS (IPv6)') ]), E('div', { 'class':'qmodem-generic-ip-value' }, session.dns6) ]));
-					if (!session.dns4 && !session.dns6) rows.push(E('div', { 'class':'qmodem-generic-ip-row' }, [ E('div', { 'class':'qmodem-generic-ip-head' }, [ E('span', {}, 'DNS') ]), E('div', { 'class':'qmodem-generic-ip-value' }, '--') ]));
-					return rows;
-				}()),
-			E('div', { 'class':'qmodem-generic-ip-meta' }, [ E('span', {}, joinValues(session.device, session.proto) || '--'), E('span', {}, 'MTU ' + (session.mtu || '--')) ]),
-			E('a', { 'class':'qmodem-generic-card-link', 'href':L.url('admin/modem/qmodem-generic/connection') }, _('View connection details'))
-		]);
-	},
-
-	// Robust node detector: some LuCI runtimes (older L.dom) build nodes that
-	// are NOT `instanceof HTMLElement` but still have nodeType === 1.  Using
-	// only `instanceof HTMLElement` mis-classifies those nodes as scalars and
-	// toString()s them into "[object HTMLElement]".  nodeType===1 is the
-	// reliable cross-runtime test.
-	isNode: function(v) {
-		return v && typeof v === 'object' && (v instanceof HTMLElement || v.nodeType === 1);
+		return map[qci] || { label: 'QCI ' + qci, desc: _('自定义承载') };
 	},
 
 	infoRow: function(label, value) {
-		var valueNode = this.isNode(value) ? value : E('strong', {}, (value == null || value === '') ? '--' : String(value));
-		return E('div', { 'class':'qmodem-generic-info-row' }, [ E('span', {}, label), valueNode ]);
+		var valNode = (value && typeof value === 'object' && (value instanceof HTMLElement || value.nodeType === 1))
+			? value : E('strong', {}, (value == null || value === '') ? '--' : String(value));
+		return E('div', { 'class': 'qm-list-row' }, [ E('span', {}, label), valNode ]);
 	},
 
 	moduleCard: function(data) {
-		return E('section', { 'class':'qmodem-generic-info mt-ui-card' }, [
-			E('div', { 'class':'qmodem-generic-info-head' }, [
-				E('div', {}, [ E('div', { 'class':'qmodem-generic-info-title' }, _('Module')), E('div', { 'class':'qmodem-generic-info-desc' }, _('Identity and firmware')) ]),
-				E('span', { 'class':'qmodem-generic-badge active' }, data.model || _('Modem'))
+		return E('section', { 'class': 'qm-glass-card' }, [
+			E('div', { 'class': 'qm-card-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'qm-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>'),
+						_('模组')
+					]),
+					E('div', { 'class': 'qm-card-sub' }, _('硬件与固件信息'))
+				]),
+				E('span', { 'class': 'qm-badge active' }, data.model || _('模组'))
 			]),
-			E('div', { 'class':'qmodem-generic-info-list' }, [
-				this.infoRow(_('Manufacturer'), data.manufacturer),
-				this.infoRow(_('Model'), data.model),
-				this.infoRow(_('Firmware'), data.revision),
+			E('div', {}, [
+				this.infoRow(_('厂商'), data.manufacturer),
+				this.infoRow(_('型号'), data.model),
+				this.infoRow(_('固件'), data.revision),
 				this.infoRow('IMEI', data.imei),
-				this.infoRow(_('AT port'), data.at_port)
+				this.infoRow(_('AT 端口'), data.at_port)
 			])
 		]);
 	},
@@ -611,113 +726,135 @@ return view.extend({
 		var simOk = /READY|正常|OK/i.test(simState);
 		var subRate = this.subscriptionRate(data.qosInfo);
 		var qciInfo = this.qciExplain(data.qosInfo);
-		return E('section', { 'class':'qmodem-generic-info mt-ui-card' }, [
-			E('div', { 'class':'qmodem-generic-info-head' }, [
-				E('div', {}, [ E('div', { 'class':'qmodem-generic-info-title' }, _('SIM & Subscription')), E('div', { 'class':'qmodem-generic-info-desc' }, _('Subscriber identity and service plan')) ]),
-				E('span', { 'class':'qmodem-generic-badge' + (simOk ? ' active' : '') }, simOk ? _('Ready') : (simState || _('Unknown')))
+		return E('section', { 'class': 'qm-glass-card' }, [
+			E('div', { 'class': 'qm-card-head' }, [
+				E('div', {}, [
+					E('div', { 'class': 'qm-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="8" y="10" width="8" height="8" rx="1"/></svg>'),
+						_('SIM 与订阅')
+					]),
+					E('div', { 'class': 'qm-card-sub' }, _('订阅身份与运营商 QoS'))
+				]),
+				E('span', { 'class': 'qm-badge' + (simOk ? ' excellent' : ' weak') }, simOk ? _('就绪') : (simState || _('未知')))
 			]),
-			E('div', { 'class':'qmodem-generic-info-list' }, [
-				this.infoRow(_('Operator'), data.operator),
-				this.infoRow(_('Access technology'), data.sysmode_detail),
-				this.infoRow(_('APN'), data.active_apn),
-				this.infoRow(_('Subscription rate'), subRate || '--'),
-				/* QoS Level 常显：模组上报 QCI/5QI 时展示映射等级，未知时显示 -- */
-				E('div', { 'class':'qmodem-generic-info-row' }, [
-					E('span', {}, _('QoS Level')),
+			E('div', {}, [
+				this.infoRow(_('运营商'), data.operator),
+				this.infoRow(_('接入技术'), data.sysmode_detail),
+				this.infoRow(_('接入点'), data.active_apn),
+				this.infoRow(_('签约速率'), subRate || '--'),
+				E('div', { 'class': 'qm-list-row' }, [
+					E('span', {}, _('QoS 等级')),
 					qciInfo.label ? E('div', {}, [
-						E('strong', {}, qciInfo.label),
-						E('span', { 'style':'font-weight:400;margin-left:6px' }, qciInfo.desc)
+						E('strong', { 'style': 'color:#0072f5' }, qciInfo.label),
+						E('span', { 'style': 'font-weight:400;margin-left:6px;font-size:11px' }, qciInfo.desc)
 					]) : E('strong', {}, '--')
 				]),
 				this.infoRow('ICCID', data.iccid),
-				this.infoRow('IMSI', data.imsi),
-				this.infoRow(_('Phone number'), data.phone_number)
+				this.infoRow('IMSI', data.imsi)
 			])
 		]);
 	},
 
-	// 流量面板：数据源为 QModem get_usage_stats（当前计数器）+ qmodem_stats
-	// daily_stats（本机持久化的分天记录，重启不丢失，按中国时区 UTC+8 切日）。
-	// huawei 等模组 available:0 时给出说明而不是图表。
-	// 方向自动识别：个别驱动把 rx/tx 接反（tx 持续大于 rx），后端识别后以
-	// swapped=1 标记，这里统一交换显示，保证「下载 > 上传」的常规直觉正确。
+	/* 动态 SVG 历史双轨能量条形图 */
+	renderSvgTrafficChart: function(days, swapped) {
+		var list = Array.isArray(days) ? days.slice(-10) : [];
+		if (!list.length) {
+			return E('div', { 'style': 'text-align:center;padding:35px 0;color:#94a3b8;font-size:11px' }, _('暂无历史数据。'));
+		}
+		var max = 1;
+		list.forEach(function(d) {
+			var rx = swapped ? (Number(d.tx) || 0) : (Number(d.rx) || 0);
+			var tx = swapped ? (Number(d.rx) || 0) : (Number(d.tx) || 0);
+			max = Math.max(max, rx, tx);
+		});
+
+		var svgW = 440, svgH = 100;
+		var gap = svgW / list.length;
+		var barW = Math.max(6, gap * 0.32);
+
+		var barsSvg = list.map(function(d, i) {
+			var rx = swapped ? (Number(d.tx) || 0) : (Number(d.rx) || 0);
+			var tx = swapped ? (Number(d.rx) || 0) : (Number(d.tx) || 0);
+			var rxH = Math.max(3, (rx / max) * 65);
+			var txH = Math.max(3, (tx / max) * 65);
+			var x = i * gap + (gap - barW * 2 - 3) / 2;
+			var dateLabel = String(d.date || '').slice(5);
+
+			return [
+				'<rect x="' + x + '" y="' + (80 - rxH) + '" width="' + barW + '" height="' + rxH + '" rx="3" fill="#0072f5"/>',
+				'<rect x="' + (x + barW + 3) + '" y="' + (80 - txH) + '" width="' + barW + '" height="' + txH + '" rx="3" fill="#10b981"/>',
+				'<text x="' + (x + barW) + '" y="94" font-size="8" fill="#94a3b8" text-anchor="middle">' + dateLabel + '</text>'
+			].join('');
+		}).join('');
+
+		var fullChart = [
+			'<svg class="qm-traffic-chart-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '">',
+			'  <line x1="0" y1="80" x2="' + svgW + '" y2="80" stroke="rgba(226,232,240,0.8)" stroke-width="1"/>',
+			barsSvg,
+			'</svg>'
+		].join('');
+
+		return svgNode(fullChart);
+	},
+
 	trafficPanel: function(usage, interfaceName, daily) {
 		usage = usage || {}; daily = daily || {};
 		var swapped = Number(daily.swapped) === 1;
 		var dl = swapped ? (Number(daily.total_tx) || 0) : (Number(daily.total_rx) || 0);
 		var ul = swapped ? (Number(daily.total_rx) || 0) : (Number(daily.total_tx) || 0);
 
-		var head = E('div', { 'class':'qmodem-generic-traffic-head' }, [
+		var head = E('div', { 'class': 'qm-card-head' }, [
 			E('div', {}, [
-				E('h3', {}, _('Traffic Statistics')),
-				E('p', {}, _('Usage counters reported by QModem for %s').format(interfaceName || '--'))
+				E('div', { 'class': 'qm-card-title' }, [
+					svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'),
+					_('流量统计')
+				]),
+				E('div', { 'class': 'qm-card-sub' }, _('接口计数器 %s').format(interfaceName || '--'))
 			]),
-			E('div', { 'class':'qmodem-generic-traffic-side' }, [
-				E('div', { 'class':'qmodem-generic-updated' }, _('Last updated') + ' · ' + usageUpdated(usage.updated_at)),
-				E('div', { 'class':'qmodem-generic-legend' }, [ E('span', {}, _('Download')), E('span', {}, _('Upload')) ])
+			E('div', { 'style': 'text-align:right' }, [
+				E('div', { 'style': 'font-size:10px;color:#94a3b8' }, _('已更新') + ' · ' + usageUpdated(usage.updated_at)),
+				E('div', { 'style': 'display:flex;gap:10px;font-size:10px;color:#64748b;margin-top:4px' }, [
+					E('span', {}, '● 下行 (DL) #0072f5'),
+					E('span', {}, '● 上行 (UL) #10b981')
+				])
 			])
 		]);
 
 		if (!isTrafficAvailable(usage)) {
-			return E('section', { 'class':'qmodem-generic-traffic mt-ui-card' }, [
+			return E('section', { 'class': 'qm-glass-card', 'style': 'margin-bottom:16px' }, [
 				head,
-				E('div', { 'class':'qmodem-generic-focus-desc' }, _('This module reports no traffic statistics via QModem (some vendor drivers do not implement usage_stats).'))
+				E('div', { 'style': 'color:#94a3b8;font-size:12px;padding:14px 0' }, _('该模组未通过 QModem 上报流量统计。'))
 			]);
 		}
 
-		function stat(label, value, split) {
-			return E('div', { 'class':'qmodem-generic-traffic-stat' }, [
-				E('div', { 'class':'qmodem-generic-traffic-label' }, label),
-				E('div', { 'class':'qmodem-generic-traffic-value' }, controls.formatBytes(value)),
-				E('div', { 'class':'qmodem-generic-traffic-split' }, split || '')
-			]);
-		}
+		var todayDl = swapped ? (Number(daily.today_tx) || 0) : (Number(daily.today_rx) || 0);
+		var todayUl = swapped ? (Number(daily.today_rx) || 0) : (Number(daily.today_tx) || 0);
 
-		// 分天历史：最近 14 天，每天两行（下行蓝 / 上行绿），按全表最大值归一化
-		var dayRows = Array.isArray(daily.days) ? daily.days.slice(-14) : [];
-		var maxDay = 1;
-		dayRows.forEach(function(d) {
-			maxDay = Math.max(maxDay, Number(d.rx) || 0, Number(d.tx) || 0);
-		});
-		if (!dayRows.length)
-			maxDay = Math.max(dl, ul, 1);
-		function dayBar(date, rxDl, txUl, isToday) {
-			return E('div', { 'class':'qmodem-generic-day' }, [
-				E('span', { 'class':'qmodem-generic-date' }, date.substring(5)),
-				E('div', { 'class':'qmodem-generic-bars' }, [
-					E('div', { 'class':'qmodem-generic-bar' }, E('i', { 'style':'width:' + Math.max(rxDl ? 2 : 0, rxDl / maxDay * 100).toFixed(1) + '%' })),
-					E('div', { 'class':'qmodem-generic-bar tx' }, E('i', { 'style':'width:' + Math.max(txUl ? 2 : 0, txUl / maxDay * 100).toFixed(1) + '%' }))
-				]),
-				E('span', { 'class':'qmodem-generic-values' }, controls.formatBytes(rxDl + txUl))
-			]);
-		}
-		var todayRow = dayBar(_('Today'), Number(daily.today_rx) || 0, Number(daily.today_tx) || 0, true).cloneNode(true);
-		var history = E('div', { 'class':'qmodem-generic-days' }, [ todayRow ].concat(
-			dayRows.map(function(d) {
-				return dayBar(String(d.date || ''), swapped ? (Number(d.tx) || 0) : (Number(d.rx) || 0),
-					swapped ? (Number(d.rx) || 0) : (Number(d.tx) || 0), false);
-			})
-		));
-
-		return E('section', { 'class':'qmodem-generic-traffic mt-ui-card' }, [
+		return E('section', { 'class': 'qm-glass-card', 'style': 'margin-bottom:16px' }, [
 			head,
-			E('div', { 'class':'qmodem-generic-traffic-layout' }, [
-				stat(_('Today download'), swapped ? (Number(daily.today_tx) || 0) : (Number(daily.today_rx) || 0)),
-				stat(_('Today upload'), swapped ? (Number(daily.today_rx) || 0) : (Number(daily.today_tx) || 0)),
-				stat(_('All-time total'), dl + ul, _('Download %s · Upload %s').format(controls.formatBytes(dl), controls.formatBytes(ul))),
-				history
-			]),
-			swapped ? E('p', { 'class':'qmodem-generic-focus-desc', 'style':'margin-top:10px' },
-				_('Modem driver reports reversed counters; download/upload were swapped automatically.')) : null,
-			isTrafficAvailable(usage) && !dayRows.length && !(Number(daily.today_rx) + Number(daily.today_tx)) ?
-				E('p', { 'class':'qmodem-generic-focus-desc', 'style':'margin-top:10px' },
-					_('Daily history is being recorded in the background; the first full-day record will appear tomorrow.')) : null
+			E('div', { 'class': 'qm-traffic-layout' }, [
+				E('div', { 'class': 'qm-stat-card' }, [
+					E('div', { 'class': 'qm-stat-label' }, '今日下载 (DL)'),
+					E('div', { 'class': 'qm-stat-val', 'style': 'color:#0072f5' }, controls.formatBytes(todayDl)),
+					E('div', { 'class': 'qm-stat-sub' }, '今日流量')
+				]),
+				E('div', { 'class': 'qm-stat-card' }, [
+					E('div', { 'class': 'qm-stat-label' }, '今日上传 (UL)'),
+					E('div', { 'class': 'qm-stat-val', 'style': 'color:#10b981' }, controls.formatBytes(todayUl)),
+					E('div', { 'class': 'qm-stat-sub' }, '今日流量')
+				]),
+				E('div', { 'class': 'qm-stat-card' }, [
+					E('div', { 'class': 'qm-stat-label' }, '累计总量'),
+					E('div', { 'class': 'qm-stat-val' }, controls.formatBytes(dl + ul)),
+					E('div', { 'class': 'qm-stat-sub' }, 'DL ' + controls.formatBytes(dl) + ' / UL ' + controls.formatBytes(ul))
+				]),
+				E('div', { 'class': 'qm-traffic-chart-box' }, [
+					this.renderSvgTrafficChart(daily.days, swapped)
+				])
+			])
 		]);
 	},
 
-	// 流量统计自动清零计划：数据源为 QModem get_traffic_reset_schedule /
-	// set_traffic_reset_schedule，仅在模组支持流量统计时展示。同时提供"立即清零"动作
-	// （clearStats，仅部分模组如 Quectel 可用）。
 	trafficScheduleCard: function(schedule, section) {
 		schedule = schedule || {};
 		function pad2(n) { return (n < 10 ? '0' : '') + n; }
@@ -772,8 +909,6 @@ return view.extend({
 				controls.confirmModal(_('立即清零流量统计'),
 					_('此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？'),
 					function() {
-						// QModem clear_stats（模组侧）+ 本地持久化记录一并清零；
-						// 部分模组不支持模组侧清零，本地记录仍会重置
 						return Promise.resolve(controls.clearStats(section)).catch(function() { return null; })
 							.then(function() { return controls.statsReset(section); });
 					});
@@ -783,11 +918,16 @@ return view.extend({
 	},
 
 	shortcut: function(title, description, path) {
-		return E('a', { 'class':'qmodem-generic-shortcut mt-ui-card', 'href':L.url(path) }, [ E('div', {}, [ E('strong', {}, title), E('span', {}, description) ]), E('b', {}, '›') ]);
+		return E('a', { 'class': 'qm-glass-card qm-shortcut-item', 'href': L.url(path) }, [
+			E('div', {}, [
+				E('strong', {}, title),
+				E('span', {}, description)
+			]),
+			E('i', {}, '→')
+		]);
 	},
 
 	render: function(res) {
-		/* 立即画出完整页面，然后非重叠轮询缓存做局部重绘 */
 		return controls.liveView(this, res, {
 			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
@@ -800,11 +940,12 @@ return view.extend({
 		res = res || {};
 
 		if (!res.section) {
-			return E('div', { 'class':'qmodem-generic-page mt-ui-page' }, [
+			return E('div', { 'class': 'qmodem-glass-page' }, [
 				this.styleNode(), controls.styleNode(),
-				E('div', { 'class':'alert-message warning qmodem-generic-alert' }, _('No modem detected (make sure QModem has recognised the device).')),
+				E('div', { 'class': 'qm-glass-card', 'style': 'color:#b91c1c;background:rgba(254,242,242,0.85)' },
+					_('No modem detected (make sure QModem has recognised the device).')),
 				(res.errors || []).map(function(msg) {
-					return E('div', { 'class':'alert-message warning qmodem-generic-alert' }, msg);
+					return E('div', { 'class': 'qm-glass-card', 'style': 'margin-top:10px;color:#b91c1c' }, msg);
 				})
 			]);
 		}
@@ -813,60 +954,85 @@ return view.extend({
 		var connected = data.connected === '1', reachable = data.reachable === '1';
 		var session = this.parseSession(res, connected);
 		var carrierInfo = this.carrierInfo(res);
-		/* 运营商：优先小区 MCC/MNC 映射，回退模组上报的运营商名称（ISP 等），
-		 * 两者皆无时 SIM 卡片显示 --，顶部横幅显示通用占位 */
+
 		if (/^(n\/a|none|null|--)$/i.test(data.operator_name || ''))
 			data.operator_name = '';
 		var opInfo = controls.operatorInfo(data.operator_name || null, data.mcc, data.mnc);
 		var operator = opInfo.name;
 		data.operator = (operator && operator !== _('Mobile Network')) ? operator : '';
 
-		return E('div', { 'class':'qmodem-generic-page mt-ui-page' }, [
+		return E('div', { 'class': 'qmodem-glass-page' }, [
 			this.styleNode(), controls.styleNode(),
+			/* 背景环境光晕 */
+			E('div', { 'class': 'qmodem-glass-bg-glow' }),
+			E('div', { 'class': 'qmodem-glass-bg-glow2' }),
+
 			(res.errors || []).map(function(msg) {
-				return E('div', { 'class':'alert-message warning qmodem-generic-alert' }, msg);
+				return E('div', { 'class': 'qm-glass-card', 'style': 'margin-bottom:12px;color:#b91c1c' }, msg);
 			}),
+
 			this.modems && this.modems.length > 1 ? controls.renderModemBar(this.modems, res.section, function(id) {
 				controls.setStoredSection(id);
 				window.location.reload();
 			}) : null,
-			E('section', { 'class':'qmodem-generic-hero' }, [
-				E('div', { 'class':'qmodem-generic-hero-copy' }, [
-					E('h2', { 'class':'qmodem-generic-title' }, [ data.model || _('Mobile Module') ]),
-					E('div', { 'class':'qmodem-generic-summary' }, !reachable
-						? _('The modem did not respond. Check the module connection.')
-						: connected ? _('Mobile network is connected and ready.')
-						: _('The module is online, but mobile data is not connected.')),
-					E('div', { 'class':'qmodem-generic-hero-meta' }, [
-						E('span', { 'class':'qmodem-generic-hero-op' }, [
+
+			/* 顶部 Hero 玻璃卡片 */
+			E('section', { 'class': 'qm-glass-card qm-hero' }, [
+				E('div', {}, [
+					E('h2', { 'class': 'qm-hero-title' }, data.model || _('移动模组')),
+					E('div', { 'class': 'qm-hero-sub' }, !reachable
+						? _('模组未响应，请检查模组连接。')
+						: connected ? _('移动网络已连接并正常运行。')
+						: _('模组在线，但移动数据会话已断开。')),
+					E('div', { 'class': 'qm-hero-meta' }, [
+						E('span', { 'class': 'qm-hero-op' }, [
 							opInfo.logo ? E('img', { 'src': opInfo.logo, 'alt': operator }) : null,
-							E('strong', {}, operator || '--')
+							operator || '--'
 						]),
-						E('span', {}, [ _('Network Mode'), E('strong', {}, data.sysmode_detail || '--') ]),
-						E('span', {}, [ _('Network interface'), E('strong', {}, data.network_interface || '--') ])
+						E('span', { 'class': 'qm-pill-tag' }, [ _('模式:'), E('strong', {}, data.sysmode_detail || '--') ]),
+						E('span', { 'class': 'qm-pill-tag' }, [ _('接口:'), E('strong', {}, data.network_interface || '--') ])
 					])
 				]),
-				E('div', { 'class':'qmodem-generic-hero-side' }, [
-					E('div', { 'class':'qmodem-generic-status' + (connected ? ' online' : '') }, [
-						E('span', { 'class':'qmodem-generic-dot' }),
-						connected ? _('Connected') : reachable ? _('Module online') : _('Unavailable')
+				E('div', { 'class': 'qm-hero-actions' }, [
+					E('div', { 'class': 'qm-status-badge' + (connected ? ' online' : '') }, [
+						E('span', { 'class': 'qm-pulse-circle' }),
+						connected ? _('已连接') : reachable ? _('在线') : _('不可用')
 					]),
-					E('button', { 'class':'btn qmodem-generic-refresh', 'click':function() { window.location.reload(); } }, _('Refresh'))
+					E('button', { 'class': 'qm-refresh-btn', 'click': function() { window.location.reload(); } }, _('刷新'))
 				])
 			]),
-			E('div', { 'class':'qmodem-generic-focus-grid' }, [ this.signalCard(data), this.carrierCard(carrierInfo, res.devStatus), this.addressCard(session) ]),
-			E('div', { 'class':'qmodem-generic-info-grid' }, [ this.moduleCard(data), this.simCard(data) ]),
-			this.trafficPanel(res.usage, data.network_interface, res.daily),
-		isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
-			E('div', { 'class':'qmodem-generic-shortcuts' }, [
-				this.shortcut(_('Mobile data'), _('APN, dialing, IP details and session counters'), 'admin/modem/qmodem-generic/connection'),
-				this.shortcut(_('Radio and Cells'), _('Bands, cells, radio policy and diagnostics'), 'admin/modem/qmodem-generic/network'),
-				this.shortcut(_('Module and SIM'), _('Module identity, SIM information and maintenance'), 'admin/modem/qmodem-generic/system')
+
+			/* 核心聚焦 3 栏网格 (信号 / 载波 / 会话IP) */
+			E('div', { 'class': 'qm-grid-3' }, [
+				this.signalCard(data),
+				this.carrierCard(carrierInfo, res.devStatus),
+				this.addressCard(session)
 			]),
-			E('div', { 'class':'qmodem-generic-info-all' }, [
-				E('h3', {}, _('Full module information')),
-				E('p', {}, _('All fields reported by QModem for this module, grouped by category.')),
-				E('div', { 'class':'mt-info-grid-all' }, controls.renderInfoGrouped(res.allInfo))
+
+			/* 模组与 SIM 硬件卡片 */
+			E('div', { 'class': 'qm-grid-2' }, [
+				this.moduleCard(data),
+				this.simCard(data)
+			]),
+
+			/* 流量监控面板与 SVG 图表 */
+			this.trafficPanel(res.usage, data.network_interface, res.daily),
+
+			/* 流量清零计划 */
+			isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
+
+			/* 快捷跳转 */
+			E('div', { 'class': 'qm-shortcuts' }, [
+				this.shortcut(_('移动数据'), _('APN、拨号、IP 详情与会话计数'), 'admin/modem/qmodem-generic/connection'),
+				this.shortcut(_('射频与小区'), _('频段、小区、射频策略与诊断'), 'admin/modem/qmodem-generic/network'),
+				this.shortcut(_('模组与 SIM'), _('模组身份、SIM 信息与维护'), 'admin/modem/qmodem-generic/system')
+			]),
+
+			/* 原始底层完整信息 */
+			E('div', { 'class': 'qm-glass-card' }, [
+				E('h3', { 'style': 'margin:0 0 6px;font-size:15px;font-weight:750;color:#0f172a' }, _('完整模组信息')),
+				E('p', { 'style': 'margin:0 0 16px;color:#64748b;font-size:11px' }, _('该模组由 QModem 上报的全部字段，按类别分组展示。')),
+				E('div', { 'class': 'mt-info-grid-all' }, controls.renderInfoGrouped(res.allInfo))
 			])
 		]);
 	},

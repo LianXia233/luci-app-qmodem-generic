@@ -7,20 +7,13 @@
 'require qmodem-generic.controls as controls';
 
 /*
- * 网络与小区（Radio & Cells）
- *
+ * 网络与小区（Radio & Cells）— 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 射频仪表重构
  * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 qmodem-generic.controls 封装）：
- *   get_mode / get_network_prefer / get_lockband / get_neighborcell /
- *   get_current_band / cell_info / get_disabled_features / get_at_cfg
+ *    get_mode / get_network_prefer / get_lockband / get_neighborcell /
+ *    get_current_band / cell_info / get_disabled_features / get_at_cfg
  * 控制动作：set_mode / set_network_prefer / set_lockband / send_at。
- * 旧的 AT 文本后端与所有 AT 输出正则解析已全部移除。
  */
 
-/* ------------------------------------------------------------------ */
-/* 防御式取值辅助                                                       */
-/* ------------------------------------------------------------------ */
-
-/* 出错时不抛异常，记入 errors 数组，返回 null，避免白屏 */
 function guard(promise, label, errors) {
 	return Promise.resolve(promise).catch(function(err) {
 		errors.push(label + '：' + ((err && err.message) || String(err)));
@@ -28,18 +21,18 @@ function guard(promise, label, errors) {
 	});
 }
 
-/* 把 QModem 的返回值统一成 [{key,value}] 形式 */
 function entriesOf(raw) {
 	if (Array.isArray(raw))
 		return raw;
 	if (raw && Array.isArray(raw.modem_info))
 		return raw.modem_info;
+	if (raw && Array.isArray(raw.connect_status))
+		return raw.connect_status;
 	if (raw && typeof raw === 'object')
 		return Object.keys(raw).map(function(k) { return { key: k, value: raw[k] }; });
 	return [];
 }
 
-/* 忽略大小写/空格/下划线的键查找，支持多个候选键名 */
 function ci(obj, names) {
 	if (!obj || typeof obj !== 'object')
 		return undefined;
@@ -54,7 +47,6 @@ function ci(obj, names) {
 	return undefined;
 }
 
-/* 从 cell_info 字典里按多个候选键名取第一个有值的字段 */
 function pick(map, names) {
 	var v = ci(map, names);
 	if (v === undefined || v === null)
@@ -64,7 +56,6 @@ function pick(map, names) {
 	return String(v).trim();
 }
 
-/* 取出 { <key>: {...} } 里的子对象，取不到时返回空对象 */
 function plainObject(raw, key) {
 	if (!raw || typeof raw !== 'object')
 		return {};
@@ -74,24 +65,20 @@ function plainObject(raw, key) {
 	return {};
 }
 
-/* 数值化，非数值返回 NaN */
 function num(value) {
 	if (value === undefined || value === null || value === '')
 		return NaN;
 	return parseFloat(String(value).replace(/[^0-9.\-]/g, ''));
 }
 
-/* 显示值：空/未知一律显示 -- */
 function shown(value) {
 	return (value === undefined || value === null || value === '') ? '--' : String(value);
 }
 
-/* 判断是否为 DOM 节点（部分 LuCI 运行时 instanceof HTMLElement 为 false） */
 function isNode(v) {
 	return v && typeof v === 'object' && (v instanceof HTMLElement || v.nodeType === 1);
 }
 
-/* getDisabledFeatures → 小写特性名数组 */
 function disabledSet(raw) {
 	var list = (raw && (ci(raw, [ 'disabled_features' ]) || raw)) || [];
 	if (!Array.isArray(list))
@@ -103,7 +90,6 @@ function isDisabled(list, name) {
 	return list.indexOf(String(name).toLowerCase()) !== -1;
 }
 
-/* send_at 返回值形态不固定，尽力取出文本 */
 function atText(raw) {
 	if (raw === undefined || raw === null)
 		return '';
@@ -122,13 +108,11 @@ function atText(raw) {
 	return String(raw);
 }
 
-/* 把 AT 返回文本切成可显示的行（去空行/单独的 OK） */
 function atLines(text) {
 	return String(text || '').split(/\r?\n/).map(function(l) { return l.trim(); })
 		.filter(function(l) { return l && l !== 'OK'; });
 }
 
-/* lockband 的 lock_band / available_band 元素统一成 {band_id, band_name} */
 function bandItem(item) {
 	if (item === undefined || item === null)
 		return null;
@@ -150,7 +134,6 @@ function bandItems(list) {
 	return list.map(bandItem).filter(Boolean);
 }
 
-/* 邻区数据结构不固定：数组 / {key:数组} / 单对象，统一展开成 [{group,data}] */
 function neighborList(raw) {
 	if (!raw || typeof raw !== 'object')
 		return [];
@@ -183,10 +166,6 @@ function neighborList(raw) {
 	return out;
 }
 
-/* ------------------------------------------------------------------ */
-/* 图形化信号辅助（保留原有观感）                                       */
-/* ------------------------------------------------------------------ */
-
 function signalColorClass(value, kind) {
 	var v = num(value);
 	if (isNaN(v)) return 'unknown';
@@ -215,7 +194,6 @@ function signalBar(value, kind, label) {
 	]);
 }
 
-/* SCS 原始值 → kHz 文案（QModem 也可能直接给 30kHz 这样的字符串） */
 function scsText(value) {
 	var raw = String(value || '').trim();
 	if (!raw) return '';
@@ -225,26 +203,22 @@ function scsText(value) {
 	return raw;
 }
 
-/* 频段类别中文名：QModem 各 vendor 脚本返回的类别键不统一
- * （UMTS/LTE/NR/NR_NSA/NRNSA/NRSA/GW/Lte…），全部映射为友好标签 */
 var BAND_CLASS_LABEL = {
 	GW: _('2G / 3G（GSM / WCDMA）'),
 	UMTS: _('3G UMTS'),
-	LTE: '4G LTE',
-	Lte: '4G LTE',
-	NR: '5G NR',
+	LTE: _('4G 长期演进（LTE）'),
+	Lte: _('4G 长期演进（LTE）'),
+	NR: _('5G 新空口（NR）'),
 	NR_NSA: _('5G NR（NSA 非独立组网）'),
 	NRNSA: _('5G NR（NSA 非独立组网）'),
 	NR_SA: _('5G NR（SA 独立组网）'),
 	NRSA: _('5G NR（SA 独立组网）')
 };
 
-/* 类别显示顺序：3G → 4G → 5G，其余未知类别按字母序排在最后 */
 var BAND_CLASS_ORDER = [ 'GW', 'UMTS', 'LTE', 'Lte', 'NR', 'NR_NSA', 'NRNSA', 'NR_SA', 'NRSA' ];
 
 function bandClassLabel(k) { return BAND_CLASS_LABEL[k] || k; }
 
-/* 频段号排序：数字频段按数值升序，非数字的排后面按字典序 */
 function bandSortKey(id) {
 	var n = parseInt(String(id).replace(/[^0-9].*$/, ''), 10);
 	return isNaN(n) ? null : n;
@@ -260,21 +234,22 @@ function sortBands(items) {
 	});
 }
 
-/* 拨号/网络模式中文名 */
 var MODE_LABEL = {
-	auto: _('自动'), ecm: 'ECM', ncm: 'NCM', rndis: 'RNDIS',
-	mbim: 'MBIM', qmi: 'QMI', gobinet: 'GobiNet', ppp: 'PPP'
+	auto: _('自动'), ecm: _('以太网控制模型（ECM）'), ncm: _('网络控制模型（NCM）'), rndis: _('远程网络驱动接口规范（RNDIS）'),
+	mbim: _('移动宽带接口模型（MBIM）'), qmi: _('高通调制解调器接口（QMI）'), gobinet: _('高通 Gobi 网络协议（GobiNet）'), ppp: _('点对点协议（PPP）')
 };
 
 function modeLabel(key) {
 	return MODE_LABEL[String(key).toLowerCase()] || String(key).toUpperCase();
 }
 
+function svgNode(xmlString) {
+	var wrap = document.createElement('div');
+	wrap.innerHTML = xmlString.trim();
+	return wrap.firstElementChild;
+}
+
 return view.extend({
-	/*
-	 * 本页要读的缓存域。锁频段 / 邻区 / 当前载波等都是 modem 查询，
-	 * 一律由后台 worker 采集，首屏只读 /tmp/qmodem-cache。
-	 */
 	DOMAINS: [ 'network', 'signal', 'device' ],
 	POLL_INTERVAL: 8000,
 
@@ -287,7 +262,6 @@ return view.extend({
 	},
 
 	collect: function(ctx) {
-		var self = this;
 		var errors = [];
 		var section = ctx.section;
 
@@ -295,77 +269,129 @@ return view.extend({
 			return { section: null, errors: errors };
 
 		return Promise.all([
-				guard(controls.getMode(section), '网络/拨号模式', errors),
-				guard(controls.getNetworkPrefer(section), '网络优选', errors),
-				guard(controls.getLockBand(section), '锁频段', errors),
-				guard(controls.getNeighborCell(section), '邻区信息', errors),
-				guard(controls.getCurrentBand(section), '当前频段', errors),
-				guard(controls.getCurrentBandCapabilities(section), '当前频段能力', errors),
-				guard(controls.getCellInfo(section), '小区信息', errors),
-				guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
-				guard(controls.getAtCfg(section), 'AT 端口配置', errors)
-			]).then(function(r) {
-				return {
-					section: section,
-					mode: r[0],
-					prefer: r[1],
-					lockband: r[2],
-					neighbor: r[3],
-					currentBand: r[4],
-					currentBandCapabilities: r[5],
-					cell: r[6],
-					disabled: r[7],
-					atCfg: r[8],
-					errors: errors
-				};
-			});
+			guard(controls.getMode(section), '网络/拨号模式', errors),
+			guard(controls.getNetworkPrefer(section), '网络优选', errors),
+			guard(controls.getLockBand(section), '锁频段', errors),
+			guard(controls.getNeighborCell(section), '邻区信息', errors),
+			guard(controls.getCurrentBand(section), '当前频段', errors),
+			guard(controls.getCurrentBandCapabilities(section), '当前频段能力', errors),
+			guard(controls.getCellInfo(section), '小区信息', errors),
+			guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
+			guard(controls.getAtCfg(section), 'AT 端口配置', errors)
+		]).then(function(r) {
+			return {
+				section: section,
+				mode: r[0],
+				prefer: r[1],
+				lockband: r[2],
+				neighbor: r[3],
+				currentBand: r[4],
+				currentBandCapabilities: r[5],
+				cell: r[6],
+				disabled: r[7],
+				atCfg: r[8],
+				errors: errors
+			};
+		});
 	},
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.mt-net{max-width:1120px;margin:0 auto;color:var(--text-color-high,#20242a)}',
-			'.mt-net-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:21px 23px;border:1px solid #cfe4fb;border-radius:15px;background:linear-gradient(135deg,#f4f9ff,#eefaf8);margin-bottom:16px}',
-			'.mt-net-kicker{font-size:12px;color:#2470a9;font-weight:700;margin-bottom:5px}',
-			'.mt-net-title{font-size:25px;font-weight:720;line-height:1.2;margin:0 0 6px;display:flex;align-items:center;gap:10px}',
-			'.mt-net-sub{font-size:13px;color:var(--text-color-medium,#68717d)}',
+			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
+			'.mt-net{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			/* 背景环境光晕 */
+			'.mt-net-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mt-net-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(14,165,233,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+
+			/* 白色毛玻璃卡片核心样式 */
+			'.mt-net-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
+			'.mt-net-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+
+			/* 顶部 Hero 玻璃卡片 */
+			'.mt-net-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
+			'.mt-net-kicker{font-size:12px;color:#0072f5;font-weight:750;letter-spacing:.03em;margin-bottom:4px}',
+			'.mt-net-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:flex;align-items:center;gap:10px}',
+			'.mt-net-sub{font-size:13px;color:#64748b;line-height:1.5}',
 			'.mt-op-logo{width:28px;height:28px;border-radius:6px;flex-shrink:0;object-fit:contain}',
-			'.mt-net-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:999px;background:#dcf6eb;color:#08775d;font-size:12px;font-weight:700;white-space:nowrap}',
-			'.mt-net-badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#17b883}',
-			'.mt-net-badge.off{background:#fff0e2;color:#99530a}.mt-net-badge.off:before{background:#e99737}',
-			'.mt-net-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 16px}',
-			'.mt-net-metric,.mt-net-panel{border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff);box-shadow:0 3px 12px rgba(20,32,50,.04)}',
-			'.mt-net-metric{padding:16px}.mt-net-label{font-size:12px;color:var(--text-color-medium,#707985);margin-bottom:6px}',
-			'.mt-net-value{font-size:23px;font-weight:720}.mt-net-unit{font-size:12px;color:#747c86;margin-left:5px}',
-			'.mt-net-metric-top{display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:9px}.mt-net-qual{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}.mt-net-qual.excellent{background:#dcf6eb;color:#08775d}.mt-net-qual.good{background:#e2f3e4;color:#2f7a3f}.mt-net-qual.fair{background:#fdf0d8;color:#9a6a12}.mt-net-qual.weak{background:#fce4e0;color:#b23b30}.mt-net-qual.unknown{background:var(--background-color-low,#eef1f4);color:#8a939d}',
-			'.mt-net-gauge{position:relative;height:7px;border-radius:999px;background:var(--border-color-low,#e3e8ee);overflow:hidden;margin-top:2px}.mt-net-gauge i{display:block;height:100%;min-width:3px;border-radius:inherit;background:#4b94df;transition:width .35s ease}.mt-net-gauge i.excellent{background:linear-gradient(90deg,#0fb783,#13a979)}.mt-net-gauge i.good{background:linear-gradient(90deg,#4bb985,#3fa66f)}.mt-net-gauge i.fair{background:linear-gradient(90deg,#f0b44f,#e4a23a)}.mt-net-gauge i.weak{background:linear-gradient(90deg,#e8756c,#db5b52)}.mt-net-gauge i.unknown{background:var(--border-color-low,#cfd6de)}.mt-net-gauge-scale{display:flex;justify-content:space-between;margin-top:4px;color:var(--text-color-medium,#9099a3);font-size:9px;opacity:.8}',
-			'.mt-net-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}',
-			'.mt-net-panel{padding:16px}.mt-net-panel h3{font-size:14px;margin:0 0 12px}',
-			'.mt-net-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--border-color-low,#edf0f4);font-size:13px}',
-			'.mt-net-row:last-child{border-bottom:0}.mt-net-row span:first-child{color:var(--text-color-medium,#707985)}.mt-net-row strong{text-align:right;word-break:break-word}',
+
+			/* 状态徽章 */
+			'.mt-net-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:750;white-space:nowrap;background:rgba(236,253,245,0.85);color:#065f46;border:1px solid rgba(167,243,208,0.8)}',
+			'.mt-net-badge:before{content:"";width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 0 4px rgba(16,185,129,0.2)}',
+			'.mt-net-badge.off{background:rgba(254,242,242,0.85);color:#991b1b;border-color:rgba(254,202,202,0.8)}',
+			'.mt-net-badge.off:before{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,0.2)}',
+
+			/* 4 列指标卡片 (带 SVG 动态微仪表) */
+			'.mt-net-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}',
+			'.mt-net-metric-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 14px}',
+			'.mt-net-metric-head{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:8px}',
+			'.mt-net-metric-label{font-size:11px;color:#64748b;font-weight:700}',
+			'.mt-net-qual{font-size:10px;font-weight:750;padding:2px 8px;border-radius:999px}',
+			'.mt-net-qual.excellent{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}',
+			'.mt-net-qual.good{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}',
+			'.mt-net-qual.fair{background:#fffbeb;color:#d97706;border:1px solid #fde68a}',
+			'.mt-net-qual.weak{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}',
+			'.mt-net-qual.unknown{background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0}',
+			'.mt-gauge-svg-box{position:relative;width:105px;height:62px;margin:2px 0 6px}',
+			'.mt-gauge-svg{width:100%;height:100%}',
+			'.mt-gauge-val{position:absolute;bottom:4px;left:0;right:0;font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-.02em}',
+
+			/* 2 列网络状态与服务小区卡片 */
+			'.mt-net-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}',
+			'.mt-card-title{font-size:15px;font-weight:750;color:#0f172a;display:flex;align-items:center;gap:8px;margin-bottom:14px}',
+			'.mt-net-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(226,232,240,0.6);font-size:12px}',
+			'.mt-net-row:last-child{border-bottom:0}',
+			'.mt-net-row span:first-child{color:#64748b;font-weight:500}',
+			'.mt-net-row strong{color:#0f172a;font-weight:600;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
 			'.mt-net-row-block{display:block}.mt-net-row-block>span:first-child{display:block;margin-bottom:8px}.mt-net-row-block strong{display:block;text-align:left}',
-			'.mt-locksum{display:flex;flex-direction:column;gap:7px}.mt-locksum-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mt-locksum-label{flex:0 0 auto;font-size:11px;font-weight:700;color:#4a7db3;background:#eaf2fb;border-radius:6px;padding:2px 8px;white-space:nowrap}.mt-locksum-chips{display:flex;flex-wrap:wrap;gap:4px}.mt-locksum-chip{display:inline-flex;align-items:center;justify-content:center;min-width:26px;padding:2px 7px;border-radius:6px;background:#e9f2fc;border:1px solid #c9ddf2;color:#1c62a8;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}.mt-locksum-chip.off{background:var(--background-color-low,#eef1f4);border-color:var(--border-color-low,#dfe4ea);color:#8a939d}.mt-locksum-avail{font-size:10.5px;color:#8a939d;white-space:nowrap}',
-			'.mt-net-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.mt-net-actions .btn{border-radius:9px;padding:7px 14px}',
-			'.mt-scan-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:12px}.mt-scan-panel{padding:16px}.mt-scan-panel h4{font-size:14px;margin:0 0 12px;color:var(--text-color-high,#20242a)}.mt-scan-table{width:100%;border-collapse:collapse;font-size:12.5px}.mt-scan-table th,.mt-scan-table td{padding:6px 10px;border-bottom:1px solid var(--border-color-low,#edf0f4);text-align:left}.mt-scan-table th{color:var(--text-color-medium,#707985);font-weight:600;background:var(--background-color-low,#f8fafb)}.mt-scan-table td{text-align:right;font-weight:600}.mt-scan-table td:first-child{text-align:left;font-weight:400}.mt-scan-note{color:var(--text-color-medium,#707985);font-size:12px;padding:8px 0}.mt-scan-raw{margin-top:8px}',
-			'.mt-net-details{margin-top:14px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:12px;overflow:hidden}',
-			'.mt-net-details summary{cursor:pointer;padding:13px 15px;font-size:13px;font-weight:650}.mt-net-raw{margin:0;padding:14px;background:#17202a;color:#dce6ef;white-space:pre-wrap;word-break:break-word;font:12px/1.55 monospace;max-height:420px;overflow:auto}',
-			'.mt-freq-head{margin-top:20px;padding:19px 20px;border-radius:13px;background:linear-gradient(135deg,#f4f7fb,#f1f8f6);border:1px solid #dce7ee}.mt-freq-head h3{font-size:18px;margin:0 0 6px}.mt-freq-head p{margin:0;color:var(--text-color-medium,#68717d);font-size:12px}',
-			'.mt-freq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.mt-freq-card{padding:17px;border:1px solid var(--border-color-medium,#d9dde4);border-radius:13px;background:var(--background-color-high,#fff)}.mt-freq-card h4{margin:0 0 12px;font-size:14px}.mt-freq-field{margin:11px 0}.mt-freq-field label{display:block;font-size:12px;color:var(--text-color-medium,#6d7680);margin-bottom:5px}.mt-freq-field input,.mt-freq-field select{width:100%;box-sizing:border-box}.mt-freq-help{font-size:11px;color:var(--text-color-medium,#7b838c);margin-top:5px}.mt-freq-actions{display:flex;justify-content:flex-end;margin-top:14px}',
-			'.mt-band-card{padding:18px}.mt-band-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.mt-band-head h3{margin:0 0 4px;font-size:15px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.mt-band-total{font-size:11px;font-weight:600;color:#4a7db3;background:#eaf2fb;border-radius:999px;padding:1px 9px}.mt-band-head p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-locked-list{color:#08775d;font-weight:600}.mt-band-tools{display:flex;align-items:center;gap:7px;flex:0 0 auto}.mt-band-tools .btn{padding:5px 12px;font-size:12px}.mt-band-count{font-size:11px;color:#6d7680;font-variant-numeric:tabular-nums;white-space:nowrap}',
-			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:6px 4px 5px;border:1px solid var(--border-color-low,#e8ecf0);border-radius:9px;background:var(--background-color-low,#f8fafb);cursor:pointer;font-size:13.5px;font-weight:650;font-variant-numeric:tabular-nums;text-align:center;transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease;-webkit-user-select:none;user-select:none}.mt-band-option:hover{border-color:#9cc5ee;background:#f1f7fd}.mt-band-option.checked{border-color:#4b94df;background:#e9f2fc;box-shadow:inset 0 0 0 1px #4b94df;color:#1c62a8}.mt-band-option input{position:absolute;width:0;height:0;margin:0;opacity:0;pointer-events:none}.mt-band-option .mt-band-name{display:none}.mt-band-option input:focus-visible+.mt-band-name,.mt-band-option:focus-within{outline:2px solid #9cc5ee;outline-offset:1px}.mt-band-apply{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:18px;padding:15px 18px}.mt-band-apply p{margin:0;color:var(--text-color-medium,#6d7680);font-size:11px;line-height:1.5}.mt-band-apply .btn{flex:0 0 auto}',
-			'.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
-			// 图形化信号条
-			'.mt-sbar{display:flex;align-items:center;gap:8px;margin:4px 0}.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:var(--text-color-medium,#707985)}.mt-sbar-track{flex:1;height:16px;border-radius:8px;background:#eef1f5;overflow:hidden;min-width:60px}.mt-sbar-fill{height:100%;border-radius:8px;transition:width .35s ease}.mt-sbar-value{flex:0 0 auto;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:72px;text-align:right}',
-			'.mt-sbar.excellent .mt-sbar-fill{background:linear-gradient(90deg,#22c55e,#16a34a)}.mt-sbar.good .mt-sbar-fill{background:linear-gradient(90deg,#3b82f6,#2563eb)}.mt-sbar.fair .mt-sbar-fill{background:linear-gradient(90deg,#f59e0b,#d97706)}.mt-sbar.weak .mt-sbar-fill{background:linear-gradient(90deg,#ef4444,#dc2626)}',
-			'.mt-sbar.excellent .mt-sbar-value{color:#15803d}.mt-sbar.good .mt-sbar-value{color:#1d4ed8}.mt-sbar.fair .mt-sbar-value{color:#b45309}.mt-sbar.weak .mt-sbar-value{color:#b91c1c}',
-			// 载波 / 邻区卡片网格
-			'.mt-lock-cell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-top:10px}.mt-lock-cell-card{padding:14px;border-radius:12px;border:1px solid var(--border-color-medium,#d9dde4);background:var(--background-color-high,#fff);transition:border-color .2s ease,box-shadow .2s ease}.mt-lock-cell-card:hover{border-color:#9cc5ee;box-shadow:0 3px 12px rgba(20,32,50,.06)}',
-			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.mt-lock-cell-band{font-size:12px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-lock-cell-btns{display:flex;gap:6px}.mt-lock-btn{flex:0 0 auto;padding:4px 12px;font-size:11px;border-radius:8px;background:#eef2f6;color:#176bc1;font-weight:700;border:1px solid #c9daf0;cursor:pointer;white-space:nowrap}.mt-lock-btn:hover{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}',
-			'.mt-lock-cell-pci{margin-top:6px;font-size:10px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
-			'.mt-cell-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#eef2f6;color:#4a5561;font-size:10px;font-weight:700;text-transform:uppercase}.mt-cell-role.pcc{background:#dcf6eb;color:#08775d}',
-			// 服务小区强调块
-			'.mt-ssb-serving{padding:16px;border-radius:12px;background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border-color-low,#e8ecf0);margin-bottom:12px}.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mt-ssb-serving-title{font-size:13px;font-weight:700;color:var(--text-color-high,#20242a)}.mt-ssb-serving-meta{font-size:11px;color:var(--text-color-medium,#707985);font-variant-numeric:tabular-nums}',
-			'@media(max-width:720px){.mt-net-hero{display:block}.mt-net-badge{margin-top:13px}.mt-net-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.mt-net-grid,.mt-freq-grid{grid-template-columns:1fr}.mt-band-options{grid-template-columns:repeat(auto-fill,minmax(56px,1fr))}.mt-band-apply{display:block}.mt-band-apply .btn{width:100%;margin-top:12px}}',
-			'@media(max-width:430px){.mt-band-head{display:block}.mt-band-tools{margin-top:10px}.mt-band-options{grid-template-columns:repeat(auto-fill,minmax(52px,1fr))}}'
+
+			/* 频段锁定摘要芯片 */
+			'.mt-locksum{display:flex;flex-direction:column;gap:7px}',
+			'.mt-locksum-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+			'.mt-locksum-label{font-size:10.5px;font-weight:700;color:#0072f5;background:rgba(239,246,255,0.9);border-radius:6px;padding:2px 8px}',
+			'.mt-locksum-chips{display:flex;flex-wrap:wrap;gap:4px}',
+			'.mt-locksum-chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:6px;background:rgba(241,245,249,0.8);border:1px solid rgba(226,232,240,0.8);color:#0072f5;font-size:11px;font-weight:700}',
+			'.mt-locksum-chip.off{background:#f8fafc;color:#94a3b8;border-color:#e2e8f0}',
+
+			/* 载波聚合动态流向面板 */
+			'.mt-ssb-serving{padding:14px 18px;border-radius:14px;background:rgba(248,250,252,0.85);border:1px solid rgba(226,232,240,0.8);margin-bottom:14px}',
+			'.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center}',
+			'.mt-ssb-serving-title{font-size:14px;font-weight:750;color:#0f172a}',
+			'.mt-ssb-serving-meta{font-size:11px;color:#64748b}',
+			'.mt-lock-cell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin-top:12px}',
+			'.mt-lock-cell-card{padding:16px;border-radius:14px;border:1px solid rgba(226,232,240,0.8);background:rgba(248,250,252,0.75);transition:all .2s ease}',
+			'.mt-lock-cell-card:hover{border-color:rgba(0,114,245,0.4);background:#fff;transform:translateY(-2px)}',
+			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}',
+			'.mt-lock-cell-band{font-size:13px;font-weight:750;color:#0f172a}',
+			'.mt-cell-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:750;text-transform:uppercase}',
+			'.mt-cell-role.pcc{background:#0072f5;color:#fff}',
+
+			/* 信号条组件 */
+			'.mt-sbar{display:flex;align-items:center;gap:8px;margin:6px 0}',
+			'.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:#64748b}',
+			'.mt-sbar-track{flex:1;height:6px;border-radius:999px;background:#e2e8f0;overflow:hidden;min-width:60px}',
+			'.mt-sbar-fill{height:100%;border-radius:inherit;transition:width .4s ease}',
+			'.mt-sbar-value{flex:0 0 auto;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:72px;text-align:right}',
+			'.mt-sbar.excellent .mt-sbar-fill{background:#10b981}.mt-sbar.excellent .mt-sbar-value{color:#059669}',
+			'.mt-sbar.good .mt-sbar-fill{background:#0072f5}.mt-sbar.good .mt-sbar-value{color:#2563eb}',
+			'.mt-sbar.fair .mt-sbar-fill{background:#f59e0b}.mt-sbar.fair .mt-sbar-value{color:#d97706}',
+			'.mt-sbar.weak .mt-sbar-fill{background:#ef4444}.mt-sbar.weak .mt-sbar-value{color:#dc2626}',
+
+			/* 无线策略网格 */
+			'.mt-control-section{margin-top:16px}',
+			'.mt-control-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}',
+			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin:10px 0}',
+			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid rgba(226,232,240,0.8);border-radius:10px;background:rgba(248,250,252,0.8);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
+			'.mt-band-option:hover{border-color:rgba(0,114,245,0.4);background:#fff}',
+			'.mt-band-option.checked{border-color:#0072f5;background:#eff6ff;color:#0072f5;box-shadow:inset 0 0 0 1px #0072f5}',
+			'.mt-band-option input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}',
+
+			/* 频率扫描终端卡片 */
+			'.mt-scan-panel{margin-top:12px;padding:16px;border-radius:14px;background:#0f172a;color:#38bdf8;box-shadow:inset 0 2px 6px rgba(0,0,0,0.5)}',
+			'.mt-scan-raw{margin:0;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}',
+
+			/* 响应式 */
+			'@media(max-width:980px){.mt-net-metrics{grid-template-columns:repeat(2,1fr)}.mt-net-grid,.mt-control-grid{grid-template-columns:1fr}}',
+			'@media(max-width:680px){.mt-net-hero{flex-direction:column;align-items:flex-start}.mt-net-metrics{grid-template-columns:1fr}}'
 		].join(''));
 	},
 
@@ -374,40 +400,59 @@ return view.extend({
 		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
 	},
 
-	metric: function(label, value, unit) {
-		return E('div', { 'class': 'mt-net-metric mt-ui-card' }, [
-			E('div', { 'class': 'mt-net-label' }, label),
-			E('span', { 'class': 'mt-net-value' }, shown(value)),
-			value ? E('span', { 'class': 'mt-net-unit' }, unit) : null
-		]);
-	},
-
-	metricGauge: function(label, kind, rawValue, unit, scaleLow, scaleHigh) {
+	/* 动态 SVG 射频仪表 (RSRP / RSRQ / SINR) */
+	metricGauge: function(label, kind, rawValue, unit) {
 		var n = num(rawValue), has = !isNaN(n), pct = 0, cls = 'unknown', ql = '';
 		var tags = { excellent: _('优秀'), good: _('良好'), fair: _('一般'), weak: _('较弱') };
+		var strokeColor = '#94a3b8';
 		if (has) {
 			if (kind === 'rsrp') { pct = (n + 120) * 2.5; cls = n >= -80 ? 'excellent' : n >= -90 ? 'good' : n >= -100 ? 'fair' : 'weak'; }
 			else if (kind === 'rsrq') { pct = (n + 25) * 4; cls = n >= -10 ? 'excellent' : n >= -15 ? 'good' : n >= -20 ? 'fair' : 'weak'; }
 			else if (kind === 'sinr') { pct = (n + 10) * 2.5; cls = n >= 20 ? 'excellent' : n >= 13 ? 'good' : n >= 0 ? 'fair' : 'weak'; }
 			else { pct = (n - 20) / 60 * 100; cls = n < 45 ? 'excellent' : n < 55 ? 'good' : n < 65 ? 'fair' : 'weak'; }
-			pct = Math.max(4, Math.min(100, pct));
+			pct = Math.max(5, Math.min(100, pct));
 			ql = tags[cls] || '';
+			strokeColor = cls === 'excellent' ? '#10b981' : cls === 'good' ? '#0072f5' : cls === 'fair' ? '#f59e0b' : '#ef4444';
 		}
-		return E('div', { 'class': 'mt-net-metric mt-ui-card' }, [
-			E('div', { 'class': 'mt-net-metric-top' }, [
-				E('span', { 'class': 'mt-net-label', 'style': 'margin:0' }, label),
+
+		var radius = 38;
+		var totalLen = Math.PI * radius; // 约 119.4
+		var activeLen = (pct / 100) * totalLen;
+
+		var svgStr = [
+			'<svg class="mt-gauge-svg" viewBox="0 0 100 58">',
+			'  <path d="M 12 50 A 38 38 0 0 1 88 50" fill="none" stroke="rgba(226,232,240,0.8)" stroke-width="8" stroke-linecap="round"/>',
+			'  <path d="M 12 50 A 38 38 0 0 1 88 50" fill="none" stroke="' + strokeColor + '" stroke-width="8" stroke-linecap="round"',
+			'        stroke-dasharray="' + activeLen.toFixed(1) + ' 120" style="transition: stroke-dasharray .5s cubic-bezier(.2,.8,.4,1);"/>',
+			'</svg>'
+		].join('');
+
+		return E('div', { 'class': 'mt-net-card mt-net-metric-card' }, [
+			E('div', { 'class': 'mt-net-metric-head' }, [
+				E('span', { 'class': 'mt-net-metric-label' }, label),
 				E('span', { 'class': 'mt-net-qual ' + cls }, ql || _('无数据'))
 			]),
-			E('div', {}, [
-				E('span', { 'class': 'mt-net-value' }, has ? String(rawValue) : '--'),
-				has ? E('span', { 'class': 'mt-net-unit' }, unit) : null
+			E('div', { 'class': 'mt-gauge-svg-box' }, [
+				svgNode(svgStr),
+				E('div', { 'class': 'mt-gauge-val' }, has ? String(rawValue) : '--')
 			]),
-			E('div', { 'class': 'mt-net-gauge' }, [ E('i', { 'class': cls, 'style': 'width:' + (has ? pct : 0) + '%' }) ]),
-			E('div', { 'class': 'mt-net-gauge-scale' }, [ E('span', {}, scaleLow || ''), E('span', {}, scaleHigh || '') ])
+			E('span', { 'style': 'font-size:10px;color:#64748b' }, unit || '')
 		]);
 	},
 
-	/* ---------------- 网络模式（ECM / NCM） ---------------- */
+	metricBand: function(label, band) {
+		return E('div', { 'class': 'mt-net-card mt-net-metric-card' }, [
+			E('div', { 'class': 'mt-net-metric-head' }, [
+				E('span', { 'class': 'mt-net-metric-label' }, label),
+				E('span', { 'class': 'mt-net-qual good' }, _('当前活跃'))
+			]),
+			E('div', { 'style': 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:62px;margin:2px 0 6px' }, [
+				E('div', { 'style': 'font-size:22px;font-weight:800;color:#0072f5;letter-spacing:-.02em' }, shown(band)),
+				E('span', { 'style': 'font-size:10px;color:#64748b' }, _('驻网频段'))
+			]),
+			E('span', { 'style': 'font-size:10px;color:#64748b' }, _('RF 射频通道'))
+		]);
+	},
 
 	modeCard: function(section, modeRaw) {
 		var mode = plainObject(modeRaw, 'mode');
@@ -416,7 +461,6 @@ return view.extend({
 		keys.forEach(function(k) {
 			if (String(mode[k]) === '1') active = k;
 		});
-		/* QModem 按模组实际返回的能力提供可用的拨号模式，ECM / NCM 为常见兜底项 */
 		[ 'ecm', 'ncm' ].forEach(function(k) {
 			if (keys.indexOf(k) === -1) keys.push(k);
 		});
@@ -438,13 +482,10 @@ return view.extend({
 		return controls.card(_('网络模式'),
 			_('模组对外呈现的拨号模式（由 QModem get_mode / set_mode 提供）。'), [
 				controls.state(_('当前模式'), active ? modeLabel(active) : '--'),
-				E('div', { 'class': 'mt-control-state mt-control-state-current' }, [ E('span', {}, _('当前制式')), E('strong', {}, active ? modeLabel(active) : '--') ]),
-				keys.length ? E('div', { 'class': 'mt-net-actions' }, buttons)
+				keys.length ? E('div', { 'style': 'display:flex;gap:8px;flex-wrap:wrap;margin-top:12px' }, buttons)
 					: E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 未上报可用的网络模式。'))
 			]);
 	},
-
-	/* ---------------- 网络优选（3G / 4G / 5G） ---------------- */
 
 	preferCard: function(section, preferRaw) {
 		var prefer = plainObject(preferRaw, 'network_prefer');
@@ -462,16 +503,20 @@ return view.extend({
 				'checked': String(prefer[k]) === '1' ? 'checked' : null
 			});
 			boxes[k] = box;
-			return E('label', { 'class': 'mt-band-option' }, [ box, E('span', {}, k) ]);
+			var lbl = E('label', { 'class': 'mt-band-option' + (String(prefer[k]) === '1' ? ' checked' : '') }, [ box, E('span', {}, k) ]);
+			box.addEventListener('change', function() {
+				lbl.classList[box.checked ? 'add' : 'remove']('checked');
+			});
+			return lbl;
 		});
 
 		return controls.card(_('网络优选'),
-			_('选择模组允许驻网的制式。至少保留一项，取消全部选择会导致无法注册网络。'), [
+			_('选择模组允许驻网的制式。至少保留一项。'), [
 				E('div', { 'class': 'mt-control-state mt-control-state-current' },
 					[ E('span', {}, _('当前优选')), E('strong', {},
 						keys.filter(function(k) { return String(prefer[k]) === '1'; }).join(' / ') || '--') ]),
 				E('div', { 'class': 'mt-band-options' }, options),
-				E('div', { 'class': 'mt-band-actions' }, E('button', {
+				E('div', { 'style': 'display:flex;justify-content:flex-end;margin-top:12px' }, E('button', {
 					'type': 'button', 'class': 'btn cbi-button-apply',
 					'click': function() {
 						var checked = keys.filter(function(k) { return boxes[k] && boxes[k].checked; });
@@ -485,8 +530,6 @@ return view.extend({
 			]);
 	},
 
-	/* ---------------- 锁频段 ---------------- */
-
 	lockBandPanel: function(section, bandClass, data) {
 		var available = sortBands(bandItems(ci(data, [ 'available_band', 'availableband', 'bands' ])));
 		var locked = bandItems(ci(data, [ 'lock_band', 'lockband', 'locked_band' ]));
@@ -496,11 +539,9 @@ return view.extend({
 		if (!available.length) {
 			available = sortBands(locked.slice());
 			if (!available.length)
-				return E('section', { 'class': 'mt-band-card mt-ui-card' }, [
-					E('div', { 'class': 'mt-band-head' }, E('div', {}, [
-						E('h3', {}, bandClassLabel(bandClass)),
-						E('p', {}, _('本模组经 QModem 未上报该类别的可用频段。'))
-					]))
+				return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:12px' }, [
+					E('h3', { 'style': 'font-size:14px;font-weight:750;margin:0 0 6px' }, bandClassLabel(bandClass)),
+					E('p', { 'style': 'font-size:11px;color:#94a3b8;margin:0' }, _('本模组经 QModem 未上报该类别的可用频段。'))
 				]);
 		}
 
@@ -519,10 +560,10 @@ return view.extend({
 			});
 			boxes.push(box);
 			return E('label', { 'class': 'mt-band-option' + (lockedIds[item.id] ? ' checked' : '') },
-				[ box, E('span', {}, item.id), E('span', { 'class': 'mt-band-name' }, item.name) ]);
+				[ box, E('span', {}, item.id) ]);
 		});
 
-		var summaryNode = E('span', { 'class': 'mt-band-count' }, '');
+		var summaryNode = E('span', { 'style': 'font-size:11px;color:#64748b' }, '');
 		function refresh() {
 			var n = boxes.filter(function(b) { return b.checked; }).length;
 			summaryNode.textContent = _('已选 %d / %d').format(n, available.length);
@@ -541,28 +582,26 @@ return view.extend({
 				var csv = currentCsv();
 				controls.confirmModal(_('应用频段锁定'),
 					csv ? _('将 %s 锁定到频段 %s？移动数据会短暂中断。').format(bandClassLabel(bandClass), csv)
-						: _('解除 %s 的频段锁定？').format(bandClassLabel(bandClass)),
+						: _('解除 %s 的频段锁定？').format(bandClassLabel(bandClass),
 					function() {
 						return controls.setLockBand(section, { band_class: bandClass, lock_band: csv });
-					}, true);
+					}, true));
 			}
 		}, _('应用锁定'));
 
-		return E('section', { 'class': 'mt-band-card mt-ui-card' }, [
-			E('div', { 'class': 'mt-band-head' }, [
+		return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:14px' }, [
+			E('div', { 'style': 'display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px' }, [
 				E('div', {}, [
-					E('h3', {}, [
+					E('h3', { 'style': 'font-size:15px;font-weight:750;margin:0 0 4px;color:#0f172a' }, [
 						bandClassLabel(bandClass),
-						E('span', { 'class': 'mt-band-total' },
+						E('span', { 'style': 'margin-left:8px;font-size:11px;color:#0072f5;font-weight:600' },
 							_('共 %d 个频段').format(available.length))
 					]),
-					E('p', {}, locked.length
-						? _('当前锁定 %d 个：').format(locked.length) +
-						  E('span', { 'class': 'mt-band-locked-list' },
-							locked.map(function(b) { return b.name; }).join('、')).textContent
+					E('p', { 'style': 'margin:0;color:#64748b;font-size:11px' }, locked.length
+						? _('当前锁定 %d 个：').format(locked.length) + locked.map(function(b) { return b.name; }).join('、')
 						: _('未锁定，模组可自由驻网到该类别全部可用频段。'))
 				]),
-				E('div', { 'class': 'mt-band-tools' }, [
+				E('div', { 'style': 'display:flex;align-items:center;gap:8px' }, [
 					summaryNode,
 					E('button', {
 						'type': 'button', 'class': 'btn',
@@ -575,7 +614,7 @@ return view.extend({
 				])
 			]),
 			E('div', { 'class': 'mt-band-options' }, options),
-			E('div', { 'class': 'mt-band-actions' }, [
+			E('div', { 'style': 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn',
 					'click': function() { boxes.forEach(function(b) { b.checked = false; }); refresh(); }
@@ -586,18 +625,16 @@ return view.extend({
 	},
 
 	lockBandSection: function(section, lockRaw, disabled) {
-		var head = E('div', { 'class': 'mt-control-section-head' }, [
-			E('h3', {}, _('频段锁定')),
-			E('p', {}, _('限制模组可使用的频段。日常使用建议保持不锁定，锁定后在异地可能无法注册网络。'))
+		var head = E('div', { 'style': 'margin-bottom:14px' }, [
+			E('h3', { 'style': 'font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px' }, _('频段锁定')),
+			E('p', { 'style': 'font-size:12px;color:#64748b;margin:0' }, _('限制模组可使用的频段。日常使用建议保持不锁定。'))
 		]);
 
 		var note = isDisabled(disabled, 'lockband')
-			? E('div', { 'class': 'mt-control-note' }, _('固件报告频段锁定已禁用，但底层 set_lockband 方法仍可调用。尝试提交频段配置可能生效。'))
+			? E('div', { 'class': 'mt-control-note' }, _('固件报告频段锁定已禁用，但底层 set_lockband 方法仍可调用。'))
 			: null;
 
 		var lockband = plainObject(lockRaw, 'lockband');
-		/* QModem 各 vendor 的类别键不统一（GW/UMTS/LTE/Lte/NR/NR_NSA/NRNSA/NRSA…），
-		 * 全部接受：先按 BAND_CLASS_ORDER 排序，未知类别按字母序追加在最后 */
 		var classes = Object.keys(lockband).filter(function(k) {
 			return lockband[k] && typeof lockband[k] === 'object';
 		});
@@ -609,23 +646,19 @@ return view.extend({
 			return String(a).localeCompare(String(b));
 		});
 
+		var children = [ head ];
+		if (note) children.push(note);
 		if (!classes.length) {
-			var children = [head];
-			if (note) children.push(note);
-			children.push(E('div', { 'class': 'mt-control-note', 'style': 'background:#eef2f6;color:#58606a' }, _('本模组经 QModem 暂无可用的锁频段数据（get_lockband 返回为空）。')));
-			return E('section', { 'class': 'mt-control-section' }, children);
+			children.push(E('div', { 'style': 'padding:20px;text-align:center;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无可用的锁频段数据。')));
+		} else {
+			var self = this;
+			children = children.concat(classes.map(function(k) {
+				return self.lockBandPanel(section, k, lockband[k]);
+			}));
 		}
 
-		var self = this;
-		var children = [head];
-		if (note) children.push(note);
-		children.push(E('div', { 'class': 'mt-freq-grid', 'style': 'margin-top:0' }, classes.map(function(k) {
-			return self.lockBandPanel(section, k, lockband[k]);
-		})));
 		return E('section', { 'class': 'mt-control-section' }, children);
 	},
-
-	/* ---------------- 当前频段 / 载波聚合 ---------------- */
 
 	currentBandSection: function(currentRaw) {
 		var current = plainObject(currentRaw, 'current_band');
@@ -646,7 +679,7 @@ return view.extend({
 				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('制式')), E('strong', {}, shown(rat)) ]),
 				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('频段')), E('strong', {}, shown(band)) ]),
 				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, channelType || _('频点')), E('strong', {}, shown(channel)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, 'PCI'), E('strong', {}, shown(pci)) ]),
+				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('物理小区标识（PCI）')), E('strong', {}, shown(pci)) ]),
 				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('下行带宽')), E('strong', {}, shown(dl)) ]),
 				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('上行带宽')), E('strong', {}, shown(ul)) ])
 			];
@@ -660,8 +693,11 @@ return view.extend({
 			].concat(rows));
 		});
 
-		return E('section', { 'class': 'mt-net-panel mt-ui-card', 'style': 'margin-top:12px' }, [
-			E('h3', {}, _('当前频段与载波聚合（%d 个载波）').format(cells.length)),
+		return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' }, [
+			E('div', { 'class': 'mt-card-title' }, [
+				svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49"/></svg>'),
+				_('当前频段与载波聚合（%d 个载波）').format(cells.length)
+			]),
 			E('div', { 'class': 'mt-ssb-serving' }, [
 				E('div', { 'class': 'mt-ssb-serving-head' }, [
 					E('span', { 'class': 'mt-ssb-serving-title' }, shown(pick(current, [ 'network_mode' ]))),
@@ -674,19 +710,11 @@ return view.extend({
 				])
 			]),
 			cells.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
-				: E('div', { 'class': 'mt-scan-note' }, _('本模组经 QModem 暂无载波聚合数据。'))
+				: E('div', { 'style': 'padding:14px 0;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无载波聚合数据。'))
 		]);
 	},
 
-	/* ---------------- 邻区 ---------------- */
-
 	neighborSection: function(neighborRaw, disabled) {
-		var head = E('h3', {}, _('邻区信息'));
-
-		var note = (isDisabled(disabled, 'neighborcell') || isDisabled(disabled, 'neighbourcell'))
-			? E('div', { 'class': 'mt-control-note', 'style': 'margin-bottom:12px' }, _('固件报告邻区查询已禁用，但底层 set_neighborcell/get_neighborcell 方法仍可调用。'))
-			: null;
-
 		var list = neighborList(neighborRaw);
 		var cards = list.map(function(item, index) {
 			var d = item.data;
@@ -712,26 +740,25 @@ return view.extend({
 					rat ? E('span', { 'class': 'mt-cell-role' }, rat) : null
 				])
 			];
-			if (rsrp !== '') children.push(signalBar(rsrp, 'rsrp', 'RSRP'));
-			if (rsrq !== '') children.push(signalBar(rsrq, 'rsrq', 'RSRQ'));
-			if (sinr !== '') children.push(signalBar(sinr, 'sinr', 'SINR'));
-			if (pci) children.push(E('div', { 'class': 'mt-lock-cell-pci' }, 'PCI: ' + pci));
+			if (rsrp !== '') children.push(signalBar(rsrp, 'rsrp', _('参考信号接收功率（RSRP）')));
+			if (rsrq !== '') children.push(signalBar(rsrq, 'rsrq', _('参考信号接收质量（RSRQ）')));
+			if (sinr !== '') children.push(signalBar(sinr, 'sinr', _('信号与干扰加噪声比（SINR）')));
+			if (pci) children.push(E('div', { 'style': 'margin-top:6px;font-size:11px;color:#64748b' }, _('物理小区标识（PCI）: ') + pci));
 			return E('div', { 'class': 'mt-lock-cell-card' }, children.concat(extra));
 		});
 
-		return E('section', { 'class': 'mt-net-panel mt-ui-card', 'style': 'margin-top:12px' }, [
-			head,
-			note,
-			E('div', {}, _('邻区信息（%d）').format(list.length)),
+		return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' }, [
+			E('div', { 'class': 'mt-card-title' }, [
+				svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'),
+				_('邻区信息（%d）').format(list.length)
+			]),
 			cards.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
-				: E('div', { 'class': 'mt-scan-note' }, _('本模组经 QModem 暂无邻区数据。'))
-		].filter(Boolean));
+				: E('div', { 'style': 'padding:14px 0;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无邻区数据。'))
+		]);
 	},
 
-	/* ---------------- 频率扫描（AT^CELLSCAN） ---------------- */
-
 	scanSection: function(section, atPort) {
-		var host = E('div', { 'class': 'mt-scan-results' });
+		var host = E('div', { 'style': 'margin-top:12px' });
 		var self = this;
 		var button = E('button', { 'type': 'button', 'class': 'btn cbi-button-action' }, _('开始扫描'));
 
@@ -759,8 +786,8 @@ return view.extend({
 		});
 
 		return controls.card(_('频率扫描'),
-			_('经 QModem 下发 AT^CELLSCAN 并原样展示模组返回的文本。模组已驻网时可能返回错误。'), [
-				E('div', { 'class': 'mt-net-actions' }, button),
+			_('经 QModem 下发 AT^CELLSCAN 扫描无线频段。'), [
+				E('div', { 'style': 'display:flex;justify-content:flex-end;margin-top:10px' }, button),
 				host
 			], true);
 	},
@@ -768,20 +795,12 @@ return view.extend({
 	scanResult: function(text) {
 		var lines = atLines(text);
 		if (!lines.length)
-			return E('div', { 'class': 'mt-scan-note' }, _('模组未返回扫描数据。'));
-		if (lines.some(function(l) { return l.indexOf('ERROR') !== -1; }))
-			return E('section', { 'class': 'mt-scan-panel mt-ui-card' }, [
-				E('h4', {}, _('频率扫描')),
-				E('div', { 'class': 'mt-scan-note' }, _('模组拒绝了本次扫描（通常因为已驻留在小区上）。')),
-				E('pre', { 'class': 'mt-net-raw mt-scan-raw' }, lines.join('\n'))
-			]);
-		return E('section', { 'class': 'mt-scan-panel mt-ui-card' }, [
-			E('h4', {}, _('频率扫描结果（%d 行）').format(lines.length)),
-			E('pre', { 'class': 'mt-net-raw mt-scan-raw' }, lines.join('\n'))
+			return E('div', { 'style': 'color:#94a3b8;font-size:12px;padding:8px 0' }, _('模组未返回扫描数据。'));
+		return E('div', { 'class': 'mt-scan-panel' }, [
+			E('h4', { 'style': 'font-size:13px;margin:0 0 8px;color:#fff' }, _('扫描结果（%d 行）').format(lines.length)),
+			E('pre', { 'class': 'mt-scan-raw' }, lines.join('\n'))
 		]);
 	},
-
-	/* ---------------- 渲染 ---------------- */
 
 	render: function(res) {
 		return controls.liveView(this, res, {
@@ -796,14 +815,14 @@ return view.extend({
 		res = res || {};
 		var errors = res.errors || [];
 		var warnings = errors.map(function(msg) {
-			return E('div', { 'class': 'alert-message warning' }, msg);
+			return E('div', { 'class': 'mt-net-card', 'style': 'color:#b91c1c;margin-bottom:12px' }, msg);
 		});
 
 		if (!res.section)
-			return E('div', { 'class': 'mt-net mt-ui-page' }, [
+			return E('div', { 'class': 'mt-net' }, [
 				this.styleNode(),
 				controls.styleNode(),
-				E('div', { 'class': 'alert-message warning' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
+				E('div', { 'class': 'mt-net-card', 'style': 'color:#b91c1c' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
 			].concat(warnings));
 
 		var section = res.section;
@@ -840,7 +859,7 @@ return view.extend({
 		var prefer = plainObject(res.prefer, 'network_prefer');
 		var preferOn = Object.keys(prefer).filter(function(k) { return String(prefer[k]) === '1'; });
 		var lockband = plainObject(res.lockband, 'lockband');
-		/* 无线状态·频段锁定行：按制式分组渲染成频段芯片，替代大段逗号文本 */
+
 		var lockClasses = Object.keys(lockband).filter(function(k) {
 			return lockband[k] && typeof lockband[k] === 'object' &&
 				(bandItems(ci(lockband[k], [ 'lock_band', 'lockband' ])).length ||
@@ -862,7 +881,7 @@ return view.extend({
 					E('span', { 'class': 'mt-locksum-chips' }, locked.length
 						? locked.map(function(b) { return E('span', { 'class': 'mt-locksum-chip' }, b.id); })
 						: [ E('span', { 'class': 'mt-locksum-chip off' }, _('未锁定')) ]),
-					availCount ? E('span', { 'class': 'mt-locksum-avail' },
+					availCount ? E('span', { 'style': 'font-size:10px;color:#94a3b8' },
 						_('可用 %d').format(availCount)) : null
 				]);
 			})) : null;
@@ -878,45 +897,60 @@ return view.extend({
 			rawDump = _('无法序列化 QModem 返回数据。');
 		}
 
-		return E('div', { 'class': 'mt-net mt-ui-page' }, [
+		return E('div', { 'class': 'mt-net' }, [
 			this.styleNode(),
-			controls.styleNode()
-		].concat(warnings).concat([
+			controls.styleNode(),
+			/* 背景环境光晕 */
+			E('div', { 'class': 'mt-net-bg-glow1' }),
+			E('div', { 'class': 'mt-net-bg-glow2' }),
+
 			modemBar,
-			E('section', { 'class': 'mt-net-hero mt-ui-hero' }, [
+
+			/* 顶部 Hero 玻璃卡片 */
+			E('section', { 'class': 'mt-net-card mt-net-hero' }, [
 				E('div', {}, [
-					E('div', { 'class': 'mt-net-kicker' }, _('网络与小区')),
+					E('div', { 'class': 'mt-net-kicker' }, _('无线射频与蜂窝小区')),
 					E('h2', { 'class': 'mt-net-title' }, [
 						opInfo.logo ? E('img', { 'class': 'mt-op-logo', 'src': opInfo.logo, 'alt': operatorName }) : null,
 						operatorName
 					]),
-					E('div', { 'class': 'mt-net-sub' }, _('由 QModem 上报的服务小区、频段与驻网信息。'))
+					E('div', { 'class': 'mt-net-sub' }, _('实时监控服务小区物理参数、载波聚合配置及多频段策略。'))
 				]),
 				E('span', { 'class': 'mt-net-badge' + (registered ? '' : ' off') },
 					registered ? (networkMode || _('已驻网')) : _('未驻网'))
 			]),
+
+			/* 4 列指标卡片 (动态 SVG 微仪表) */
 			E('div', { 'class': 'mt-net-metrics' }, [
-				this.metricGauge('RSRP', 'rsrp', rsrp, ' dBm', '-120', '-70'),
-				this.metricGauge('RSRQ', 'rsrq', rsrq, ' dB', '-25', '-3'),
-				this.metricGauge('SINR', 'sinr', sinr, ' dB', '-10', '30'),
-				this.metric(_('当前频段'), band, '')
+				this.metricGauge(_('参考信号接收功率（RSRP）'), 'rsrp', rsrp, _('dBm（毫瓦分贝）')),
+				this.metricGauge(_('参考信号接收质量（RSRQ）'), 'rsrq', rsrq, _('dB（分贝）')),
+				this.metricGauge(_('信号与干扰加噪声比（SINR）'), 'sinr', sinr, _('dB（分贝）')),
+				this.metricBand(_('当前频段'), band)
 			]),
+
+			/* 2 列网络状态与服务小区卡片 */
 			E('div', { 'class': 'mt-net-grid' }, [
-				E('section', { 'class': 'mt-net-panel' }, [
-					E('h3', {}, _('服务小区')),
+				E('section', { 'class': 'mt-net-card' }, [
+					E('div', { 'class': 'mt-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'),
+						_('服务小区')
+					]),
 					this.row(_('网络模式'), networkMode),
-					this.row('MCC / MNC', (mcc && mnc) ? (mcc + ' / ' + mnc) : ''),
+					this.row(_('移动国家码 / 移动网络码（MCC / MNC）'), (mcc && mnc) ? (mcc + ' / ' + mnc) : ''),
 					this.row(_('频段'), band),
-					this.row('EARFCN / ARFCN', earfcn),
-					this.row('PCI', pci),
+					this.row(_('绝对射频信道号（EARFCN / ARFCN）'), earfcn),
+					this.row(_('物理小区标识（PCI）'), pci),
 					this.row(_('小区 ID'), cellId),
-					this.row('TAC / LAC', tac),
+					this.row(_('跟踪区码 / 位置区码（TAC / LAC）'), tac),
 					scs ? this.row(_('子载波间隔'), scsText(scs)) : null,
 					this.row(_('下行带宽'), dlBw),
 					this.row(_('上行带宽'), ulBw)
 				]),
-				E('section', { 'class': 'mt-net-panel' }, [
-					E('h3', {}, _('无线状态')),
+				E('section', { 'class': 'mt-net-card' }, [
+					E('div', { 'class': 'mt-card-title' }, [
+						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>'),
+						_('无线状态')
+					]),
 					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('运营商')), E('strong', {}, operatorName) ]),
 					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络模式')), E('strong', {}, activeMode ? modeLabel(activeMode) : '--') ]),
 					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络优选')), E('strong', {}, preferOn.length ? preferOn.join(' / ') : '--') ]),
@@ -924,25 +958,26 @@ return view.extend({
 					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('AT 端口')), E('strong', {}, shown(atPort)) ])
 				])
 			]),
+
+			/* 当前频段与载波聚合 */
 			this.currentBandSection(res.currentBand),
+
+			/* 邻区信息 */
 			this.neighborSection(res.neighbor, disabled),
-			E('div', { 'class': 'mt-net-actions' }, [
+
+			/* 刷新按钮 */
+			E('div', { 'style': 'display:flex;gap:10px;margin:16px 0' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn cbi-button-action',
 					'click': function() { window.location.reload(); }
 				}, _('刷新状态'))
 			]),
-			E('details', { 'class': 'mt-net-details mt-ui-details' }, [
-				E('summary', {}, [
-					E('span', { 'class': 'mt-ui-summary-copy' }, E('span', { 'class': 'mt-ui-summary-title' }, _('技术细节（QModem 原始数据）'))),
-					E('span', { 'class': 'mt-ui-chevron', 'aria-hidden': 'true' }, '›')
-				]),
-				E('pre', { 'class': 'mt-net-raw mt-ui-details-body' }, rawDump)
-			]),
-			E('section', { 'class': 'mt-control-section' }, [
-				E('div', { 'class': 'mt-control-section-head' }, [
-					E('h3', {}, _('无线策略')),
-					E('p', {}, _('网络模式、驻网制式与频率扫描，全部经 QModem 的 qmodem ubus 下发。'))
+
+			/* 无线策略 (模式 / 优选 / 扫描) */
+			E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' }, [
+				E('div', { 'style': 'margin-bottom:14px' }, [
+					E('h3', { 'style': 'font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px' }, _('无线策略')),
+					E('p', { 'style': 'font-size:12px;color:#64748b;margin:0' }, _('配置驻网模式、网络制式优选及射频扫描。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
 					this.modeCard(section, res.mode),
@@ -950,8 +985,18 @@ return view.extend({
 					this.scanSection(section, atPort)
 				])
 			]),
-			this.lockBandSection(section, res.lockband, disabled)
-		]));
+
+			/* 频段锁定 */
+			this.lockBandSection(section, res.lockband, disabled),
+
+			/* 技术细节调试折叠栏 */
+			E('details', { 'class': 'mt-net-card', 'style': 'margin-top:16px' }, [
+				E('summary', { 'style': 'cursor:pointer;font-size:13px;font-weight:700;color:#0f172a;list-style:none' }, [
+					_('技术细节（QModem 原始数据）')
+				]),
+				E('pre', { 'class': 'mt-scan-raw', 'style': 'background:#0f172a;padding:14px;border-radius:12px;margin-top:12px' }, rawDump)
+			])
+		]);
 	},
 
 	handleSave: null,
