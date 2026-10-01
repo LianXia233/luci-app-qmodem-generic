@@ -416,19 +416,41 @@ collect_all_sections() {
 	done
 }
 
+RUN_LOOP_FLAG=1
+# 退出前清理：先停掉在途采集子进程（它会带着 AT 互斥锁），再释放本进程持有的锁。
+# 只 kill 主进程而不清理子 shell，会让它在杀掉后继续持锁跑完这一轮采集，
+# 慢模组/慢环境里 AT 锁长时间残留，阻塞其它 AT 访问。
+# 注意：不要在 trap 里 `wait` 采集子进程——子 shell 迟迟不退会让关闭超过预期
+# 时延（procd / 测试对 SIGTERM 收敛有要求）。qmodem-lib 的 qm_lock 本来就带
+# 「持有者已死即回收」（对锁 pid 做 kill -0 检查），child 被 kill 后锁自然可被
+# 下一个取锁者回收，无需等它干净退出。
+qm_stop_run() {
+	RUN_LOOP_FLAG=0
+	if [ -n "$CUR_COLLECT_PID" ] && kill -0 "$CUR_COLLECT_PID" 2>/dev/null; then
+		kill -TERM "$CUR_COLLECT_PID" 2>/dev/null
+		sleep 1
+		kill -KILL "$CUR_COLLECT_PID" 2>/dev/null
+	fi
+	qm_unlock_all
+	qm_worker_log "stopped"
+	exit 0
+}
+
 run_loop() {
 	qm_init_dirs
 	qm_worker_log "starting: interval=${WORKER_INTERVAL}s cycle_timeout=${CYCLE_TIMEOUT}s"
 
+	CUR_COLLECT_PID=''
 	# 单实例：已有 worker 在跑就直接退出（procd respawn 也不会叠出多个）
 	if ! qm_lock worker 0; then
 		qm_worker_log "another worker is already running, exiting"
 		exit 0
 	fi
-	trap 'qm_unlock_all; qm_worker_log "stopped"; exit 0' INT TERM
+	trap 'qm_stop_run' INT TERM
 	WORKER_ROUND=0
 
 	while :; do
+		[ "$RUN_LOOP_FLAG" = 1 ] || break
 		WORKER_ROUND=$(( WORKER_ROUND + 1 ))
 		qm_heartbeat "$$" "$WORKER_INTERVAL" \
 			"{\"round\":$WORKER_ROUND,\"interval\":$WORKER_INTERVAL,\"cycle_timeout\":$CYCLE_TIMEOUT}"
@@ -436,9 +458,11 @@ run_loop() {
 		for _s in $(qm_enabled_sections); do
 			# 单模组单轮的总超时看门狗：即使某条 AT 卡死（ubus -t 失效等极端情况），
 			# 也只是杀掉这一轮的子进程，worker 主循环继续跑，不会永久卡死。
+			[ "$RUN_LOOP_FLAG" = 1 ] || break
 			_start=$(qm_now)
 			( collect_section "$_s" "$PERIODIC_DOMAINS" ) &
 			_pid=$!
+			CUR_COLLECT_PID=$_pid
 			_w=0
 			while kill -0 "$_pid" 2>/dev/null; do
 				_w=$(( $(qm_now) - _start ))
@@ -452,6 +476,7 @@ run_loop() {
 				sleep 1
 			done
 			wait "$_pid" 2>/dev/null
+			CUR_COLLECT_PID=''
 			qm_heartbeat "$$" "$WORKER_INTERVAL" \
 				"{\"round\":$WORKER_ROUND,\"interval\":$WORKER_INTERVAL,\"cycle_timeout\":$CYCLE_TIMEOUT}"
 		done

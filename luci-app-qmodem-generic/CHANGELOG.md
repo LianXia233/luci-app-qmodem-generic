@@ -3,6 +3,33 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.4.11-18] - 2026-10-01
+
+### 修复
+- **「模组与 SIM」页无法正确显示签约速率与 QCI/5QI 等级**：完整追踪了
+  模组 → AT → `qmodem-at-probe` → `qmodem-worker` → `/tmp/qmodem-cache` → `rpcd/qos`
+  → LuCI RPC → 前端 的整条数据链，修复三方面问题，并各加 `*_source` 溯源字段便于排障：
+  - **AT 探测**（`qmodem-at-probe`）：`QCI`（LTE，`AT+CGEQOSRDP`）与 `5QI`（5G，
+    `AT+C5GQOSRDP`）不再混为一谈，分别解析、分别上报；速率统一折算为 kbps
+    （`bps/kbps/Mbps` 归一为 `kbps`），无值显式用 `null`（绝不伪装成 `0`）。
+  - **多 PDP Context**：不再写死 `CID=1`。先经 `AT+CGCONTRDP` 收集 active PDP 上下文，
+    再和配置里的 APN 匹配，优先取「当前拨号数据 APN」（如 `internet`）对应的 CID，
+    避免把 `ims`/`cbs` 等控制面上下文的 QoS 误当用户签约速率。
+  - **前端展示**（`status.js` / `controls.js`）：QCI 与 5QI 分开展示、互不覆盖；
+    未知一律显示 `--`（绝不把「QCI 0」当成未知）；下载/上传按
+    `1 Mbps = 1024 kbps`、`1 Gbps = 1024×1024 kbps` 折算（`102400→100 Mbps`、`51200→50 Mbps`）。
+  - **`rpcd/qos` 空态信封**：`qci`/`five_qi`/`downlink_rate_kbps`/`uplink_rate_kbps`
+    返回 `null` 而非 `0`。
+- **`qmodem-worker` 退出清理**：SIGTERM 时先停掉在途采集子进程（它会持有 AT 互斥锁）
+  再释放锁，避免慢模组下 AT 锁残留阻塞其它访问；关闭路径带强杀兜底并释放 worker 锁，
+  保证 procd/测试对 SIGTERM 收敛的要求（子进程锁可经 `qm_lock` 的「持有者已死」检测自动回收）。
+
+### 测试
+- 后端回归（`tests/run-backend-tests.sh`）新增并校准 QoS 断言：QCI/5QI 分别溯源、
+  下行/上行 `102400/51200 kbps`、优先选 `internet` 而非 `ims` APN；前端
+  `run-frontend-tests.js` 新增 `formatRate`/`qosExplain`/`subscriptionRate` 的成对用例
+  （QCI 与 5QI 并存不覆盖、未知/0 → `--`、速率单位折算）。
+
 ## [2.4.11-17] - 2026-09-30
 
 ### 修复
