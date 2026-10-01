@@ -205,7 +205,12 @@ t_worker_collect_ok() {
 
 	_qos=$(cat "$CACHE/modem0/qos.json")
 	assert_json "qos probed via AT (CGEQOSRDP)" "$_qos" '@.data.status' ok
-	assert_json "qos downlink_rate_kbps" "$_qos" '@.data.downlink_rate_kbps' 200000
+	assert_json "qos qci source traced" "$_qos" '@.data.qci_source' AT+CGEQOSRDP
+	assert_json "qos qci = 9" "$_qos" '@.data.qci' 9
+	assert_json "qos five_qi = 9" "$_qos" '@.data.five_qi' 9
+	assert_json "qos downlink_rate_kbps" "$_qos" '@.data.downlink_rate_kbps' 102400
+	assert_json "qos uplink_rate_kbps" "$_qos" '@.data.uplink_rate_kbps' 51200
+	assert_json "qos picks internet (data) apn, not ims" "$_qos" '@.data.apn' internet
 
 	# 每个域文件都必须是合法 JSON（原子写入，不能有半截）
 	_n=0; _badjson=0

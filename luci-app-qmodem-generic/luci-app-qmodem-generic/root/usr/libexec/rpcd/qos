@@ -55,7 +55,7 @@ cache_data() {
 
 emit_unavailable() {
 	case "$1" in
-		qos_info) printf '{"qci":0,"status":"unavailable","stale":true}\n' ;;
+		qos_info) printf '{"qci":null,"five_qi":null,"downlink_rate_kbps":null,"uplink_rate_kbps":null,"status":"unavailable","stale":true}\n' ;;
 		*)        printf '{"status":"unavailable","stale":true}\n' ;;
 	esac
 }

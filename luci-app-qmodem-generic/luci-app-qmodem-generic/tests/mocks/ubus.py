@@ -89,13 +89,56 @@ CANNED = {
                                       'total_tx_bytes': 500000},
     ('qmodem', 'get_traffic_reset_schedule'): lambda: {'enabled': False},
     ('qmodem', 'get_sms'): lambda: {'sms': []},
-    ('qmodem', 'send_at'): lambda: {'result': 'OK\r\n+CGEQOSRDP: 1,9,,,200000,50000\r\n'},
+    # send_at 需要在 reply() 里读取载荷中的实际 AT 命令，才能命中 send_at_response 分支，
+    # 因此这里不占位，直接在 reply() 里特殊处理。
     ('qmodem', 'do_reboot'): lambda: {'result': 1},
 }
 
 
+# 模拟不同 AT 命令的真实响应，验证 qmodem-at-probe 对「QCI / 5QI 分离、
+# 多 PDP 上下文、单位归一化(bps→kbps)」的解析。
+# 这里故意构造：
+#   CID 1 = ims       → QCI 5，无 AMBR
+#   CID 2 = internet  → QCI 9，DL=102400kbps / UL=51200kbps（当前拨号数据 APN，
+#                       配置 APN=internet，因此解析器应选中它而不是 CID 1）
+#   5G 形态（C5GQOSRDP）→ 5QI 9，SAMBR 102400/51200 kbps
+#   CGCONTRDP 的 AMBR 用 bps（5G 规范单位），DL=102400000 / UL=51200000 → 归一化 102400/51200
+def send_at_response(at_cmd):
+    c = at_cmd or ''
+    if 'AT+C5GQOSRDP' in c:
+        return {'result': 'OK\r\n+C5GQOSRDP: 2,9,0,0,0,0,102400,51200\r\n',
+                'source': 'AT+C5GQOSRDP'}
+    if 'AT+CGEQOSRDP' in c:
+        # 定向查询某 CID：返回对应上下文
+        if '=1' in c:
+            return {'result': 'OK\r\n+CGEQOSRDP: 1,5,0,0,0,0,0,0\r\n',
+                    'source': 'AT+CGEQOSRDP=1'}
+        return {'result': 'OK\r\n+CGEQOSRDP: 2,9,0,0,0,0,102400,51200\r\n',
+                'source': 'AT+CGEQOSRDP=2'}
+    if 'AT+CGCONTRDP' in c:
+        return {'result': 'OK\r\n'
+                          '+CGCONTRDP: 1,1,"ims","10.20.30.40","255.255.255.255","0.0.0.0","0.0.0.0","0.0.0.0","0.0.0.0",0,0,0\r\n'
+                          '+CGCONTRDP: 2,1,"internet","200.100.50.1","255.255.255.0","218.7.7.7","114.114.114.114","0.0.0.0","0.0.0.0",0,102400000,51200000\r\n',
+                'source': 'AT+CGCONTRDP'}
+    return {'result': 'OK\r\n'}
+
+
 def reply(obj, method, payload):
     if obj == 'qmodem':
+        if method == 'send_at':
+            # payload 是 ubus 传给我们的原始 JSON 字符串，读取出实际 AT 命令，
+            # 命中 send_at_response 对应分支
+            at_cmd = ''
+            obj_in = None
+            try:
+                obj_in = json.loads(payload) if isinstance(payload, str) else payload
+                at_cmd = obj_in['params']['at']
+            except (KeyError, TypeError, ValueError):
+                try:
+                    at_cmd = obj_in.get('at', '') if obj_in else ''
+                except Exception:
+                    at_cmd = ''
+            return send_at_response(at_cmd)
         fn = CANNED.get((obj, method))
         return fn() if fn else {}
     if obj.startswith('network.interface.'):

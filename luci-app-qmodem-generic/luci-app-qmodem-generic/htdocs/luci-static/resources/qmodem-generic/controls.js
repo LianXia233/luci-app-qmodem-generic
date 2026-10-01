@@ -1132,10 +1132,15 @@ function getDeviceStatusCached(section) {
 	return cachedValue(section, 'status', 'device', {}, function() { return Promise.resolve({}); });
 }
 
-/* QoS / 调制信息：AT 探测已搬到 qmodem-worker，这里只读缓存 */
+/* QoS / 调制信息：AT 探测已搬到 qmodem-worker，这里只读缓存。
+ * 默认信封只描述「空态」，不把未知的 QCI/5QI 伪装成 0；具体是否有效由后端
+ * qmodem-at-probe 判断（qci/five_qi 用 null 表示未获取到）。 */
 function getQosInfo(section) {
-	return cachedDomain(section, 'qos', { qci: 0, status: 'unavailable' },
-		function() { return callQosInfo(section); });
+	return cachedDomain(section, 'qos', {
+		qci: null, qci_source: null, five_qi: null, five_qi_source: null,
+		downlink_rate_kbps: null, uplink_rate_kbps: null, rate_source: null,
+		apn: '', cid: null, domain: 'LTE', status: 'no_data'
+	}, function() { return callQosInfo(section); });
 }
 function getRadioInfo(section) {
 	return cachedDomain(section, 'radio', { status: 'unavailable' },
@@ -1517,11 +1522,17 @@ function formatDuration(seconds) {
 	return (days ? days + _('d') + ' ' : '') + (hours ? hours + _('h') + ' ' : '') + minutes + _('min');
 }
 
+/* 签约速率格式化。后端统一以 kbps 上报（见 qmodem-at-probe 的 norm_kbps），
+ * 前端只负责展示，不再猜测单位。
+ * 折算约定：1 Mbps = 1024 kbps、1 Gbps = 1024×1024 kbps
+ * （因此 102400 kbps → 100 Mbps、51200 kbps → 50 Mbps，与验收标准一致）。
+ * null / 0 / 非数字一律显示 '--'，绝不把「未知」显示成有效速率。 */
 function formatRate(value) {
-	value = Number(value) || 0;
-	if (value >= 1000000000) return (value / 1000000000).toFixed(2) + ' Gbps';
-	if (value >= 1000000) return (value / 1000000).toFixed(1) + ' Mbps';
-	return value ? Math.round(value / 1000) + ' Kbps' : '--';
+	var n = Number(value);
+	if (!isFinite(n) || n <= 0) return '--';
+	if (n >= 1048576) return (n / 1048576).toFixed(2) + ' Gbps';
+	if (n >= 1024) return (n % 1024 ? (n / 1024).toFixed(1) : String(n / 1024)) + ' Mbps';
+	return Math.round(n) + ' Kbps';
 }
 
 function select(options, value) {

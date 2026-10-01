@@ -148,23 +148,45 @@ return view.extend({
 		    conn = res.conn || [], net = res.net || [];
 
 		var atQos = res.qosInfo || {};
+		/* 后端契约：签名速率统一为 kbps，未知用 null（绝不伪装成 0）。
+		 * QCI（LTE）与 5QI（5G）是两个独立维度，前端必须分开承接，不能互相覆盖。 */
+		function posNum(v) {
+			var n = Number(v);
+			return isFinite(n) && n > 0 ? n : null;
+		}
 		function mbpsToKbps(v) {
 			var n = parseFloat(v);
-			return isNaN(n) || n <= 0 ? 0 : Math.round(n * 1000);
+			return isNaN(n) || n <= 0 ? null : Math.round(n * 1000);
 		}
+		/* QModem 原生 modem_info 字段优先（QCI 属于 LTE、5QI 属于 5G），
+		 * 且必须确认字段属于当前注册网络/当前 APN（worker 已按 CID 校准）。 */
+		var qmQci = parseInt(find(net, 'QCI') || find(base, 'QCI') ||
+			find(cell, 'QCI') || find(sim, 'QCI') ||
+			find(net, 'QCI Index') || find(base, 'QCI Index'), 10);
+		var qm5qi = parseInt(find(net, '5QI') || find(base, '5QI') ||
+			find(cell, '5QI') || find(sim, '5QI') ||
+			find(net, '5QI Index') || find(base, '5QI Index'), 10);
+		qmQci = isFinite(qmQci) && qmQci > 0 ? qmQci : null;
+		qm5qi = isFinite(qm5qi) && qm5qi > 0 ? qm5qi : null;
 		var qmUl = mbpsToKbps(find(net, 'AMBR UL'));
 		var qmDl = mbpsToKbps(find(net, 'AMBR DL'));
-		var qmQciRaw = find(net, 'QCI') || find(net, '5QI') ||
-			find(base, 'QCI') || find(base, '5QI') ||
-			find(cell, 'QCI') || find(cell, '5QI') ||
-			find(sim, 'QCI') || find(sim, '5QI');
-		var qmQci = parseInt(qmQciRaw, 10) || 0;
+
+		var atQci = posNum(atQos.qci);
+		var at5qi = posNum(atQos.five_qi);
+		var atDl = posNum(atQos.downlink_rate_kbps);
+		var atUl = posNum(atQos.uplink_rate_kbps);
+
 		var qosInfo = {
-			qci: qmQci || Number(atQos.qci) || 0,
-			uplink_rate_kbps: qmUl || Number(atQos.uplink_rate_kbps) || 0,
-			downlink_rate_kbps: qmDl || Number(atQos.downlink_rate_kbps) || 0,
-			apn: atQos.apn || '',
-			status: (qmUl || qmDl || qmQci || atQos.status === 'ok') ? 'ok' : String(atQos.status || 'no_data')
+			qci: qmQci != null ? qmQci : atQci,
+			qci_source: qmQci != null ? 'qmodem.network_info' : (atQci != null ? String(atQos.qci_source || 'qmodem.modem_info') : null),
+			five_qi: qm5qi != null ? qm5qi : at5qi,
+			five_qi_source: qm5qi != null ? 'qmodem.network_info' : (at5qi != null ? String(atQos.five_qi_source || 'qmodem.modem_info') : null),
+			downlink_rate_kbps: qmDl != null ? qmDl : atDl,
+			uplink_rate_kbps: qmUl != null ? qmUl : atUl,
+			rate_source: (qmDl != null || qmUl != null) ? 'qmodem.network_info' : String(atQos.rate_source || ''),
+			apn: atQos.apn || find(net, 'APN') || '',
+			domain: String(atQos.domain || (qm5qi != null ? 'NR' : 'LTE')),
+			status: String(atQos.status || 'no_data')
 		};
 
 		var data = {};
@@ -659,38 +681,69 @@ return view.extend({
 
 	subscriptionRate: function(qosInfo) {
 		qosInfo = qosInfo || {};
-		if (qosInfo.status !== 'ok')
-			return '';
-		var down = Number(qosInfo.downlink_rate_kbps != null ? qosInfo.downlink_rate_kbps : (qosInfo.downlink_rate != null ? qosInfo.downlink_rate : qosInfo.rx_data_rate_max));
-		var up = Number(qosInfo.uplink_rate_kbps != null ? qosInfo.uplink_rate_kbps : (qosInfo.uplink_rate != null ? qosInfo.uplink_rate : qosInfo.tx_data_rate_max));
-		if (!down && !up)
-			return '';
+		// 后端统一以 kbps 上报；未知/空用 '--'，绝不把「没有」显示成「0」
+		var down = Number(qosInfo.downlink_rate_kbps != null ? qosInfo.downlink_rate_kbps : qosInfo.downlink_rate);
+		var up = Number(qosInfo.uplink_rate_kbps != null ? qosInfo.uplink_rate_kbps : qosInfo.uplink_rate);
+		down = isFinite(down) && down > 0 ? down : null;
+		up = isFinite(up) && up > 0 ? up : null;
+		if (down == null && up == null)
+			return null;
 		return _('下行 %s / 上行 %s').format(
-			down ? controls.formatRate(down * 1000) : '--',
-			up ? controls.formatRate(up * 1000) : '--'
+			down != null ? controls.formatRate(down) : '--',
+			up != null ? controls.formatRate(up) : '--'
 		);
 	},
 
-	qciExplain: function(qosInfo) {
-		var qci = qosInfo ? parseInt(qosInfo.qci, 10) : 0;
-		if (!qosInfo || qosInfo.status !== 'ok' || !qci)
-			return { label: '', desc: '' };
-		var map = {
-			1:  { label: 'QCI 1', desc: _('GBR · 实时语音 (VoLTE)') },
-			2:  { label: 'QCI 2', desc: _('GBR · 实时视频通话') },
-			3:  { label: 'QCI 3', desc: _('GBR · 实时游戏 / 低延迟交互') },
-			4:  { label: 'QCI 4', desc: _('GBR · 缓冲流视频') },
-			5:  { label: 'QCI 5', desc: _('Non-GBR · IMS 信令 (语音/视频控制)') },
-			6:  { label: 'QCI 6', desc: _('Non-GBR · TCP 优先 (网页/邮件/文件传输)') },
-			7:  { label: 'QCI 7', desc: _('Non-GBR · 交互业务 (VoIP / 在线游戏)') },
-			8:  { label: 'QCI 8', desc: _('Non-GBR · 通用数据 (默认上网)') },
-			9:  { label: 'QCI 9', desc: _('Non-GBR · 后台数据 (最低优先级)') },
-			65: { label: 'QCI 65', desc: _('GBR · 关键任务语音') },
-			66: { label: 'QCI 66', desc: _('GBR · 关键任务 PTT') },
-			69: { label: 'QCI 69', desc: _('Non-GBR · 关键任务信令') },
-			70: { label: 'QCI 70', desc: _('GBR · 关键任务数据') }
+	/* QCI 与 5QI 分开发布：LTE 用 QCI、5G 用 5QI，二者独立，不互相覆盖。
+	 * 两侧都能给出时（边界情况）分别列出。未知一律返回 label='' ，由卡片显示 '--'。 */
+	qosExplain: function(qosInfo) {
+		qosInfo = qosInfo || {};
+		var out = [];
+		function pushLevel(type, val, map) {
+			var n = val == null ? NaN : parseInt(val, 10);
+			if (!isFinite(n) || n <= 0) return;
+			var m = map[n] || { label: type + ' ' + n, desc: _('自定义承载') };
+			out.push({ label: type + ' ' + n, desc: m.desc });
+		}
+		var qciMap = {
+			1:  { desc: _('GBR · 实时语音 (VoLTE)') },
+			2:  { desc: _('GBR · 实时视频通话') },
+			3:  { desc: _('GBR · 实时游戏 / 低延迟交互') },
+			4:  { desc: _('GBR · 缓冲流视频') },
+			5:  { desc: _('Non-GBR · IMS 信令') },
+			6:  { desc: _('Non-GBR · TCP 优先（网页/邮件/文件）') },
+			7:  { desc: _('Non-GBR · 交互业务（VoIP/在线游戏）') },
+			8:  { desc: _('Non-GBR · 通用数据（默认上网）') },
+			9:  { desc: _('Non-GBR · 后台数据（最低优先级）') },
+			65: { desc: _('GBR · 关键任务语音') },
+			66: { desc: _('GBR · 关键任务 PTT') },
+			69: { desc: _('Non-GBR · 关键任务信令') },
+			70: { desc: _('GBR · 关键任务数据') }
 		};
-		return map[qci] || { label: 'QCI ' + qci, desc: _('自定义承载') };
+		var qi5Map = {
+			1:  { desc: _('GBR · 会话语音') },
+			2:  { desc: _('GBR · 会话视频（实时）') },
+			3:  { desc: _('GBR · 实时游戏 / 交互') },
+			4:  { desc: _('GBR · 缓冲流媒体') },
+			5:  { desc: _('Non-GBR · IMS 信令') },
+			6:  { desc: _('Non-GBR · 交互（TCP 网页/邮件）') },
+			7:  { desc: _('Non-GBR · 交互（VoIP/在线游戏）') },
+			8:  { desc: _('Non-GBR · 默认数据') },
+			9:  { desc: _('Non-GBR · 后台数据（最低优先级）') },
+			65: { desc: _('GBR · 关键任务语音') },
+			66: { desc: _('GBR · 关键任务 PTT') },
+			67: { desc: _('GBR · 关键任务视频') },
+			69: { desc: _('Non-GBR · 关键任务信令') },
+			70: { desc: _('GBR · 关键任务数据') }
+		};
+		pushLevel('QCI', qosInfo.qci, qciMap);
+		pushLevel('5QI', qosInfo.five_qi, qi5Map);
+		if (!out.length)
+			return { label: '', desc: '' };
+		return {
+			label: out.map(function(o) { return o.label; }).join(' · '),
+			desc: out.map(function(o) { return o.desc; }).join(' / ')
+		};
 	},
 
 	infoRow: function(label, value) {
@@ -725,7 +778,7 @@ return view.extend({
 		var simState = data.sim || '';
 		var simOk = /READY|正常|OK/i.test(simState);
 		var subRate = this.subscriptionRate(data.qosInfo);
-		var qciInfo = this.qciExplain(data.qosInfo);
+		var qosLvl = this.qosExplain(data.qosInfo);
 		return E('section', { 'class': 'qm-glass-card' }, [
 			E('div', { 'class': 'qm-card-head' }, [
 				E('div', {}, [
@@ -744,9 +797,9 @@ return view.extend({
 				this.infoRow(_('签约速率'), subRate || '--'),
 				E('div', { 'class': 'qm-list-row' }, [
 					E('span', {}, _('QoS 等级')),
-					qciInfo.label ? E('div', {}, [
-						E('strong', { 'style': 'color:#0072f5' }, qciInfo.label),
-						E('span', { 'style': 'font-weight:400;margin-left:6px;font-size:11px' }, qciInfo.desc)
+					qosLvl.label ? E('div', {}, [
+						E('strong', { 'style': 'color:#0072f5' }, qosLvl.label),
+						E('span', { 'style': 'font-weight:400;margin-left:6px;font-size:10px' }, qosLvl.desc)
 					]) : E('strong', {}, '--')
 				]),
 				this.infoRow('ICCID', data.iccid),

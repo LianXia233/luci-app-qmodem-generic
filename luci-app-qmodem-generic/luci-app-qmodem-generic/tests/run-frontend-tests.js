@@ -607,6 +607,55 @@ function testViews(rt) {
 	}, Promise.resolve());
 }
 
+/* 签约速率与 QCI/5QI 展示：验证后端 kbps → 前端 'N M/G/Kbps'，未知 → '--' */
+function testQosDisplay(rt, controls) {
+	console.log('\n[7.5] 签约速率 / QoS 等级前端格式化');
+	function freshStatus(controls) {
+		return rt.loadModule('view/qmodem-generic/status.js',
+			{ 'luci/qmodem-generic/controls': controls });
+	}
+	/* formatRate 把 kbps 折成 G/M/Kbps */
+	var rateCases = [
+		[102400, '100 Mbps'],
+		[51200, '50 Mbps'],
+		[102400000, '97.66 Gbps'],
+		[0, '--'],
+		[null, '--'],
+		['abc', '--']
+	];
+	rateCases.forEach(function(c) {
+		var got = controls.formatRate(c[0]);
+		ok('formatRate(' + (c[0] === null ? 'null' : c[0]) + ')', got === c[1], got);
+	});
+
+	var mod = freshStatus(controls);
+	/* LTE：只看 QCI */
+	var lte = mod.qosExplain({ qci: 9, five_qi: null });
+	ok('LTE 显示 QCI 9', lte.label === 'QCI 9', lte.label);
+	/* 5G：只看 5QI */
+	var nr = mod.qosExplain({ qci: null, five_qi: 9 });
+	ok('5G 显示 5QI 9', nr.label === '5QI 9', nr.label);
+	/* 两侧同时存在：分别列出，不互相覆盖 */
+	var both = mod.qosExplain({ qci: 9, five_qi: 9 });
+	ok('QCI/5QI 同时存在时不覆盖', both.label.indexOf('QCI 9') >= 0 && both.label.indexOf('5QI 9') >= 0, both.label);
+	/* 未知：label 为空 → 卡片回退 '--'，绝不显示 'QCI 0' */
+	var none = mod.qosExplain({ qci: null, five_qi: null });
+	ok('未知时 label 为空（不显示 QCI 0）', none.label === '', none.label);
+	var bothKnownNull = mod.qosExplain({ qci: 0, five_qi: 0 });
+	ok('0 视为未知（不显示成等级）', bothKnownNull.label === '', bothKnownNull.label);
+
+	/* 签约速率：有数据格式化，只有下行、只有上行、都无 */
+	var subOk = mod.subscriptionRate({ downlink_rate_kbps: 102400, uplink_rate_kbps: 51200 });
+	ok('签约速率 混合文本', subOk === '下行 100 Mbps / 上行 50 Mbps', subOk);
+	var subNone = mod.subscriptionRate({ downlink_rate_kbps: null, uplink_rate_kbps: null });
+	ok('无签约速率 → null（前端走双横线）', subNone == null, subNone);
+	var subDownOnly = mod.subscriptionRate({ downlink_rate_kbps: 102400, uplink_rate_kbps: null });
+	ok('只有下行时上行显示双横线', subDownOnly === '下行 100 Mbps / 上行 --', subDownOnly);
+
+	rt.resetCalls();
+	return Promise.resolve();
+}
+
 function testRender(rt) {
 	console.log('\n[8] 视图渲染：首屏数据不全也不能抛异常（白屏）');
 	rt.setUbusDelay(8000);
@@ -662,6 +711,7 @@ testBootstrap(rt)
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
+	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
 	.then(function() { return testRender(makeRuntime()); })
 	.then(function() {
 		console.log('\n----------------------------------------');
