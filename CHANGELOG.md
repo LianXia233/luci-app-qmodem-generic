@@ -5,6 +5,13 @@
 
 ## [2.4.11-18] - 2026-10-01
 
+### 维护
+- **仓库结构整理**：包内容原嵌套在 `luci-app-qmodem-generic/luci-app-qmodem-generic/`
+  二级目录下，且根目录与一级目录重复保存了一套脚手架（`.github/`、`docs/`、
+  `CHANGELOG.md`、`README.md`、`LICENSE`、`.editorconfig` 等）。本次把包内容上移一层
+  至 `luci-app-qmodem-generic/`，并删除一级目录下的重复脚手架（内容与根目录完全一致）。
+  纯文件移动（`git mv` 保持字节级不变），不影响产物结构与 CI（`PKG_DIR` 路径未变）。
+
 ### 修复
 - **「模组与 SIM」页无法正确显示签约速率与 QCI/5QI 等级**：完整追踪了
   模组 → AT → `qmodem-at-probe` → `qmodem-worker` → `/tmp/qmodem-cache` → `rpcd/qos`
