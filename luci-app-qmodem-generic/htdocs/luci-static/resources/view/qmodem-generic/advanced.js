@@ -212,20 +212,20 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
-			'.mt-hardware{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.mt-hardware{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境光晕 */
-			'.mt-adv-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
-			'.mt-adv-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(14,165,233,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+			'.mt-adv-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mt-adv-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 
 			/* 白色毛玻璃卡片通用规则 */
 			'.mt-adv-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
-			'.mt-adv-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+			'.mt-adv-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
 
 			/* 顶部 Hero 玻璃卡片 */
-			'.mt-hardware-head{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
-			'.mt-hardware-head h2{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
-			'.mt-hardware-head p{font-size:13px;color:#64748b;line-height:1.5;margin:0}',
+			'.mt-hardware-head{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
+			'.mt-hardware-head h2{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.mt-hardware-head p{font-size:13px;color:var(--qm-text-muted);line-height:1.5;margin:0}',
 
 			/* 动态 SVG 硬件总线拓扑 */
 			'.mt-adv-topo-card{padding:20px 24px;margin-bottom:16px}',
@@ -234,29 +234,29 @@ return view.extend({
 			'.qm-bus-stream{stroke-dasharray:7,5;animation:qmBusDash 1.4s linear infinite}',
 
 			/* 警告与提示卡片 */
-			'.mt-hardware-warning{margin-bottom:14px;color:#b45309;background:rgba(254,243,199,0.85);border:1px solid rgba(253,230,138,0.8);border-radius:14px;padding:12px 18px;font-size:12.5px;display:flex;align-items:center;gap:10px}',
+			'.mt-hardware-warning{margin-bottom:14px;color:var(--qm-warn);background:var(--qm-warn-soft);border:1px solid var(--qm-warn-border);border-radius:14px;padding:12px 18px;font-size:12.5px;display:flex;align-items:center;gap:10px}',
 
 			/* 控制区域与标题 */
 			'.mt-control-section{margin-top:16px}',
 			'.mt-control-section-head{margin-bottom:14px}',
-			'.mt-control-section-head h3{font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px;display:flex;align-items:center;gap:8px}',
-			'.mt-control-section-head p{font-size:12px;color:#64748b;margin:0}',
+			'.mt-control-section-head h3{font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 4px;display:flex;align-items:center;gap:8px}',
+			'.mt-control-section-head p{font-size:12px;color:var(--qm-text-muted);margin:0}',
 			'.mt-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}',
 
 			/* 特性标签胶囊 */
 			'.mt-hardware-caps{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}',
-			'.mt-hardware-cap{padding:3px 10px;border-radius:999px;background:rgba(254,242,242,0.85);color:#dc2626;font-size:10.5px;font-weight:700;border:1px solid rgba(254,202,202,0.8)}',
-			'.mt-hardware-cap.ok{background:rgba(236,253,245,0.85);color:#059669;border-color:rgba(167,243,208,0.8)}',
+			'.mt-hardware-cap{padding:3px 10px;border-radius:999px;background:var(--qm-danger-soft);color:var(--qm-danger);font-size:10.5px;font-weight:700;border:1px solid var(--qm-danger-border)}',
+			'.mt-hardware-cap.ok{background:var(--qm-ok-soft);color:var(--qm-ok);border-color:var(--qm-ok-border)}',
 
 			/* 频段锁定网格卡片 */
 			'.mt-hardware-bands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px}',
 			'.mt-hardware-band{padding:18px}',
-			'.mt-hardware-band h4{margin:0 0 4px;font-size:14.5px;font-weight:750;color:#0f172a}',
-			'.mt-hardware-band p{margin:0 0 12px;color:#64748b;font-size:11px;line-height:1.45}',
+			'.mt-hardware-band h4{margin:0 0 4px;font-size:14.5px;font-weight:750;color:var(--qm-text)}',
+			'.mt-hardware-band p{margin:0 0 12px;color:var(--qm-text-muted);font-size:11px;line-height:1.45}',
 			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}',
-			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid rgba(226,232,240,0.8);border-radius:10px;background:rgba(248,250,252,0.8);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
-			'.mt-band-option:hover{border-color:rgba(0,114,245,0.4);background:#fff}',
-			'.mt-band-option.checked{border-color:#0072f5;background:#eff6ff;color:#0072f5;box-shadow:inset 0 0 0 1px #0072f5}',
+			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
+			'.mt-band-option:hover{border-color:var(--qm-accent-border);background:var(--qm-surface)}',
+			'.mt-band-option.checked{border-color:var(--qm-accent);background:var(--qm-accent-soft);color:var(--qm-accent);box-shadow:inset 0 0 0 1px var(--qm-accent)}',
 			'.mt-band-option input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}',
 			'.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
 
@@ -265,7 +265,7 @@ return view.extend({
 			'.mt-hardware-tool-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}',
 
 			/* 终端输出视窗 (AT 控制台与详情) */
-			'.mt-hardware-raw{background:#0f172a;padding:16px;border-radius:14px;color:#38bdf8;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
+			'.mt-hardware-raw{background:var(--qm-surface-3);padding:16px;border-radius:14px;color:var(--qm-accent-2);font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
 
 			/* 响应式 */
 			'@media(max-width:980px){.mt-control-grid,.mt-hardware-bands{grid-template-columns:1fr}}',
@@ -940,8 +940,8 @@ return view.extend({
 			/* 诊断与开发者工具 */
 			E('section', { 'class': 'mt-adv-card mt-hardware-tools' }, [
 				E('div', {}, [
-					E('h3', { 'style': 'margin:0 0 4px;font-size:15px;font-weight:750;color:#0f172a' }, _('诊断与开发者工具')),
-					E('p', { 'style': 'margin:0;color:#64748b;font-size:12px' }, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
+					E('h3', { 'style': 'margin:0 0 4px;font-size:15px;font-weight:750;color:var(--qm-text)' }, _('诊断与开发者工具')),
+					E('p', { 'style': 'margin:0;color:var(--qm-text-muted);font-size:12px' }, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
 				]),
 				E('div', { 'class': 'mt-hardware-tool-actions' }, [
 					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/settings') }, _('设备参数设置')),
@@ -955,12 +955,12 @@ return view.extend({
 
 			/* 调试技术细节折叠栏 */
 			E('details', { 'class': 'mt-adv-card', 'style': 'margin-top:16px' }, [
-				E('summary', { 'style': 'cursor:pointer;font-size:13.5px;font-weight:750;color:#0f172a;list-style:none;display:flex;justify-content:space-between;align-items:center' }, [
+				E('summary', { 'style': 'cursor:pointer;font-size:13.5px;font-weight:750;color:var(--qm-text);list-style:none;display:flex;justify-content:space-between;align-items:center' }, [
 					E('span', { 'style': 'display:flex;align-items:center;gap:8px' }, [
 						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>'),
 						_('技术细节（QModem 原始数据）')
 					]),
-					E('span', { 'style': 'font-size:18px;color:#94a3b8;font-weight:700' }, '›')
+					E('span', { 'style': 'font-size:18px;color:var(--qm-text-muted);font-weight:700' }, '›')
 				]),
 				E('pre', { 'class': 'mt-hardware-raw', 'style': 'margin-top:12px' }, rawDump || _('无响应。'))
 			])

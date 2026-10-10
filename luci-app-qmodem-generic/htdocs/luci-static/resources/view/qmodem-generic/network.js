@@ -297,96 +297,96 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
-			'.mt-net{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.mt-net{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境光晕 */
-			'.mt-net-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
-			'.mt-net-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(14,165,233,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+			'.mt-net-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mt-net-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 
 			/* 白色毛玻璃卡片核心样式 */
 			'.mt-net-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
-			'.mt-net-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+			'.mt-net-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
 
 			/* 顶部 Hero 玻璃卡片 */
-			'.mt-net-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
-			'.mt-net-kicker{font-size:12px;color:#0072f5;font-weight:750;letter-spacing:.03em;margin-bottom:4px}',
-			'.mt-net-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:flex;align-items:center;gap:10px}',
-			'.mt-net-sub{font-size:13px;color:#64748b;line-height:1.5}',
+			'.mt-net-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
+			'.mt-net-kicker{font-size:12px;color:var(--qm-accent);font-weight:750;letter-spacing:.03em;margin-bottom:4px}',
+			'.mt-net-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:flex;align-items:center;gap:10px}',
+			'.mt-net-sub{font-size:13px;color:var(--qm-text-muted);line-height:1.5}',
 			'.mt-op-logo{width:28px;height:28px;border-radius:6px;flex-shrink:0;object-fit:contain}',
 
 			/* 状态徽章 */
-			'.mt-net-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:750;white-space:nowrap;background:rgba(236,253,245,0.85);color:#065f46;border:1px solid rgba(167,243,208,0.8)}',
-			'.mt-net-badge:before{content:"";width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 0 4px rgba(16,185,129,0.2)}',
-			'.mt-net-badge.off{background:rgba(254,242,242,0.85);color:#991b1b;border-color:rgba(254,202,202,0.8)}',
-			'.mt-net-badge.off:before{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,0.2)}',
+			'.mt-net-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:750;white-space:nowrap;background:var(--qm-ok-soft);color:var(--qm-ok);border:1px solid var(--qm-ok-border)}',
+			'.mt-net-badge:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--qm-ok);box-shadow:0 0 0 4px var(--qm-ok-soft)}',
+			'.mt-net-badge.off{background:var(--qm-danger-soft);color:var(--qm-danger);border-color:var(--qm-danger-border)}',
+			'.mt-net-badge.off:before{background:var(--qm-danger);box-shadow:0 0 0 4px var(--qm-danger-border)}',
 
 			/* 4 列指标卡片 (带 SVG 动态微仪表) */
 			'.mt-net-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}',
 			'.mt-net-metric-card{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 14px}',
 			'.mt-net-metric-head{display:flex;justify-content:space-between;align-items:center;width:100%;margin-bottom:8px}',
-			'.mt-net-metric-label{font-size:11px;color:#64748b;font-weight:700}',
+			'.mt-net-metric-label{font-size:11px;color:var(--qm-text-muted);font-weight:700}',
 			'.mt-net-qual{font-size:10px;font-weight:750;padding:2px 8px;border-radius:999px}',
-			'.mt-net-qual.excellent{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}',
-			'.mt-net-qual.good{background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe}',
-			'.mt-net-qual.fair{background:#fffbeb;color:#d97706;border:1px solid #fde68a}',
-			'.mt-net-qual.weak{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}',
-			'.mt-net-qual.unknown{background:#f1f5f9;color:#94a3b8;border:1px solid #e2e8f0}',
+			'.mt-net-qual.excellent{background:var(--qm-ok-soft);color:var(--qm-ok);border:1px solid var(--qm-ok-border)}',
+			'.mt-net-qual.good{background:var(--qm-accent-soft);color:var(--qm-accent);border:1px solid var(--qm-accent-border)}',
+			'.mt-net-qual.fair{background:var(--qm-warn-soft);color:var(--qm-warn);border:1px solid var(--qm-warn-border)}',
+			'.mt-net-qual.weak{background:var(--qm-danger-soft);color:var(--qm-danger);border:1px solid var(--qm-danger-border)}',
+			'.mt-net-qual.unknown{background:var(--qm-surface-2);color:var(--qm-text-muted);border:1px solid var(--qm-border-soft)}',
 			'.mt-gauge-svg-box{position:relative;width:105px;height:62px;margin:2px 0 6px}',
 			'.mt-gauge-svg{width:100%;height:100%}',
-			'.mt-gauge-val{position:absolute;bottom:4px;left:0;right:0;font-size:17px;font-weight:800;color:#0f172a;letter-spacing:-.02em}',
+			'.mt-gauge-val{position:absolute;bottom:4px;left:0;right:0;font-size:17px;font-weight:800;color:var(--qm-text);letter-spacing:-.02em}',
 
 			/* 2 列网络状态与服务小区卡片 */
 			'.mt-net-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}',
-			'.mt-card-title{font-size:15px;font-weight:750;color:#0f172a;display:flex;align-items:center;gap:8px;margin-bottom:14px}',
-			'.mt-net-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(226,232,240,0.6);font-size:12px}',
+			'.mt-card-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px;margin-bottom:14px}',
+			'.mt-net-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12px}',
 			'.mt-net-row:last-child{border-bottom:0}',
-			'.mt-net-row span:first-child{color:#64748b;font-weight:500}',
-			'.mt-net-row strong{color:#0f172a;font-weight:600;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
+			'.mt-net-row span:first-child{color:var(--qm-text-muted);font-weight:500}',
+			'.mt-net-row strong{color:var(--qm-text);font-weight:600;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
 			'.mt-net-row-block{display:block}.mt-net-row-block>span:first-child{display:block;margin-bottom:8px}.mt-net-row-block strong{display:block;text-align:left}',
 
 			/* 频段锁定摘要芯片 */
 			'.mt-locksum{display:flex;flex-direction:column;gap:7px}',
 			'.mt-locksum-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
-			'.mt-locksum-label{font-size:10.5px;font-weight:700;color:#0072f5;background:rgba(239,246,255,0.9);border-radius:6px;padding:2px 8px}',
+			'.mt-locksum-label{font-size:10.5px;font-weight:700;color:var(--qm-accent);background:var(--qm-accent-soft);border-radius:6px;padding:2px 8px}',
 			'.mt-locksum-chips{display:flex;flex-wrap:wrap;gap:4px}',
-			'.mt-locksum-chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:6px;background:rgba(241,245,249,0.8);border:1px solid rgba(226,232,240,0.8);color:#0072f5;font-size:11px;font-weight:700}',
-			'.mt-locksum-chip.off{background:#f8fafc;color:#94a3b8;border-color:#e2e8f0}',
+			'.mt-locksum-chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:6px;background:var(--qm-surface-2);border:1px solid var(--qm-border-soft);color:var(--qm-accent);font-size:11px;font-weight:700}',
+			'.mt-locksum-chip.off{background:var(--qm-surface-2);color:var(--qm-text-muted);border-color:var(--qm-border-soft)}',
 
 			/* 载波聚合动态流向面板 */
-			'.mt-ssb-serving{padding:14px 18px;border-radius:14px;background:rgba(248,250,252,0.85);border:1px solid rgba(226,232,240,0.8);margin-bottom:14px}',
+			'.mt-ssb-serving{padding:14px 18px;border-radius:14px;background:var(--qm-surface-2);border:1px solid var(--qm-border-soft);margin-bottom:14px}',
 			'.mt-ssb-serving-head{display:flex;justify-content:space-between;align-items:center}',
-			'.mt-ssb-serving-title{font-size:14px;font-weight:750;color:#0f172a}',
-			'.mt-ssb-serving-meta{font-size:11px;color:#64748b}',
+			'.mt-ssb-serving-title{font-size:14px;font-weight:750;color:var(--qm-text)}',
+			'.mt-ssb-serving-meta{font-size:11px;color:var(--qm-text-muted)}',
 			'.mt-lock-cell-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin-top:12px}',
-			'.mt-lock-cell-card{padding:16px;border-radius:14px;border:1px solid rgba(226,232,240,0.8);background:rgba(248,250,252,0.75);transition:all .2s ease}',
-			'.mt-lock-cell-card:hover{border-color:rgba(0,114,245,0.4);background:#fff;transform:translateY(-2px)}',
+			'.mt-lock-cell-card{padding:16px;border-radius:14px;border:1px solid var(--qm-border-soft);background:var(--qm-surface-2);transition:all .2s ease}',
+			'.mt-lock-cell-card:hover{border-color:var(--qm-accent-border);background:var(--qm-surface);transform:translateY(-2px)}',
 			'.mt-lock-cell-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}',
-			'.mt-lock-cell-band{font-size:13px;font-weight:750;color:#0f172a}',
-			'.mt-cell-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:750;text-transform:uppercase}',
-			'.mt-cell-role.pcc{background:#0072f5;color:#fff}',
+			'.mt-lock-cell-band{font-size:13px;font-weight:750;color:var(--qm-text)}',
+			'.mt-cell-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:var(--qm-surface-2);color:var(--qm-text-soft);font-size:10px;font-weight:750;text-transform:uppercase}',
+			'.mt-cell-role.pcc{background:var(--qm-accent);color:var(--qm-on-hero)}',
 
 			/* 信号条组件 */
 			'.mt-sbar{display:flex;align-items:center;gap:8px;margin:6px 0}',
-			'.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:#64748b}',
-			'.mt-sbar-track{flex:1;height:6px;border-radius:999px;background:#e2e8f0;overflow:hidden;min-width:60px}',
+			'.mt-sbar-label{flex:0 0 44px;font-size:11px;font-weight:600;color:var(--qm-text-muted)}',
+			'.mt-sbar-track{flex:1;height:6px;border-radius:999px;background:var(--qm-border-soft);overflow:hidden;min-width:60px}',
 			'.mt-sbar-fill{height:100%;border-radius:inherit;transition:width .4s ease}',
 			'.mt-sbar-value{flex:0 0 auto;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;min-width:72px;text-align:right}',
-			'.mt-sbar.excellent .mt-sbar-fill{background:#10b981}.mt-sbar.excellent .mt-sbar-value{color:#059669}',
-			'.mt-sbar.good .mt-sbar-fill{background:#0072f5}.mt-sbar.good .mt-sbar-value{color:#2563eb}',
-			'.mt-sbar.fair .mt-sbar-fill{background:#f59e0b}.mt-sbar.fair .mt-sbar-value{color:#d97706}',
-			'.mt-sbar.weak .mt-sbar-fill{background:#ef4444}.mt-sbar.weak .mt-sbar-value{color:#dc2626}',
+			'.mt-sbar.excellent .mt-sbar-fill{background:var(--qm-ok)}.mt-sbar.excellent .mt-sbar-value{color:var(--qm-ok)}',
+			'.mt-sbar.good .mt-sbar-fill{background:var(--qm-accent)}.mt-sbar.good .mt-sbar-value{color:var(--qm-accent)}',
+			'.mt-sbar.fair .mt-sbar-fill{background:var(--qm-warn)}.mt-sbar.fair .mt-sbar-value{color:var(--qm-warn)}',
+			'.mt-sbar.weak .mt-sbar-fill{background:var(--qm-danger)}.mt-sbar.weak .mt-sbar-value{color:var(--qm-danger)}',
 
 			/* 无线策略网格 */
 			'.mt-control-section{margin-top:16px}',
 			'.mt-control-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}',
 			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin:10px 0}',
-			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid rgba(226,232,240,0.8);border-radius:10px;background:rgba(248,250,252,0.8);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
-			'.mt-band-option:hover{border-color:rgba(0,114,245,0.4);background:#fff}',
-			'.mt-band-option.checked{border-color:#0072f5;background:#eff6ff;color:#0072f5;box-shadow:inset 0 0 0 1px #0072f5}',
+			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
+			'.mt-band-option:hover{border-color:var(--qm-accent-border);background:var(--qm-surface)}',
+			'.mt-band-option.checked{border-color:var(--qm-accent);background:var(--qm-accent-soft);color:var(--qm-accent);box-shadow:inset 0 0 0 1px var(--qm-accent)}',
 			'.mt-band-option input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}',
 
 			/* 频率扫描终端卡片 */
-			'.mt-scan-panel{margin-top:12px;padding:16px;border-radius:14px;background:#0f172a;color:#38bdf8;box-shadow:inset 0 2px 6px rgba(0,0,0,0.5)}',
+			'.mt-scan-panel{margin-top:12px;padding:16px;border-radius:14px;background:var(--qm-surface-3);color:var(--qm-accent-2);box-shadow:inset 0 2px 6px var(--qm-scrim)}',
 			'.mt-scan-raw{margin:0;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}',
 
 			/* 响应式 */
@@ -436,7 +436,7 @@ return view.extend({
 				svgNode(svgStr),
 				E('div', { 'class': 'mt-gauge-val' }, has ? String(rawValue) : '--')
 			]),
-			E('span', { 'style': 'font-size:10px;color:#64748b' }, unit || '')
+			E('span', { 'style': 'font-size:10px;color:var(--qm-text-muted)' }, unit || '')
 		]);
 	},
 
@@ -447,10 +447,10 @@ return view.extend({
 				E('span', { 'class': 'mt-net-qual good' }, _('当前活跃'))
 			]),
 			E('div', { 'style': 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:62px;margin:2px 0 6px' }, [
-				E('div', { 'style': 'font-size:22px;font-weight:800;color:#0072f5;letter-spacing:-.02em' }, shown(band)),
-				E('span', { 'style': 'font-size:10px;color:#64748b' }, _('驻网频段'))
+				E('div', { 'style': 'font-size:22px;font-weight:800;color:var(--qm-accent);letter-spacing:-.02em' }, shown(band)),
+				E('span', { 'style': 'font-size:10px;color:var(--qm-text-muted)' }, _('驻网频段'))
 			]),
-			E('span', { 'style': 'font-size:10px;color:#64748b' }, _('RF 射频通道'))
+			E('span', { 'style': 'font-size:10px;color:var(--qm-text-muted)' }, _('RF 射频通道'))
 		]);
 	},
 
@@ -541,7 +541,7 @@ return view.extend({
 			if (!available.length)
 				return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:12px' }, [
 					E('h3', { 'style': 'font-size:14px;font-weight:750;margin:0 0 6px' }, bandClassLabel(bandClass)),
-					E('p', { 'style': 'font-size:11px;color:#94a3b8;margin:0' }, _('本模组经 QModem 未上报该类别的可用频段。'))
+					E('p', { 'style': 'font-size:11px;color:var(--qm-text-muted);margin:0' }, _('本模组经 QModem 未上报该类别的可用频段。'))
 				]);
 		}
 
@@ -563,7 +563,7 @@ return view.extend({
 				[ box, E('span', {}, item.id) ]);
 		});
 
-		var summaryNode = E('span', { 'style': 'font-size:11px;color:#64748b' }, '');
+		var summaryNode = E('span', { 'style': 'font-size:11px;color:var(--qm-text-muted)' }, '');
 		function refresh() {
 			var n = boxes.filter(function(b) { return b.checked; }).length;
 			summaryNode.textContent = _('已选 %d / %d').format(n, available.length);
@@ -592,12 +592,12 @@ return view.extend({
 		return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:14px' }, [
 			E('div', { 'style': 'display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px' }, [
 				E('div', {}, [
-					E('h3', { 'style': 'font-size:15px;font-weight:750;margin:0 0 4px;color:#0f172a' }, [
+					E('h3', { 'style': 'font-size:15px;font-weight:750;margin:0 0 4px;color:var(--qm-text)' }, [
 						bandClassLabel(bandClass),
-						E('span', { 'style': 'margin-left:8px;font-size:11px;color:#0072f5;font-weight:600' },
+						E('span', { 'style': 'margin-left:8px;font-size:11px;color:var(--qm-accent);font-weight:600' },
 							_('共 %d 个频段').format(available.length))
 					]),
-					E('p', { 'style': 'margin:0;color:#64748b;font-size:11px' }, locked.length
+					E('p', { 'style': 'margin:0;color:var(--qm-text-muted);font-size:11px' }, locked.length
 						? _('当前锁定 %d 个：').format(locked.length) + locked.map(function(b) { return b.name; }).join('、')
 						: _('未锁定，模组可自由驻网到该类别全部可用频段。'))
 				]),
@@ -626,8 +626,8 @@ return view.extend({
 
 	lockBandSection: function(section, lockRaw, disabled) {
 		var head = E('div', { 'style': 'margin-bottom:14px' }, [
-			E('h3', { 'style': 'font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px' }, _('频段锁定')),
-			E('p', { 'style': 'font-size:12px;color:#64748b;margin:0' }, _('限制模组可使用的频段。日常使用建议保持不锁定。'))
+			E('h3', { 'style': 'font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 4px' }, _('频段锁定')),
+			E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin:0' }, _('限制模组可使用的频段。日常使用建议保持不锁定。'))
 		]);
 
 		var note = isDisabled(disabled, 'lockband')
@@ -649,7 +649,7 @@ return view.extend({
 		var children = [ head ];
 		if (note) children.push(note);
 		if (!classes.length) {
-			children.push(E('div', { 'style': 'padding:20px;text-align:center;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无可用的锁频段数据。')));
+			children.push(E('div', { 'style': 'padding:20px;text-align:center;color:var(--qm-text-muted);font-size:12px' }, _('本模组经 QModem 暂无可用的锁频段数据。')));
 		} else {
 			var self = this;
 			children = children.concat(classes.map(function(k) {
@@ -710,7 +710,7 @@ return view.extend({
 				])
 			]),
 			cells.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
-				: E('div', { 'style': 'padding:14px 0;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无载波聚合数据。'))
+				: E('div', { 'style': 'padding:14px 0;color:var(--qm-text-muted);font-size:12px' }, _('本模组经 QModem 暂无载波聚合数据。'))
 		]);
 	},
 
@@ -743,7 +743,7 @@ return view.extend({
 			if (rsrp !== '') children.push(signalBar(rsrp, 'rsrp', _('参考信号接收功率（RSRP）')));
 			if (rsrq !== '') children.push(signalBar(rsrq, 'rsrq', _('参考信号接收质量（RSRQ）')));
 			if (sinr !== '') children.push(signalBar(sinr, 'sinr', _('信号与干扰加噪声比（SINR）')));
-			if (pci) children.push(E('div', { 'style': 'margin-top:6px;font-size:11px;color:#64748b' }, _('物理小区标识（PCI）: ') + pci));
+			if (pci) children.push(E('div', { 'style': 'margin-top:6px;font-size:11px;color:var(--qm-text-muted)' }, _('物理小区标识（PCI）: ') + pci));
 			return E('div', { 'class': 'mt-lock-cell-card' }, children.concat(extra));
 		});
 
@@ -753,7 +753,7 @@ return view.extend({
 				_('邻区信息（%d）').format(list.length)
 			]),
 			cards.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
-				: E('div', { 'style': 'padding:14px 0;color:#94a3b8;font-size:12px' }, _('本模组经 QModem 暂无邻区数据。'))
+				: E('div', { 'style': 'padding:14px 0;color:var(--qm-text-muted);font-size:12px' }, _('本模组经 QModem 暂无邻区数据。'))
 		]);
 	},
 
@@ -795,9 +795,9 @@ return view.extend({
 	scanResult: function(text) {
 		var lines = atLines(text);
 		if (!lines.length)
-			return E('div', { 'style': 'color:#94a3b8;font-size:12px;padding:8px 0' }, _('模组未返回扫描数据。'));
+			return E('div', { 'style': 'color:var(--qm-text-muted);font-size:12px;padding:8px 0' }, _('模组未返回扫描数据。'));
 		return E('div', { 'class': 'mt-scan-panel' }, [
-			E('h4', { 'style': 'font-size:13px;margin:0 0 8px;color:#fff' }, _('扫描结果（%d 行）').format(lines.length)),
+			E('h4', { 'style': 'font-size:13px;margin:0 0 8px;color:var(--qm-on-hero)' }, _('扫描结果（%d 行）').format(lines.length)),
 			E('pre', { 'class': 'mt-scan-raw' }, lines.join('\n'))
 		]);
 	},
@@ -815,14 +815,14 @@ return view.extend({
 		res = res || {};
 		var errors = res.errors || [];
 		var warnings = errors.map(function(msg) {
-			return E('div', { 'class': 'mt-net-card', 'style': 'color:#b91c1c;margin-bottom:12px' }, msg);
+			return E('div', { 'class': 'mt-net-card', 'style': 'color:var(--qm-danger);margin-bottom:12px' }, msg);
 		});
 
 		if (!res.section)
 			return E('div', { 'class': 'mt-net' }, [
 				this.styleNode(),
 				controls.styleNode(),
-				E('div', { 'class': 'mt-net-card', 'style': 'color:#b91c1c' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
+				E('div', { 'class': 'mt-net-card', 'style': 'color:var(--qm-danger)' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
 			].concat(warnings));
 
 		var section = res.section;
@@ -881,7 +881,7 @@ return view.extend({
 					E('span', { 'class': 'mt-locksum-chips' }, locked.length
 						? locked.map(function(b) { return E('span', { 'class': 'mt-locksum-chip' }, b.id); })
 						: [ E('span', { 'class': 'mt-locksum-chip off' }, _('未锁定')) ]),
-					availCount ? E('span', { 'style': 'font-size:10px;color:#94a3b8' },
+					availCount ? E('span', { 'style': 'font-size:10px;color:var(--qm-text-muted)' },
 						_('可用 %d').format(availCount)) : null
 				]);
 			})) : null;
@@ -976,8 +976,8 @@ return view.extend({
 			/* 无线策略 (模式 / 优选 / 扫描) */
 			E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' }, [
 				E('div', { 'style': 'margin-bottom:14px' }, [
-					E('h3', { 'style': 'font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px' }, _('无线策略')),
-					E('p', { 'style': 'font-size:12px;color:#64748b;margin:0' }, _('配置驻网模式、网络制式优选及射频扫描。'))
+					E('h3', { 'style': 'font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 4px' }, _('无线策略')),
+					E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin:0' }, _('配置驻网模式、网络制式优选及射频扫描。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
 					this.modeCard(section, res.mode),
@@ -991,10 +991,10 @@ return view.extend({
 
 			/* 技术细节调试折叠栏 */
 			E('details', { 'class': 'mt-net-card', 'style': 'margin-top:16px' }, [
-				E('summary', { 'style': 'cursor:pointer;font-size:13px;font-weight:700;color:#0f172a;list-style:none' }, [
+				E('summary', { 'style': 'cursor:pointer;font-size:13px;font-weight:700;color:var(--qm-text);list-style:none' }, [
 					_('技术细节（QModem 原始数据）')
 				]),
-				E('pre', { 'class': 'mt-scan-raw', 'style': 'background:#0f172a;padding:14px;border-radius:12px;margin-top:12px' }, rawDump)
+				E('pre', { 'class': 'mt-scan-raw', 'style': 'background:var(--qm-surface-3);padding:14px;border-radius:12px;margin-top:12px' }, rawDump)
 			])
 		]);
 	},

@@ -19,6 +19,7 @@
 - [模组支持库自动注入](#模组支持库自动注入)
 - [自行编译](#自行编译)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
+- [界面主题与响应式（QM UI v2）](#界面主题与响应式qm-ui-v2)
 - [页面加载与后台任务（异步化）](#页面加载与后台任务异步化)
 - [已知事项](#已知事项)
 - [相关文档](#相关文档)
@@ -160,6 +161,26 @@ make package/luci-app-qmodem-generic/compile V=s
 2. `build` — ImmortalWrt SDK 矩阵编译：`immortalwrt-25.12-apk`（必需）、`immortalwrt-snapshot-apk`（允许失败）
 3. `release` — 把所有产物上传到 Release（tag 可在触发时指定，留空则自动生成）
 
+## 界面主题与响应式（QM UI v2）
+
+前端视觉层统一由 `htdocs/luci-static/resources/qmodem-generic/theme.js` 提供，只改前端、
+不动任何数据链路：
+
+- **兼容任意 LuCI 主题**：所有颜色走 `--qm-*` 令牌，令牌优先取主题自带变量
+  （`--background-color-*` / `--border-color-*` / `--text-color-*` / `--primary-color` /
+  `--success-color` …），取不到才用内置调色板；支持 `color-mix()` 的浏览器还会从主题
+  主色实时派生强调色，主题换肤本插件自动跟随。
+- **明暗自适应**：探测主题底色亮度 → `body` 加 `qm-dark`，内置调色板随之切换；
+  老主题（无 CSS 变量）与系统深色偏好同样生效。
+- **响应式**：栅格 `auto-fit` + 断点 1280 / 1024 / 820 / 560，手机端表单上下堆叠、
+  表格可横滑、按钮触摸目标 ≥ 38px，SMS 双栏会话在窄屏改单栏。
+- **历史页面免重写**：8 个视图的旧私有类名由统一适配层换肤，SVG 内嵌颜色通过
+  属性选择器（`[stroke="#0072f5"]`）令牌化，无需改动 SVG 字符串。
+
+新页面建议直接使用标准件：`.qm-shell` / `.qm-grid` / `.qm-card` / `.qm-stat` /
+`.qm-badge` / `.qm-kv` / `.qm-btn` / `.qm-alert`（`theme.card()` 等 helper 亦可）。
+详见 [QM UI v2 设计与落地说明](docs/QMODEM_UI_THEME.md)。
+
 ## 页面加载与后台任务（异步化）
 
 自 2.4.11-16 起，**LuCI 首屏不再等待任何 modem 查询**：
@@ -193,6 +214,7 @@ python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 
 - [异步化架构（后端任务不阻塞页面加载）](docs/QMODEM_ASYNC_ARCHITECTURE.md)
 - [QModem 通用美化版 UI 重构与自我审查报告](docs/QMODEM_GENERIC_UI_REPORT.md)
+- [QM UI v2 视觉层设计与落地说明](docs/QMODEM_UI_THEME.md)
 - [重构契约（数据层 API 约定）](docs/QMODEM_REFACTOR_CONTRACT.md)
 - [更新日志 CHANGELOG.md](CHANGELOG.md)
 

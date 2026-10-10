@@ -3,6 +3,46 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.5.0-1] - 2026-10-11
+
+### 新增
+- **QM UI v2 统一视觉层**（新增 `htdocs/luci-static/resources/qmodem-generic/theme.js`）：
+  设计令牌 + 组件标准件 + 响应式断点 + 旧类适配层，作用域限定在 `body.qm-app` 内，
+  不污染 LuCI 自身与其它插件。
+  - **主题兼容**：所有颜色改为 `var(<主题变量>, <内置 fallback>)`，优先取
+    `--background-color-* / --border-color-* / --text-color-* / --primary-color /
+    --success-color` 等；支持 `color-mix()` 时从主题主色实时派生强调色与半透明底色，
+    bootstrap / argon / material / openwrt-2020 及暗色 fork 均自动跟随。
+  - **明暗自适应**：`detectTone()` 依次用主题变量亮度 → `body` 计算背景色 →
+    `prefers-color-scheme` 判定，给 `body` 加 `qm-dark` 切换内置调色板；老主题（无 CSS
+    变量）同样生效。
+  - **响应式**：栅格统一 `auto-fit + minmax`，断点 1280/1024/820/560；≤820px 时 cbi 表单
+    标题与控件上下堆叠、输入与按钮 ≥38px、表格横滑、SMS 双栏会话改单栏；≤560px 全部单列、
+    按钮全宽 42px；尊重 `prefers-reduced-motion`。
+  - **组件标准件**：`.qm-shell/.qm-grid/.qm-card/.qm-stat/.qm-badge/.qm-dot/.qm-btn/
+    .qm-alert/.qm-kv/.qm-terminal/.qm-progress/.qm-table-wrap` 及 `theme.card()/kv()/
+    stat()/badge()/alert()/progress()` helper。
+  - **旧类适配**：按语义分组接管 250 个历史私有类名（卡片/标题/徽章/栅格/键值行/按钮/
+    等宽块/Hero），SVG 内嵌颜色用属性选择器 `[stroke="#0072f5"]{stroke:var(--qm-accent)}`
+    令牌化，无需改动 SVG 字符串；Hero 统一渐变 + 文字反色（`!important` 覆盖历史
+    inline style），保证任意主题可读。
+- **预览页** `qmodem-ui-preview.html`（仓库根目录，不进安装包）：iframe 内真实执行
+  theme.js，可切换 5 种主题 × 3 种视口，并可开关「叠加旧视图内联样式」验证兼容层。
+
+### 变更
+- **前端硬编码颜色全面令牌化**：`controls.js` 与 8 个视图共 500+ 处 hex/rgba/渐变
+  按声明属性（文字 vs 背景/描边）分流替换为 `--qm-*` 令牌；各视图原先定义在 `:root` 的
+  毛玻璃变量（会污染整个 LuCI）收窄到 `.qm-app` 作用域并改引令牌；运行时拼接到
+  inline style 的颜色（IPv4/IPv6 连接态、指标条、信号等级色）同样改为令牌。
+- **流量图例**：原先把色值当文本显示（`● 下行 (DL) #0072f5`），改为真正的彩色圆点 +
+  文案（并接入 i18n）。
+
+### 测试
+- `tests/run-frontend-tests.js` 的模块加载器新增 `qmodem-generic.theme` 依赖注入
+  （懒加载并缓存），`controls.js` 引入 theme 后 8 个视图的 render 用例仍全部通过
+  （108 项）。
+- `node --check` 覆盖 `theme.js` + `controls.js` + 8 个视图；CSS 括号平衡校验通过。
+
 ## [2.4.11-18] - 2026-10-01
 
 ### 维护

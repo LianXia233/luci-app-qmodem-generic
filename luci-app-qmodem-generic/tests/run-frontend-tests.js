@@ -320,8 +320,11 @@ function makeRuntime() {
 		};
 	}
 
+	var themeModuleCache = null;
+
 	function loadModule(relPath, extraModules) {
 		var src = fs.readFileSync(path.join(RES, relPath), 'utf8');
+		var isThemeModule = /theme\.js$/.test(relPath);
 		var modules = {
 			'luci': { view: baseclass },
 			'luci/baseclass': baseclass,
@@ -369,11 +372,15 @@ function makeRuntime() {
 
 		/* 'require qmodem-generic.controls as controls' 注入的局部变量 */
 		var controlsModule = modules['luci/qmodem-generic/controls'];
+		/* 'require qmodem-generic.theme as theme' 注入的局部变量（懒加载一次并缓存） */
+		if (!isThemeModule && !themeModuleCache)
+			themeModuleCache = loadModule('qmodem-generic/theme.js');
+		var themeModule = isThemeModule ? null : themeModuleCache;
 
 		var fn = new Function(
 			'require', 'L', 'window', 'document', 'E', '_',
 			'baseclass', 'view', 'rpc', 'uci', 'ui', 'dom', 'fs', 'poll',
-			'form', 'widgets', 'validation', 'request', 'session', 'xhr', 'controls',
+			'form', 'widgets', 'validation', 'request', 'session', 'xhr', 'controls', 'theme',
 			src);
 		return fn(
 			makeRequire(modules), { env: { rpctimeout: 20 } },
@@ -386,7 +393,7 @@ function makeRuntime() {
 			  } },
 			documentStub, E, _,
 			baseclass, baseclass, rpc, uci, ui, dom, fsStub, pollStub,
-			form, widgets, validation, request, session, xhr, controlsModule);
+			form, widgets, validation, request, session, xhr, controlsModule, themeModule);
 	}
 
 	return {

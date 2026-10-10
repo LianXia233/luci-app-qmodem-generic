@@ -123,38 +123,38 @@ return view.extend({
 	styleNode: function() {
 		return E('style', {}, [
 			/* 全局毛玻璃与流动渐变底蕴 */
-			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
-			'.mtconn-page{position:relative;max-width:1160px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.mtconn-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境氛围光球 */
-			'.mtconn-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
-			'.mtconn-bg-glow2{position:absolute;top:320px;right:5%;width:400px;height:400px;background:radial-gradient(circle,rgba(14,165,233,0.10) 0%,rgba(99,102,241,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+			'.mtconn-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mtconn-bg-glow2{position:absolute;top:320px;right:5%;width:400px;height:400px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 
 			/* 白色毛玻璃卡片通用规则 */
 			'.mtconn-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
-			'.mtconn-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+			'.mtconn-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
 
 			/* 顶部 Hero 玻璃卡片 */
-			'.mtconn-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
-			'.mtconn-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
-			'.mtconn-sub{font-size:13px;color:#64748b;line-height:1.5}',
-			'.mtconn-state{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(255,255,255,0.8);border:1px solid rgba(226,232,240,0.9);box-shadow:0 2px 8px rgba(0,0,0,0.04);font-size:13px;font-weight:750;white-space:nowrap}',
-			'.mtconn-dot{width:10px;height:10px;border-radius:50%;background:#cbd5e1;position:relative}',
-			'.mtconn-state.online{color:#065f46;background:rgba(236,253,245,0.85);border-color:rgba(167,243,208,0.8)}',
-			'.mtconn-state.online .mtconn-dot{background:#10b981;box-shadow:0 0 0 0 rgba(16,185,129,0.6);animation:qmConnPulse 2s infinite}',
-			'@keyframes qmConnPulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,0.7)}70%{box-shadow:0 0 0 8px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}',
+			'.mtconn-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
+			'.mtconn-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.mtconn-sub{font-size:13px;color:var(--qm-text-muted);line-height:1.5}',
+			'.mtconn-state{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--qm-glass);border:1px solid var(--qm-border-soft);box-shadow:0 2px 8px var(--qm-shadow-color);font-size:13px;font-weight:750;white-space:nowrap}',
+			'.mtconn-dot{width:10px;height:10px;border-radius:50%;background:var(--qm-border);position:relative}',
+			'.mtconn-state.online{color:var(--qm-ok);background:var(--qm-ok-soft);border-color:var(--qm-ok-border)}',
+			'.mtconn-state.online .mtconn-dot{background:var(--qm-ok);box-shadow:0 0 0 0 var(--qm-ok-soft);animation:qmConnPulse 2s infinite}',
+			'@keyframes qmConnPulse{0%{box-shadow:0 0 0 0 var(--qm-ok-soft)}70%{box-shadow:0 0 0 8px var(--qm-ok-soft)}100%{box-shadow:0 0 0 0 var(--qm-ok-soft)}}',
 
 			/* 关键指标概览卡片 (4 列) */
 			'.mtconn-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px}',
 			'.mtconn-fact-card{display:flex;align-items:center;gap:14px;padding:16px 18px}',
-			'.mtconn-fact-icon{width:40px;height:40px;border-radius:12px;background:rgba(239,246,255,0.8);border:1px solid rgba(191,219,254,0.6);display:flex;align-items:center;justify-content:center;color:#0072f5;flex-shrink:0}',
-			'.mtconn-fact-label{font-size:11px;color:#64748b;font-weight:600;margin-bottom:2px}',
-			'.mtconn-fact-val{font-size:15px;font-weight:750;color:#0f172a;word-break:break-all;letter-spacing:-.01em}',
+			'.mtconn-fact-icon{width:40px;height:40px;border-radius:12px;background:var(--qm-accent-soft);border:1px solid var(--qm-accent-border);display:flex;align-items:center;justify-content:center;color:var(--qm-accent);flex-shrink:0}',
+			'.mtconn-fact-label{font-size:11px;color:var(--qm-text-muted);font-weight:600;margin-bottom:2px}',
+			'.mtconn-fact-val{font-size:15px;font-weight:750;color:var(--qm-text);word-break:break-all;letter-spacing:-.01em}',
 
 			/* 动态 SVG 链路拓扑面板 */
 			'.mtconn-topo-card{padding:20px 24px;margin-bottom:16px}',
 			'.mtconn-topo-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}',
-			'.mtconn-topo-title{font-size:15px;font-weight:750;color:#0f172a;display:flex;align-items:center;gap:8px}',
-			'.mtconn-topo-sub{font-size:11px;color:#64748b}',
+			'.mtconn-topo-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px}',
+			'.mtconn-topo-sub{font-size:11px;color:var(--qm-text-muted)}',
 			'.mtconn-topo-svg{width:100%;height:100px;display:block}',
 			'@keyframes qmStreamFlow{to{stroke-dashoffset:-36}}',
 			'.qm-stream-line{stroke-dasharray:7,5;animation:qmStreamFlow 1.5s linear infinite}',
@@ -162,64 +162,64 @@ return view.extend({
 			/* 快捷操作动作按钮条 (拨号/挂断/重拨) */
 			'.mtconn-actions-bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:16px}',
 			'.mtconn-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 22px;border-radius:12px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s ease;border:1px solid transparent;backdrop-filter:blur(8px)}',
-			'.mtconn-btn-primary{background:linear-gradient(135deg,#0072f5 0%,#2563eb 100%);color:#fff;box-shadow:0 4px 14px rgba(0,114,245,0.25)}',
-			'.mtconn-btn-primary:hover{background:linear-gradient(135deg,#1a85ff 0%,#1d4ed8 100%);transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,114,245,0.35)}',
-			'.mtconn-btn-danger{background:rgba(254,242,242,0.85);color:#dc2626;border-color:rgba(254,202,202,0.8)}',
-			'.mtconn-btn-danger:hover{background:#fee2e2;transform:translateY(-1px);box-shadow:0 4px 12px rgba(220,38,38,0.15)}',
-			'.mtconn-btn-secondary{background:rgba(255,255,255,0.85);color:#334155;border-color:rgba(226,232,240,0.8)}',
-			'.mtconn-btn-secondary:hover{background:#fff;color:#0072f5;transform:translateY(-1px);border-color:rgba(0,114,245,0.3)}',
+			'.mtconn-btn-primary{background:var(--qm-accent-gradient);color:var(--qm-on-hero);box-shadow:0 4px 14px var(--qm-accent-border)}',
+			'.mtconn-btn-primary:hover{background:var(--qm-accent-gradient);transform:translateY(-1px);box-shadow:0 6px 18px var(--qm-accent-border)}',
+			'.mtconn-btn-danger{background:var(--qm-danger-soft);color:var(--qm-danger);border-color:var(--qm-danger-border)}',
+			'.mtconn-btn-danger:hover{background:var(--qm-danger-soft);transform:translateY(-1px);box-shadow:0 4px 12px var(--qm-danger-border)}',
+			'.mtconn-btn-secondary{background:var(--qm-glass);color:var(--qm-text-soft);border-color:var(--qm-border-soft)}',
+			'.mtconn-btn-secondary:hover{background:var(--qm-surface);color:var(--qm-accent);transform:translateY(-1px);border-color:var(--qm-accent-border)}',
 
 			/* 双列地址与会话面板 */
 			'.mtconn-session-grid{display:grid;grid-template-columns:1.28fr 0.92fr;gap:16px;margin-bottom:16px}',
 			'.mtconn-sec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}',
-			'.mtconn-sec-title{font-size:15px;font-weight:750;color:#0f172a;display:flex;align-items:center;gap:8px}',
-			'.mtconn-sec-sub{font-size:11px;color:#64748b;margin-top:2px}',
+			'.mtconn-sec-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px}',
+			'.mtconn-sec-sub{font-size:11px;color:var(--qm-text-muted);margin-top:2px}',
 			'.mtconn-badge{padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.02em}',
-			'.mtconn-badge.online{background:#ecfdf5;color:#059669;border:1px solid #a7f3d0}',
-			'.mtconn-badge.offline{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}',
+			'.mtconn-badge.online{background:var(--qm-ok-soft);color:var(--qm-ok);border:1px solid var(--qm-ok-border)}',
+			'.mtconn-badge.offline{background:var(--qm-surface-2);color:var(--qm-text-muted);border:1px solid var(--qm-border-soft)}',
 
 			/* 地址网格与行项目 */
 			'.mtconn-address-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}',
-			'.mtconn-kv-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid rgba(226,232,240,0.6);font-size:12px}',
+			'.mtconn-kv-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12px}',
 			'.mtconn-kv-row:last-child{border-bottom:0}',
-			'.mtconn-kv-label{color:#64748b;font-weight:500}',
-			'.mtconn-kv-val{color:#0f172a;font-weight:600;text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}',
+			'.mtconn-kv-label{color:var(--qm-text-muted);font-weight:500}',
+			'.mtconn-kv-val{color:var(--qm-text);font-weight:600;text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}',
 
 			/* 拨号状态原始网格 */
 			'.mtconn-dial-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;padding-right:4px}',
-			'.mtconn-dial-item{display:flex;justify-content:space-between;padding:7px 10px;border-radius:10px;background:rgba(248,250,252,0.7);border:1px solid rgba(241,245,249,0.85);font-size:11px}',
-			'.mtconn-dial-key{color:#64748b;font-weight:600}',
-			'.mtconn-dial-val{color:#0f172a;font-weight:700;font-variant-numeric:tabular-nums}',
+			'.mtconn-dial-item{display:flex;justify-content:space-between;padding:7px 10px;border-radius:10px;background:var(--qm-surface-2);border:1px solid var(--qm-surface-2);font-size:11px}',
+			'.mtconn-dial-key{color:var(--qm-text-muted);font-weight:600}',
+			'.mtconn-dial-val{color:var(--qm-text);font-weight:700;font-variant-numeric:tabular-nums}',
 
 			/* APN 拨号配置表单区域 (白色毛玻璃) */
 			'.mtconn-config-card{margin-bottom:16px}',
 			'.mtconn-config-card .cbi-map>h2,.mtconn-config-card .cbi-map-descr,.mtconn-config-card .cbi-section>h3{display:none}',
 			'.mtconn-config-card .cbi-section{margin:0;padding:0;border:0;box-shadow:none}',
 			'.mtconn-config-card .cbi-section-node{padding:0}',
-			'.mtconn-config-card .cbi-value{padding:12px 0;border-bottom:1px solid rgba(226,232,240,0.6);display:grid;grid-template-columns:180px 1fr;align-items:center}',
+			'.mtconn-config-card .cbi-value{padding:12px 0;border-bottom:1px solid var(--qm-border-soft);display:grid;grid-template-columns:180px 1fr;align-items:center}',
 			'.mtconn-config-card .cbi-value:last-child{border-bottom:0}',
-			'.mtconn-config-card .cbi-value-title{font-size:13px;font-weight:600;color:#334155}',
+			'.mtconn-config-card .cbi-value-title{font-size:13px;font-weight:600;color:var(--qm-text-soft)}',
 			'.mtconn-config-card .cbi-value-field{padding:0}',
-			'.mtconn-config-card .cbi-input-text,.mtconn-config-card select{background:rgba(255,255,255,0.85);border:1px solid rgba(203,213,225,0.8);border-radius:10px;padding:7px 12px;font-size:13px;color:#0f172a;transition:all .2s ease;width:100%;max-width:380px}',
-			'.mtconn-config-card .cbi-input-text:focus,.mtconn-config-card select:focus{background:#fff;border-color:#0072f5;box-shadow:0 0 0 3px rgba(0,114,245,0.15);outline:none}',
-			'.mtconn-config-footer{margin-top:16px;padding-top:14px;border-top:1px solid rgba(226,232,240,0.7);display:flex;justify-content:flex-end}',
+			'.mtconn-config-card .cbi-input-text,.mtconn-config-card select{background:var(--qm-glass);border:1px solid var(--qm-border);border-radius:10px;padding:7px 12px;font-size:13px;color:var(--qm-text);transition:all .2s ease;width:100%;max-width:380px}',
+			'.mtconn-config-card .cbi-input-text:focus,.mtconn-config-card select:focus{background:var(--qm-surface);border-color:var(--qm-accent);box-shadow:0 0 0 3px var(--qm-accent-soft);outline:none}',
+			'.mtconn-config-footer{margin-top:16px;padding-top:14px;border-top:1px solid var(--qm-border-soft);display:flex;justify-content:flex-end}',
 
 			/* 折叠面板 (高级连接信息 & 日志) */
 			'.mtconn-details{margin-bottom:16px;overflow:hidden}',
-			'.mtconn-details summary{list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;color:#0f172a}',
+			'.mtconn-details summary{list-style:none;cursor:pointer;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;color:var(--qm-text)}',
 			'.mtconn-details summary::-webkit-details-marker{display:none}',
-			'.mtconn-chevron{display:inline-block;transition:transform .2s ease;font-size:18px;color:#94a3b8;font-weight:700}',
+			'.mtconn-chevron{display:inline-block;transition:transform .2s ease;font-size:18px;color:var(--qm-text-muted);font-weight:700}',
 			'.mtconn-details[open] .mtconn-chevron{transform:rotate(90deg)}',
-			'.mtconn-details-body{padding:0 20px 20px;border-top:1px solid rgba(226,232,240,0.6)}',
+			'.mtconn-details-body{padding:0 20px 20px;border-top:1px solid var(--qm-border-soft)}',
 
 			/* 日志极客风格终端视窗 */
-			'.mtconn-term-box{background:#0f172a;border-radius:14px;padding:14px;margin-top:12px;box-shadow:inset 0 2px 6px rgba(0,0,0,0.5)}',
+			'.mtconn-term-box{background:var(--qm-surface-3);border-radius:14px;padding:14px;margin-top:12px;box-shadow:inset 0 2px 6px var(--qm-scrim)}',
 			'.mtconn-term-header{display:flex;align-items:center;gap:6px;margin-bottom:10px}',
 			'.mtconn-term-dot{width:10px;height:10px;border-radius:50%}',
-			'.mtconn-term-dot.r{background:#ef4444}',
-			'.mtconn-term-dot.y{background:#f59e0b}',
-			'.mtconn-term-dot.g{background:#10b981}',
-			'.mtconn-term-log{margin:0;max-height:280px;overflow:auto;color:#38bdf8;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}',
+			'.mtconn-term-dot.r{background:var(--qm-danger)}',
+			'.mtconn-term-dot.y{background:var(--qm-warn)}',
+			'.mtconn-term-dot.g{background:var(--qm-ok)}',
+			'.mtconn-term-log{margin:0;max-height:280px;overflow:auto;color:var(--qm-accent-2);font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}',
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.mtconn-facts{grid-template-columns:repeat(2,1fr)}.mtconn-session-grid{grid-template-columns:1fr}.mtconn-address-grid{grid-template-columns:1fr}}',
@@ -358,7 +358,7 @@ return view.extend({
 					E('span', { 'class': 'mtconn-badge online' }, 'ubus')
 				]),
 				dialRows.length ? E('div', { 'class': 'mtconn-dial-list' }, dialRows) :
-					E('div', { 'style': 'color:#94a3b8;font-size:12px;padding:20px 0;text-align:center' }, _('暂无拨号状态数据'))
+					E('div', { 'style': 'color:var(--qm-text-muted);font-size:12px;padding:20px 0;text-align:center' }, _('暂无拨号状态数据'))
 			])
 		]);
 	},
@@ -416,10 +416,10 @@ return view.extend({
 				self.styleNode(),
 				controls.styleNode(),
 				modemBar,
-				E('div', { 'class': 'mtconn-card', 'style': 'color:#b91c1c;background:rgba(254,242,242,0.85);margin-top:16px' },
+				E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger);background:var(--qm-danger-soft);margin-top:16px' },
 					_('未检测到模组（请确认 QModem 已识别该设备）。')),
 				(res.errors || []).map(function(msg) {
-					return E('div', { 'class': 'mtconn-card', 'style': 'margin-top:10px;color:#b91c1c' }, msg);
+					return E('div', { 'class': 'mtconn-card', 'style': 'margin-top:10px;color:var(--qm-danger)' }, msg);
 				})
 			]);
 		}
@@ -486,7 +486,7 @@ return view.extend({
 				E('div', { 'class': 'mtconn-bg-glow1' }),
 				E('div', { 'class': 'mtconn-bg-glow2' }),
 
-				(res.errors || []).length ? E('div', { 'class': 'mtconn-card', 'style': 'color:#b91c1c;margin-bottom:14px' }, _('部分数据读取失败：') + res.errors.join('；')) : null,
+				(res.errors || []).length ? E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger);margin-bottom:14px' }, _('部分数据读取失败：') + res.errors.join('；')) : null,
 				modemBar,
 
 				/* 顶部 Hero 玻璃卡片 */
@@ -614,7 +614,7 @@ return view.extend({
 			return E('div', { 'class': 'mtconn-page' }, [
 				self.styleNode(),
 				controls.styleNode(),
-				E('div', { 'class': 'mtconn-card', 'style': 'color:#b91c1c;margin-top:16px' },
+				E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger);margin-top:16px' },
 					_('页面渲染失败：') + ((err && err.message) || String(err)))
 			]);
 		});
@@ -670,7 +670,7 @@ return view.extend({
 			self._apnFormNode = formNode;
 			return formNode;
 		}).catch(function(err) {
-			self._apnFormNode = E('div', { 'class': 'mtconn-card', 'style': 'color:#b91c1c' },
+			self._apnFormNode = E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger)' },
 				_('拨号设置渲染失败：') + ((err && err.message) || String(err)));
 			return self._apnFormNode;
 		});

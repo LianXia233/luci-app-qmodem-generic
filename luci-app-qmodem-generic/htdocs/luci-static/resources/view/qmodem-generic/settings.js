@@ -33,22 +33,22 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			':root{--qm-glass-bg:rgba(255,255,255,0.72);--qm-glass-border:rgba(255,255,255,0.85);--qm-glass-shadow:0 8px 32px rgba(31,64,120,0.06),0 1px 3px rgba(0,0,0,0.03);--qm-primary:#0072f5;--qm-success:#10b981;--qm-warning:#f59e0b;--qm-danger:#ef4444}',
-			'.mt-diag-page{position:relative;max-width:960px;margin:0 auto;color:#1e293b;padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.mt-diag-page{position:relative;max-width:960px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
-			'.mt-set-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:radial-gradient(circle,rgba(0,114,245,0.12) 0%,rgba(16,185,129,0.04) 50%,transparent 70%);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
-			'.mt-set-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:radial-gradient(circle,rgba(99,102,241,0.09) 0%,rgba(14,165,233,0.05) 50%,transparent 70%);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
+			'.mt-set-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.mt-set-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 
 			/* 白色毛玻璃卡片核心样式 */
 			'.mt-diag-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:24px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
-			'.mt-diag-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(31,64,120,0.08),0 2px 6px rgba(0,0,0,0.04)}',
+			'.mt-diag-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
 
 			/* 顶部 Hero 玻璃卡片 */
-			'.mt-diag-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,255,255,0.85) 0%,rgba(240,246,255,0.7) 100%)}',
-			'.mt-diag-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
-			'.mt-diag-sub{font-size:13px;color:#64748b;line-height:1.5;margin:0}',
-			'.mt-diag-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:rgba(239,246,255,0.85);color:#0072f5;border:1px solid rgba(191,219,254,0.8);font-size:12px;font-weight:750;white-space:nowrap}',
-			'.mt-diag-dot{width:8px;height:8px;border-radius:50%;background:#0072f5;box-shadow:0 0 0 4px rgba(0,114,245,0.2)}',
+			'.mt-diag-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
+			'.mt-diag-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.mt-diag-sub{font-size:13px;color:var(--qm-text-muted);line-height:1.5;margin:0}',
+			'.mt-diag-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--qm-accent-soft);color:var(--qm-accent);border:1px solid var(--qm-accent-border);font-size:12px;font-weight:750;white-space:nowrap}',
+			'.mt-diag-dot{width:8px;height:8px;border-radius:50%;background:var(--qm-accent);box-shadow:0 0 0 4px var(--qm-accent-soft)}',
 
 			/* 动态 SVG 配置流拓扑卡片 */
 			'.mt-diag-topo-card{padding:20px 24px;margin-bottom:16px}',
@@ -58,26 +58,26 @@ return view.extend({
 			'@keyframes qmConfigDash{to{stroke-dashoffset:-36}}',
 
 			/* 表单区域精美定制 (白色毛玻璃) */
-			'.mt-diag-card-head{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid rgba(226,232,240,0.7)}',
-			'.mt-diag-card-head h3{font-size:16px;font-weight:750;color:#0f172a;margin:0 0 4px;display:flex;align-items:center;gap:8px}',
-			'.mt-diag-card-head p{font-size:12px;color:#64748b;margin:0;line-height:1.5}',
+			'.mt-diag-card-head{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--qm-border-soft)}',
+			'.mt-diag-card-head h3{font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 4px;display:flex;align-items:center;gap:8px}',
+			'.mt-diag-card-head p{font-size:12px;color:var(--qm-text-muted);margin:0;line-height:1.5}',
 			'.mt-diag-card .cbi-map>h2,.mt-diag-card .cbi-map-descr,.mt-diag-card .cbi-section>h3{display:none}',
 			'.mt-diag-card .cbi-section{margin:0;padding:0;border:0;box-shadow:none}',
 			'.mt-diag-card .cbi-section-node{padding:0}',
-			'.mt-diag-card .cbi-value{padding:14px 0;border-bottom:1px solid rgba(226,232,240,0.6);display:grid;grid-template-columns:200px 1fr;align-items:center}',
+			'.mt-diag-card .cbi-value{padding:14px 0;border-bottom:1px solid var(--qm-border-soft);display:grid;grid-template-columns:200px 1fr;align-items:center}',
 			'.mt-diag-card .cbi-value:last-child{border-bottom:0}',
-			'.mt-diag-card .cbi-value-title{font-size:13px;font-weight:650;color:#334155}',
-			'.mt-diag-card .cbi-value-description{font-size:11px;color:#94a3b8;margin-top:4px;line-height:1.4}',
-			'.mt-diag-card .cbi-input-text,.mt-diag-card select{background:rgba(255,255,255,0.85);border:1px solid rgba(203,213,225,0.8);border-radius:10px;padding:8px 14px;font-size:13px;color:#0f172a;transition:all .2s ease;width:100%;max-width:380px}',
-			'.mt-diag-card .cbi-input-text:focus,.mt-diag-card select:focus{background:#fff;border-color:#0072f5;box-shadow:0 0 0 3px rgba(0,114,245,0.15);outline:none}',
+			'.mt-diag-card .cbi-value-title{font-size:13px;font-weight:650;color:var(--qm-text-soft)}',
+			'.mt-diag-card .cbi-value-description{font-size:11px;color:var(--qm-text-muted);margin-top:4px;line-height:1.4}',
+			'.mt-diag-card .cbi-input-text,.mt-diag-card select{background:var(--qm-glass);border:1px solid var(--qm-border);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--qm-text);transition:all .2s ease;width:100%;max-width:380px}',
+			'.mt-diag-card .cbi-input-text:focus,.mt-diag-card select:focus{background:var(--qm-surface);border-color:var(--qm-accent);box-shadow:0 0 0 3px var(--qm-accent-soft);outline:none}',
 
 			/* 保存按钮与底部导航 */
-			'.mt-diag-footer{margin-top:20px;padding-top:16px;border-top:1px solid rgba(226,232,240,0.7);display:flex;justify-content:flex-end}',
-			'.mt-diag-save-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:12px;font-size:13px;font-weight:750;cursor:pointer;background:linear-gradient(135deg,#0072f5 0%,#2563eb 100%);color:#fff;border:0;box-shadow:0 4px 14px rgba(0,114,245,0.25);transition:all .2s ease}',
-			'.mt-diag-save-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,114,245,0.35)}',
+			'.mt-diag-footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--qm-border-soft);display:flex;justify-content:flex-end}',
+			'.mt-diag-save-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 24px;border-radius:12px;font-size:13px;font-weight:750;cursor:pointer;background:var(--qm-accent-gradient);color:var(--qm-on-hero);border:0;box-shadow:0 4px 14px var(--qm-accent-border);transition:all .2s ease}',
+			'.mt-diag-save-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px var(--qm-accent-border)}',
 			'.mt-diag-back{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap}',
-			'.mt-diag-back-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:12px;font-size:12.5px;font-weight:650;color:#334155;background:rgba(255,255,255,0.85);border:1px solid rgba(226,232,240,0.85);text-decoration:none;transition:all .2s ease}',
-			'.mt-diag-back-btn:hover{background:#fff;color:#0072f5;border-color:rgba(0,114,245,0.3);transform:translateY(-1px)}',
+			'.mt-diag-back-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:12px;font-size:12.5px;font-weight:650;color:var(--qm-text-soft);background:var(--qm-glass);border:1px solid var(--qm-border-soft);text-decoration:none;transition:all .2s ease}',
+			'.mt-diag-back-btn:hover{background:var(--qm-surface);color:var(--qm-accent);border-color:var(--qm-accent-border);transform:translateY(-1px)}',
 
 			/* 响应式适配 */
 			'@media(max-width:720px){.mt-diag-hero{flex-direction:column;align-items:flex-start}.mt-diag-card .cbi-value{grid-template-columns:1fr;gap:6px}.mt-diag-card{padding:18px}}'

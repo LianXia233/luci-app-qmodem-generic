@@ -1,0 +1,679 @@
+'use strict';
+'require baseclass';
+
+/*
+ * QM UI v2 —— 统一视觉层（设计令牌 + 组件皮肤 + 响应式 + 旧类适配）
+ *
+ * 目标（只改前端、不动任何后端与数据链路）：
+ *   1) 兼容 OpenWrt/ImmortalWrt 的任意 LuCI 主题（bootstrap / argon / material /
+ *      openwrt-2020 / 各 fork 的暗色变体 …）——所有颜色一律走 CSS 变量：
+ *      优先取主题自带的变量（--background-color-* / --border-color-* /
+ *      --text-color-* / --primary-color / --success-color …），取不到才用内置
+ *      fallback 调色板，因此主题换肤时本插件自动跟随。
+ *   2) 明/暗自适应：JS 探测主题底色亮度，给 body 加 qm-app / qm-dark，
+ *      fallback 调色板随之切换（主题自带变量仍然优先）。
+ *   3) 响应式：一套栅格 + 四个断点（1280 / 1024 / 820 / 560），卡片、表单、
+ *      表格、SMS 会话、终端在手机上一律可用，触摸目标 ≥ 38px。
+ *   4) 旧类适配：历史视图的 mt-* / qm-* / mtconn-* 等私有类名由本层统一"换肤"，
+ *      JS 里的硬编码颜色也已令牌化（见 tools 脚本执行记录），无需改视图逻辑。
+ *
+ * 用法（视图内）：
+ *   'require qmodem-generic.theme as theme';
+ *   render: function() { return E('div', {}, [ theme.stylesheet(), ... ]); }
+ * stylesheet() 会把 <style> 注入到 document.head（幂等，只注入一次），
+ * 返回的占位节点可直接放进视图节点数组。
+ */
+
+/* ------------------------------------------------------------------ */
+/* 1) 设计令牌                                                          */
+/* ------------------------------------------------------------------ */
+/* 说明：所有令牌都写成 var(<主题变量>, <内置 fallback>)。
+ * 主题提供了变量 → 自动跟随主题；没有变量的老主题 → 用内置调色板。 */
+
+var CSS_TOKENS = [
+	/* 亮色（默认） */
+	'.qm-app{',
+	'--qm-maxw:1360px;--qm-gap:16px;--qm-radius:14px;--qm-radius-sm:10px;--qm-radius-xs:8px;',
+	'--qm-surface:var(--background-color-high,#ffffff);',
+	'--qm-surface-2:var(--background-color-low,#f4f6f9);',
+	'--qm-surface-3:var(--background-color-normal,#eaeef3);',
+	'--qm-glass:var(--background-color-high,#ffffff);',
+	'--qm-border:var(--border-color-medium,#d7dde5);',
+	'--qm-border-soft:var(--border-color-low,#e7ecf2);',
+	'--qm-border-strong:var(--border-color-high,rgba(15,23,42,.22));',
+	'--qm-text:var(--text-color-high,#16202c);',
+	'--qm-text-soft:var(--text-color-medium,#3d4756);',
+	'--qm-text-muted:var(--text-color-low,#6b7684);',
+	'--qm-accent:var(--primary-color,var(--link-color,#0072f5));',
+	'--qm-accent-2:var(--primary-color,#38bdf8);',
+	'--qm-accent-3:var(--primary-color,#0d9488);',
+	'--qm-ok:var(--success-color,#10b981);',
+	'--qm-warn:var(--warning-color,#f59e0b);',
+	'--qm-danger:var(--error-color,#ef4444);',
+	'--qm-on-accent:#ffffff;--qm-on-hero:#ffffff;--qm-scrim:rgba(15,23,42,.45);',
+	'--qm-shadow-color:rgba(15,23,42,.10);',
+	'--qm-shadow:0 2px 8px var(--qm-shadow-color);',
+	'--qm-shadow-md:0 6px 18px var(--qm-shadow-color);',
+	'--qm-shadow-lg:0 14px 34px var(--qm-shadow-color);',
+	'--qm-accent-soft:rgba(0,114,245,.10);--qm-accent-border:rgba(0,114,245,.32);',
+	'--qm-ok-soft:rgba(16,185,129,.12);--qm-ok-border:rgba(16,185,129,.38);',
+	'--qm-warn-soft:rgba(245,158,11,.12);--qm-warn-border:rgba(245,158,11,.38);',
+	'--qm-danger-soft:rgba(239,68,68,.10);--qm-danger-border:rgba(239,68,68,.36);',
+	'--qm-accent-gradient:linear-gradient(135deg,#0072f5 0%,#2563eb 100%);',
+	'--qm-hero-gradient:linear-gradient(135deg,#0f172a 0%,#2563eb 100%);',
+	'--qm-surface-gradient:linear-gradient(135deg,rgba(255,255,255,.92) 0%,rgba(240,246,255,.72) 100%);',
+	'--qm-glow-a:radial-gradient(circle,rgba(0,114,245,.12) 0%,rgba(16,185,129,.04) 50%,transparent 70%);',
+	'--qm-glow-b:radial-gradient(circle,rgba(99,102,241,.09) 0%,rgba(14,165,233,.05) 50%,transparent 70%);',
+	'--qm-terminal-gradient:linear-gradient(135deg,#111820,#1d2733);',
+	'--qm-font-mono:var(--font-family-monospace,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);',
+	'color:var(--qm-text);',
+
+	'}',
+
+	/* 暗色：主题变量优先，fallback 换成暗色调色板 */
+	'.qm-app.qm-dark{',
+	'--qm-surface:var(--background-color-high,#161b22);',
+	'--qm-surface-2:var(--background-color-low,#1d232c);',
+	'--qm-surface-3:var(--background-color-normal,#232a34);',
+	'--qm-glass:var(--background-color-high,#161b22);',
+	'--qm-border:var(--border-color-medium,#2d3540);',
+	'--qm-border-soft:var(--border-color-low,#242c36);',
+	'--qm-border-strong:var(--border-color-high,rgba(255,255,255,.24));',
+	'--qm-text:var(--text-color-high,#e6edf3);',
+	'--qm-text-soft:var(--text-color-medium,#c2ccd6);',
+	'--qm-text-muted:var(--text-color-low,#93a0ad);',
+	'--qm-ok:var(--success-color,#34d399);',
+	'--qm-warn:var(--warning-color,#fbbf24);',
+	'--qm-danger:var(--error-color,#f87171);',
+	'--qm-accent-2:var(--primary-color,#7dd3fc);',
+	'--qm-scrim:rgba(0,0,0,.60);',
+	'--qm-shadow-color:rgba(0,0,0,.45);',
+	'--qm-accent-soft:rgba(56,189,248,.14);--qm-accent-border:rgba(56,189,248,.40);',
+	'--qm-ok-soft:rgba(52,211,153,.14);--qm-ok-border:rgba(52,211,153,.40);',
+	'--qm-warn-soft:rgba(251,191,36,.14);--qm-warn-border:rgba(251,191,36,.40);',
+	'--qm-danger-soft:rgba(248,113,113,.14);--qm-danger-border:rgba(248,113,113,.40);',
+	'--qm-accent-gradient:linear-gradient(135deg,var(--qm-accent) 0%,#1d4ed8 100%);',
+	'--qm-hero-gradient:linear-gradient(135deg,#0b1220 0%,var(--qm-accent) 100%);',
+	'--qm-surface-gradient:linear-gradient(135deg,rgba(30,37,47,.92) 0%,rgba(23,30,40,.82) 100%);',
+	'--qm-glow-a:radial-gradient(circle,rgba(56,189,248,.10) 0%,rgba(52,211,153,.04) 50%,transparent 70%);',
+	'--qm-glow-b:radial-gradient(circle,rgba(129,140,248,.09) 0%,rgba(56,189,248,.05) 50%,transparent 70%);',
+	'--qm-terminal-gradient:linear-gradient(135deg,#0b1017,#151d27);',
+	'}',
+
+	/* 浏览器支持 color-mix 时，半透明/渐变令牌全部从主题主色实时派生，
+	 * 主题换主色（如 argon 的 #5e72e4）本插件的强调色也会跟着变。 */
+	'@supports (background:color-mix(in srgb,red 50%,blue)){',
+	'.qm-app{',
+	'--qm-accent-soft:color-mix(in srgb,var(--qm-accent) 12%,var(--qm-surface));',
+	'--qm-accent-border:color-mix(in srgb,var(--qm-accent) 34%,var(--qm-surface));',
+	'--qm-ok-soft:color-mix(in srgb,var(--qm-ok) 12%,var(--qm-surface));',
+	'--qm-ok-border:color-mix(in srgb,var(--qm-ok) 38%,var(--qm-surface));',
+	'--qm-warn-soft:color-mix(in srgb,var(--qm-warn) 13%,var(--qm-surface));',
+	'--qm-warn-border:color-mix(in srgb,var(--qm-warn) 38%,var(--qm-surface));',
+	'--qm-danger-soft:color-mix(in srgb,var(--qm-danger) 11%,var(--qm-surface));',
+	'--qm-danger-border:color-mix(in srgb,var(--qm-danger) 36%,var(--qm-surface));',
+	'--qm-glass:color-mix(in srgb,var(--qm-surface) 90%,transparent);',
+	'--qm-accent-gradient:linear-gradient(135deg,var(--qm-accent) 0%,color-mix(in srgb,var(--qm-accent) 60%,#0b1220) 100%);',
+	'--qm-hero-gradient:linear-gradient(135deg,color-mix(in srgb,var(--qm-accent) 72%,#060b14) 0%,var(--qm-accent) 100%);',
+	'--qm-glow-a:radial-gradient(circle,color-mix(in srgb,var(--qm-accent) 14%,transparent) 0%,color-mix(in srgb,var(--qm-ok) 5%,transparent) 50%,transparent 70%);',
+	'--qm-glow-b:radial-gradient(circle,color-mix(in srgb,var(--qm-accent-2) 12%,transparent) 0%,color-mix(in srgb,var(--qm-accent) 6%,transparent) 50%,transparent 70%);',
+	'}}'
+].join('');
+
+/* ------------------------------------------------------------------ */
+/* 2) 基础排版与页面容器                                                */
+/* ------------------------------------------------------------------ */
+
+var CSS_BASE = [
+	'.qm-app *,.qm-app *::before,.qm-app *::after{box-sizing:border-box}',
+	/* 页面容器：历史视图各自的根类统一宽度与居中 */
+	'.qm-app .qm-shell,.qm-app [class$="-page"],.qm-app .mt-net,.qm-app .mt-system,.qm-app .mt-sms,',
+	'.qm-app .mt-hardware,.qm-app .mt-terminal,.qm-app .mt-ui-page{width:100%;max-width:var(--qm-maxw);margin:0 auto}',
+	'.qm-app h1,.qm-app h2,.qm-app h3,.qm-app h4{margin:0;color:var(--qm-text);line-height:1.32}',
+	'.qm-app p{margin:0}',
+	'.qm-app a{color:var(--qm-accent);text-decoration:none}',
+	'.qm-app a:hover{text-decoration:underline}',
+	'.qm-app hr{border:0;border-top:1px solid var(--qm-border-soft);margin:14px 0}',
+	/* 数字/指标统一等宽数字，避免跳动 */
+	'.qm-app strong,.qm-app b{color:var(--qm-text)}',
+	'.qm-app :focus-visible{outline:2px solid var(--qm-accent);outline-offset:2px;border-radius:6px}',
+	/* 历史视图里的"背景光斑"装饰在统一皮肤下全部移除（暗色主题会脏） */
+	'.qm-app [class*="bg-glow"]{display:none!important}'
+].join('');
+
+/* ------------------------------------------------------------------ */
+/* 3) 新组件类（QM UI v2 标准件，新代码优先使用）                        */
+/* ------------------------------------------------------------------ */
+
+var CSS_COMPONENTS = [
+	'.qm-shell{display:flex;flex-direction:column;gap:var(--qm-gap);padding:2px 0 26px}',
+	'.qm-grid{display:grid;gap:var(--qm-gap);grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}',
+	'.qm-grid-2{display:grid;gap:var(--qm-gap);grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr))}',
+	'.qm-grid-3{display:grid;gap:var(--qm-gap);grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr))}',
+	'.qm-span-all{grid-column:1/-1}',
+
+	'.qm-card{position:relative;padding:16px 18px;border:1px solid var(--qm-border);border-radius:var(--qm-radius);',
+	'background:var(--qm-surface);box-shadow:var(--qm-shadow);transition:box-shadow .18s ease,border-color .18s ease}',
+	'.qm-card:hover{box-shadow:var(--qm-shadow-md);border-color:var(--qm-border-strong)}',
+	'.qm-card.is-flat{box-shadow:none}',
+	'.qm-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}',
+	'.qm-card-title{display:flex;align-items:center;gap:8px;min-width:0;font-size:14px;font-weight:700;color:var(--qm-text)}',
+	'.qm-card-title svg{width:18px;height:18px;flex:0 0 auto;stroke:var(--qm-accent)}',
+	'.qm-card-sub{margin-top:3px;font-size:11.5px;line-height:1.45;color:var(--qm-text-muted)}',
+	'.qm-card-foot{margin-top:12px;padding-top:10px;border-top:1px solid var(--qm-border-soft)}',
+
+	'.qm-kv{display:flex;flex-direction:column}',
+	'.qm-kv-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:7px 0;',
+	'border-bottom:1px solid var(--qm-border-soft);font-size:12.5px;line-height:1.5}',
+	'.qm-kv-row:last-child{border-bottom:0}',
+	'.qm-kv-key{flex:0 0 auto;color:var(--qm-text-muted)}',
+	'.qm-kv-val{min-width:0;text-align:right;font-weight:600;word-break:break-word;font-variant-numeric:tabular-nums}',
+
+	'.qm-stat{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid var(--qm-border);',
+	'border-radius:var(--qm-radius-sm);background:var(--qm-surface-2)}',
+	'.qm-stat-label{font-size:11.5px;color:var(--qm-text-muted)}',
+	'.qm-stat-val{font-size:20px;font-weight:750;line-height:1.2;font-variant-numeric:tabular-nums;',
+	'color:var(--qm-text);text-align:left}',
+	'.qm-stat-sub{font-size:11px;color:var(--qm-text-muted)}',
+
+	'.qm-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;',
+	'border:1px solid var(--qm-border);background:var(--qm-surface-2);color:var(--qm-text-soft);',
+	'font-size:11px;font-weight:650;line-height:1.5;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}',
+	'.qm-badge.is-ok{background:var(--qm-ok-soft);border-color:var(--qm-ok-border);color:var(--qm-ok)}',
+	'.qm-badge.is-warn{background:var(--qm-warn-soft);border-color:var(--qm-warn-border);color:var(--qm-warn)}',
+	'.qm-badge.is-danger{background:var(--qm-danger-soft);border-color:var(--qm-danger-border);color:var(--qm-danger)}',
+	'.qm-badge.is-accent{background:var(--qm-accent-soft);border-color:var(--qm-accent-border);color:var(--qm-accent)}',
+	'.qm-dot{width:8px;height:8px;border-radius:50%;background:var(--qm-text-muted);flex:0 0 auto;display:inline-block}',
+	'.qm-dot.is-ok{background:var(--qm-ok)}.qm-dot.is-warn{background:var(--qm-warn)}',
+	'.qm-dot.is-danger{background:var(--qm-danger)}.qm-dot.is-accent{background:var(--qm-accent)}',
+
+	'.qm-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 14px;',
+	'border:1px solid var(--qm-border);border-radius:var(--qm-radius-sm);background:var(--qm-surface);',
+	'color:var(--qm-text);font-size:12.5px;font-weight:650;cursor:pointer;transition:background-color .16s ease,border-color .16s ease}',
+	'.qm-btn:hover{background:var(--qm-surface-2);border-color:var(--qm-border-strong)}',
+	'.qm-btn-primary{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
+	'.qm-btn-primary:hover{background:var(--qm-accent);filter:brightness(1.06)}',
+	'.qm-btn-danger{background:var(--qm-danger);border-color:var(--qm-danger);color:#fff}',
+	'.qm-btn[disabled]{opacity:.55;cursor:not-allowed}',
+
+	'.qm-alert{display:flex;gap:8px;padding:10px 12px;border-radius:var(--qm-radius-sm);border:1px solid var(--qm-border);',
+	'background:var(--qm-surface-2);color:var(--qm-text-soft);font-size:12px;line-height:1.55}',
+	'.qm-alert.is-ok{background:var(--qm-ok-soft);border-color:var(--qm-ok-border);color:var(--qm-ok)}',
+	'.qm-alert.is-warn{background:var(--qm-warn-soft);border-color:var(--qm-warn-border);color:var(--qm-warn)}',
+	'.qm-alert.is-danger{background:var(--qm-danger-soft);border-color:var(--qm-danger-border);color:var(--qm-danger)}',
+
+	'.qm-empty{padding:26px 14px;text-align:center;color:var(--qm-text-muted);font-size:12px}',
+	'.qm-mono{font-family:var(--qm-font-mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-all}',
+	'.qm-scroll{max-height:340px;overflow:auto;-webkit-overflow-scrolling:touch}',
+	'.qm-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}',
+	'.qm-progress{height:6px;border-radius:999px;background:var(--qm-surface-3);overflow:hidden}',
+	'.qm-progress>i{display:block;height:100%;border-radius:999px;background:var(--qm-accent);transition:width .4s ease}',
+	'.qm-hide-sm{display:initial}.qm-only-sm{display:none}',
+	/* 终端/日志等深色块：跟随主题，不做硬编码黑底 */
+	'.qm-terminal{background:var(--qm-surface-3);color:var(--qm-text);border:1px solid var(--qm-border);',
+	'border-radius:var(--qm-radius-sm);padding:12px 14px;font-family:var(--qm-font-mono);font-size:12px;overflow:auto}'
+].join('');
+
+/* ------------------------------------------------------------------ */
+/* 4) 旧类适配层（历史视图的私有类名统一换肤）                            */
+/* ------------------------------------------------------------------ */
+/* 类名来源：全量扫描 controls.js + 8 个视图的 'class' 属性，按语义分组。 */
+
+var CARD_CLASSES = [
+	'mt-adv-card', 'mt-adv-topo-card', 'mt-control-card', 'mt-control-state-current', 'mt-diag-card',
+	'mt-diag-topo-card', 'mt-info-card', 'mt-lock-cell-card', 'mt-locksum', 'mt-net-card',
+	'mt-net-metric-card', 'mt-hardware-band', 'mt-hardware-head', 'mt-hardware-tools', 'mt-scan-panel',
+	'mt-sys-topo-card', 'mt-system-card', 'mt-system-maint-tools', 'mt-system-maintenance',
+	'mt-system-temp-box', 'mt-terminal-card', 'mt-ui-card', 'mtconn-card', 'mtconn-config-card',
+	'mtconn-fact-card', 'mtconn-topo-card', 'qm-glass-card', 'qm-stat-card', 'qm-cc-card',
+	'qm-address-card', 'qm-ip-box', 'qm-carrier-topo-box', 'qm-signal-dial-box', 'qm-traffic-chart-box',
+	'qm-mini-item', 'qm-cc-metrics', 'mt-locksum-chip', 'mt-band-option', 'mt-diag-card-head'
+];
+/* Hero 容器类（带背景渐变的整块区域）与其内部元素类分开：
+ * 背景/圆角只给容器，文字反色给容器的后代。 */
+var HERO_CLASSES = [
+	'qm-hero', 'mt-ui-hero', 'mt-system-hero', 'mtconn-hero', 'mt-diag-hero', 'mt-net-hero',
+	'mt-sms-hero', 'mt-terminal-hero'
+];
+var HERO_INNER_CLASSES = [
+	'qm-hero-title', 'qm-hero-sub', 'qm-hero-meta', 'qm-hero-actions', 'mt-sms-hero-actions'
+];
+var TITLE_CLASSES = [
+	'mt-card-title', 'mt-diag-title', 'mt-net-title', 'mt-ssb-serving-title', 'mt-system-title',
+	'mtconn-sec-title', 'mtconn-title', 'mtconn-topo-title', 'qm-card-title', 'qm-hero-title'
+];
+var SUB_CLASSES = [
+	'mt-diag-sub', 'mt-net-sub', 'mt-system-sub', 'mtconn-sec-sub', 'mtconn-sub', 'mtconn-topo-sub',
+	'qm-card-sub', 'qm-hero-sub', 'qm-stat-sub', 'mt-control-desc', 'mt-net-kicker', 'mt-system-kicker'
+];
+var BADGE_CLASSES = [
+	'mt-diag-badge', 'mt-net-badge', 'mt-sms-count-badge', 'mtconn-badge', 'qm-badge', 'qm-cc-badge',
+	'qm-pill-tag', 'qm-status-badge', 'mt-cell-role', 'mt-locksum-chip'
+];
+var GRID_CLASSES = [
+	'mt-control-grid', 'mt-info-grid-all', 'mt-lock-cell-grid', 'mt-net-grid', 'mt-system-grid',
+	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid', 'mt-locksum-chips', 'mt-hardware-caps',
+	/* 视图内原本写死的 4 列 / 3 列栅格，统一交给自适应网格 */
+	'mt-net-metrics', 'mtconn-facts', 'qm-grid-2', 'qm-grid-3', 'qm-shortcuts', 'qm-traffic-layout',
+	'mt-hardware-bands', 'mt-system-thermal-form'
+];
+var ROW_CLASSES = [
+	'mt-info-row', 'mt-net-row', 'mt-system-row', 'mtconn-kv-row', 'qm-ip-row', 'qm-list-row',
+	'mt-control-state', 'mtconn-dial-item', 'mt-sms-contact'
+];
+var KEY_CLASSES = [
+	'mt-info-key', 'mt-modem-bar-label', 'mt-net-metric-label', 'mt-sbar-label', 'mtconn-dial-key',
+	'mtconn-fact-label', 'mtconn-kv-label', 'qm-mini-label', 'qm-stat-label', 'mt-locksum-label'
+];
+/* 仅"旧视图里本就右对齐的数值"参与统一右对齐；
+ * 新组件的数值（qm-stat-val / qm-mini-val）与仪表数值保持各自视图的对齐方式。 */
+var VAL_CLASSES = [
+	'mt-info-val', 'mt-system-temp-val', 'mtconn-dial-val', 'mtconn-fact-val', 'mtconn-kv-val',
+	'qm-ip-val', 'mt-sbar-value'
+];
+var BTN_CLASSES = [
+	'mt-diag-back-btn', 'mt-diag-save-btn', 'mt-sms-btn', 'mt-sys-btn', 'mtconn-btn', 'qm-refresh-btn'
+];
+var MONO_CLASSES = [ 'mt-hardware-raw', 'mt-scan-raw', 'mt-system-raw', 'mtconn-term-log' ];
+
+function sel(list) {
+	return list.map(function(c) { return '.qm-app .' + c; }).join(',');
+}
+
+/* 带后缀（伪类 / 后代）的选择器必须逐类展开：
+ * 若写成 sel(list) + ' svg{…}'，逗号列表里只有最后一项会带上 svg，
+ * 前面几项会变成裸选择器直接命中元素自身（历史上曾把标题压成 18px 宽）。 */
+function selDesc(list, suffix) {
+	return list.map(function(c) { return '.qm-app .' + c + suffix; }).join(',');
+}
+
+var CSS_LEGACY = [
+	/* 卡片容器 */
+	sel(CARD_CLASSES) + '{background:var(--qm-surface);border:1px solid var(--qm-border);',
+	'border-radius:var(--qm-radius);box-shadow:var(--qm-shadow);color:var(--qm-text);',
+	'transition:box-shadow .18s ease,border-color .18s ease}',
+	selDesc(CARD_CLASSES, ':hover') + '{box-shadow:var(--qm-shadow-md)}',
+
+	/* 标题 / 副标题：nowrap 防止 flex 收缩把中文标题压成竖排 */
+	sel(TITLE_CLASSES) + '{display:flex;align-items:center;gap:8px;min-width:0;font-size:14px;',
+	'font-weight:700;color:var(--qm-text);line-height:1.35;white-space:nowrap;',
+	'overflow:hidden;text-overflow:ellipsis;background-image:none!important;',
+	'-webkit-text-fill-color:currentColor!important}',
+	selDesc(TITLE_CLASSES, ' svg') + '{width:18px;height:18px;flex:0 0 auto;stroke:var(--qm-accent)}',
+	sel(SUB_CLASSES) + '{color:var(--qm-text-muted);font-size:11.5px;line-height:1.5}',
+
+	/* 卡片头：左侧文案区可伸缩，右侧徽章不被压缩 */
+	'.qm-app .qm-card-head,.qm-app [class*="-card-head"],.qm-app [class*="-head"]>*{min-width:0}',
+	'.qm-app .qm-card-head>*:first-child,.qm-app [class*="-card-head"]>*:first-child{flex:1 1 auto}',
+
+	/* 历史视图用 background-clip:text 做的"渐变文字"，在任意主题下都可能
+	 * 变成透明字（渐变令牌随主题变化）。统一还原为纯色文字。 */
+	'.qm-app [class*="-val"],.qm-app [class*="-value"],.qm-app [class*="-label"],',
+	'.qm-app [class*="-kicker"]{background-image:none!important;-webkit-text-fill-color:currentColor!important}',
+
+	/* 徽章 */
+	sel(BADGE_CLASSES) + '{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:3px 9px;',
+	'border:1px solid var(--qm-border);border-radius:999px;background:var(--qm-surface-2);',
+	'color:var(--qm-text-soft);font-size:11px;font-weight:650;line-height:1.5;',
+	'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+
+	/* 栅格：统一为自适应网格（原固定 2 列在窄屏会挤） */
+	sel(GRID_CLASSES) + '{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}',
+	'.qm-app .mt-locksum-chips,.qm-app .mt-hardware-caps{grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))}',
+
+	/* 键值行 */
+	sel(ROW_CLASSES) + '{display:flex;align-items:baseline;justify-content:space-between;gap:12px;',
+	'border-bottom:1px solid var(--qm-border-soft);font-size:12.5px}',
+	selDesc(ROW_CLASSES, ':last-child') + '{border-bottom:0}',
+	sel(KEY_CLASSES) + '{color:var(--qm-text-muted);font-size:11.5px}',
+	sel(VAL_CLASSES) + '{font-weight:650;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
+
+	/* 按钮：统一触摸目标与圆角 */
+	sel(BTN_CLASSES) + '{display:inline-flex;align-items:center;justify-content:center;gap:6px;',
+	'min-height:36px;padding:7px 14px;border:1px solid var(--qm-border);border-radius:var(--qm-radius-sm);',
+	'background:var(--qm-surface);color:var(--qm-text);font-size:12.5px;font-weight:650;cursor:pointer;',
+	'transition:background-color .16s ease,border-color .16s ease,filter .16s ease}',
+	selDesc(BTN_CLASSES, ':hover') + '{background:var(--qm-surface-2);border-color:var(--qm-border-strong)}',
+	sel(BTN_CLASSES.filter(function(c) { return /primary|save/.test(c); })) +
+		'{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
+	sel(BTN_CLASSES.filter(function(c) { return /danger/.test(c); })) +
+		'{background:var(--qm-danger);border-color:var(--qm-danger);color:#fff}',
+
+	/* 等宽输出块 */
+	sel(MONO_CLASSES) + '{font-family:var(--qm-font-mono);font-size:12px;line-height:1.55;',
+	'white-space:pre-wrap;word-break:break-all;background:var(--qm-surface-2);color:var(--qm-text);',
+	'border:1px solid var(--qm-border-soft);border-radius:var(--qm-radius-sm);padding:10px 12px}',
+
+	/* Hero：统一渐变（跟随主题主色），文字强制反色，保证任何主题下可读。
+	 * 渐变文字（-webkit-background-clip:text）一并还原为纯色，避免暗底暗字。 */
+	sel(HERO_CLASSES) + '{background:var(--qm-hero-gradient)!important;color:var(--qm-on-hero)!important;',
+	'border:0;border-radius:18px;box-shadow:var(--qm-shadow-md)}',
+	selDesc(HERO_CLASSES, ' *') + '{color:var(--qm-on-hero)!important;',
+	'border-color:rgba(255,255,255,.28)!important;-webkit-text-fill-color:var(--qm-on-hero)!important}',
+	selDesc(HERO_CLASSES.concat(HERO_INNER_CLASSES), ' svg') + '{stroke:var(--qm-on-hero)!important}',
+	selDesc(HERO_CLASSES, ' [class*="badge"]') + ',' + selDesc(HERO_CLASSES, ' [class*="-dot"]') +
+		'{background:rgba(255,255,255,.18)!important}',
+
+	/* 进度条 / 条形图轨道 */
+	'.qm-app .qm-mini-bar,.qm-app .mt-sbar-track,.qm-app .mt-sbar{background:var(--qm-surface-3);border-radius:999px;overflow:hidden}',
+	'.qm-app .mt-sbar-fill{background:var(--qm-accent)}',
+	'.qm-app .qm-mini-item{display:flex;flex-direction:column;gap:4px}',
+
+	/* 表单（LuCI cbi）：输入控件跟随主题，宽屏保持 LuCI 默认布局 */
+	'.qm-app .cbi-input-text,.qm-app .cbi-input-select,.qm-app .cbi-input-textarea,',
+	'.qm-app input[type="text"],.qm-app input[type="password"],.qm-app select,.qm-app textarea',
+	'{background:var(--qm-surface);color:var(--qm-text);border:1px solid var(--qm-border);',
+	'border-radius:var(--qm-radius-xs);padding:6px 9px;max-width:100%}',
+	'.qm-app .cbi-button:focus,.qm-app .btn:focus{outline:2px solid var(--qm-accent);outline-offset:2px}',
+	/* 分区标题（设置/高级/网络等表单页） */
+	'.qm-app .mt-control-section{margin-top:18px}',
+	'.qm-app .mt-control-section-head h3{font-size:16px;font-weight:750}',
+	'.qm-app .mt-control-note{background:var(--qm-warn-soft);border:1px solid var(--qm-warn-border);',
+	'color:var(--qm-warn);border-radius:var(--qm-radius-xs);padding:10px 12px;font-size:11.5px;line-height:1.5}',
+	'.qm-app .mt-modem-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;',
+	'background:var(--qm-surface);border:1px solid var(--qm-border);border-radius:var(--qm-radius-sm);padding:10px 14px}',
+
+	/* SVG 内联颜色统一令牌化：CSS 属性选择器按原色值命中，
+	 * presentation attribute 优先级低于 CSS，因此可直接覆盖（无需改 JS 里的 SVG 字符串） */
+	'.qm-app [stroke="#0072f5"],.qm-app [stroke="#2563eb"],.qm-app [stroke="#1264d8"],',
+	'.qm-app [stroke="#176bc1"],.qm-app [stroke="#1a85ff"],.qm-app [stroke="#1d4ed8"],',
+	'.qm-app [stroke="#087eae"],.qm-app [stroke="#07988e"]{stroke:var(--qm-accent)}',
+	'.qm-app [fill="#0072f5"],.qm-app [fill="#2563eb"],.qm-app [fill="#1264d8"],',
+	'.qm-app [fill="#1d4ed8"],.qm-app [fill="#07988e"]{fill:var(--qm-accent)}',
+	'.qm-app [stop-color="#0072f5"],.qm-app [stop-color="#2563eb"]{stop-color:var(--qm-accent)}',
+	'.qm-app [stroke="#60a5fa"],.qm-app [stroke="#38bdf8"],.qm-app [stroke="#bfdbfe"]{stroke:var(--qm-accent-2)}',
+	'.qm-app [fill="#60a5fa"],.qm-app [fill="#38bdf8"]{fill:var(--qm-accent-2)}',
+	'.qm-app [stroke="#10b981"],.qm-app [stroke="#059669"]{stroke:var(--qm-ok)}',
+	'.qm-app [fill="#10b981"],.qm-app [fill="#059669"]{fill:var(--qm-ok)}',
+	'.qm-app [stop-color="#10b981"]{stop-color:var(--qm-ok)}',
+	'.qm-app [stop-color="#f59e0b"]{stop-color:var(--qm-warn)}',
+	'.qm-app [stop-color="#ef4444"]{stop-color:var(--qm-danger)}',
+	'.qm-app [stop-color="#94a3b8"],.qm-app [stop-color="#64748b"]{stop-color:var(--qm-text-muted)}',
+	'.qm-app [stop-color="#0ea5e9"]{stop-color:var(--qm-accent-2)}',
+	'.qm-app [stroke="#f59e0b"]{stroke:var(--qm-warn)}.qm-app [fill="#f59e0b"]{fill:var(--qm-warn)}',
+	'.qm-app [stroke="#ef4444"],.qm-app [stroke="#dc2626"],.qm-app [stroke="#b91c1c"]{stroke:var(--qm-danger)}',
+	'.qm-app [fill="#ef4444"],.qm-app [fill="#dc2626"],.qm-app [fill="#b91c1c"]{fill:var(--qm-danger)}',
+	'.qm-app [stroke="#0f172a"],.qm-app [stroke="#1e293b"],.qm-app [stroke="#334155"]{stroke:var(--qm-text)}',
+	'.qm-app [fill="#0f172a"],.qm-app [fill="#1e293b"],.qm-app [fill="#334155"],',
+	'.qm-app [fill="#475569"]{fill:var(--qm-text)}',
+	'.qm-app [stroke="#64748b"],.qm-app [stroke="#94a3b8"],.qm-app [stroke="#cbd5e1"]{stroke:var(--qm-text-muted)}',
+	'.qm-app [fill="#64748b"],.qm-app [fill="#94a3b8"]{fill:var(--qm-text-muted)}',
+	'.qm-app [stroke="#e2e8f0"],.qm-app [stroke="#cbd5e1"],.qm-app [stroke="#226"],',
+	'.qm-app [stroke="rgba(226,232,240,0.8)"]{stroke:var(--qm-border)}',
+	'.qm-app [fill="#f1f5f9"],.qm-app [fill="#f8fafc"],.qm-app [fill="#e2e8f0"]{fill:var(--qm-surface-2)}',
+	'.qm-app [fill="#fff"],.qm-app [fill="#ffffff"]{fill:var(--qm-surface)}'
+].join('');
+
+/* ------------------------------------------------------------------ */
+/* 5) 响应式                                                            */
+/* ------------------------------------------------------------------ */
+
+var CSS_RESPONSIVE = [
+	/* ≥1280：宽屏给更密的栅格 */
+	'@media (min-width:1280px){.qm-app{--qm-gap:18px}}',
+
+	/* ≤1024：卡片最小宽度下调，Hero 收紧 */
+	'@media (max-width:1024px){',
+	'.qm-app{--qm-gap:14px}',
+	sel(GRID_CLASSES) + '{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}',
+	sel(HERO_CLASSES) + '{padding:18px 20px;border-radius:16px}',
+	'.qm-app .qm-shell,' + sel(['mt-ui-page', 'mtconn-page', 'mt-diag-page']) + '{padding-bottom:18px}',
+	'}',
+
+	/* ≤820：平板/竖屏 —— 卡片单列或双列、表单堆叠、表格可横滑 */
+	'@media (max-width:820px){',
+	'.qm-app{--qm-gap:12px;--qm-radius:12px}',
+	'.qm-app .qm-grid,.qm-app .qm-grid-2,.qm-app .qm-grid-3,' + sel(GRID_CLASSES) +
+		'{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}',
+	sel(HERO_CLASSES) + '{flex-direction:column;align-items:flex-start;gap:14px;padding:18px}',
+	selDesc(HERO_CLASSES, ' [class*="actions"]') + '{width:100%;flex-wrap:wrap}',
+	sel(CARD_CLASSES) + '{padding:14px 15px}',
+	'.qm-app .mt-control-grid,.qm-app .mt-system-grid,.qm-app .mt-net-grid,',
+	'.qm-app .mt-hardware-bands,.qm-app .mt-system-thermal-form{grid-template-columns:1fr}',
+	/* 4 列指标条 → 2 列 */
+	'.qm-app .mt-net-metrics,.qm-app .mtconn-facts{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}',
+	/* SMS 双栏（联系人 + 会话）改为单栏堆叠 */
+	'.qm-app .mt-sms-shell{grid-template-columns:1fr;min-height:0}',
+	'.qm-app .mt-sms-sidebar{max-height:240px;overflow:auto}',
+	/* 表单行：标题与控件上下堆叠（含视图内自定义的两列表单行） */
+	'.qm-app .mt-control-row,.qm-app .mt-sms-settings-row{grid-template-columns:1fr;gap:6px}',
+	'.qm-app .mtconn-config-card .cbi-value,.qm-app .mt-diag-card .cbi-value{grid-template-columns:1fr;gap:6px}',
+	'.qm-app .mtconn-config-card .cbi-input-text,.qm-app .mtconn-config-card select,',
+	'.qm-app .mt-diag-card .cbi-input-text,.qm-app .mt-diag-card select{max-width:100%}',
+	/* LuCI cbi 表单：标题与控件由左右分栏改为上下堆叠 */
+	'.qm-app .cbi-value{display:block;width:100%}',
+	'.qm-app .cbi-value-title,.qm-app .cbi-value-field{display:block;width:100%;float:none;padding:0 0 6px}',
+	'.qm-app .cbi-section-table-row,.qm-app .cbi-section-table-cell{display:block}',
+	'.qm-app .cbi-input-text,.qm-app .cbi-input-select,.qm-app select,.qm-app textarea,',
+	'.qm-app input[type="text"],.qm-app input[type="password"]{width:100%;min-height:38px}',
+	'.qm-app .btn,.qm-app .cbi-button{min-height:38px}',
+	'.qm-app table{display:block;width:100%;overflow-x:auto}',
+	'.qm-hide-sm{display:none}.qm-only-sm{display:initial}',
+	'}',
+
+	/* ≤560：手机 —— 全部单列，触摸优先 */
+	'@media (max-width:560px){',
+	'.qm-app{--qm-gap:10px;--qm-radius:12px;--qm-maxw:100%}',
+	'.qm-app .qm-grid,.qm-app .qm-grid-2,.qm-app .qm-grid-3,' + sel(GRID_CLASSES) + '{grid-template-columns:1fr}',
+	sel(CARD_CLASSES) + '{padding:13px 14px;border-radius:12px}',
+	'.qm-app .qm-card-head,' + sel(ROW_CLASSES) + '{gap:8px}',
+	sel(HERO_CLASSES) + '{padding:16px;border-radius:14px}',
+	'.qm-app .qm-stat-val{font-size:18px}',
+	'.qm-app .qm-btn,' + sel(BTN_CLASSES) + '{width:100%;min-height:42px}',
+	'.qm-app .qm-scroll{max-height:280px}',
+	'.qm-app .mt-sms-shell{grid-template-columns:1fr!important}',
+	'.qm-app .mt-sms-sidebar,.qm-app .mt-sms-contacts-scroll{max-height:220px}',
+	'.qm-app [class*="-hero"] [class*="-title"]{font-size:18px}',
+	'.qm-app .qm-kv-val,.qm-app ' + sel(VAL_CLASSES) + '{text-align:right}',
+	'}',
+
+	/* 无障碍：尊重"减少动态效果" */
+	'@media (prefers-reduced-motion:reduce){.qm-app *{animation-duration:.001ms!important;',
+	'animation-iteration-count:1!important;transition-duration:.001ms!important}}'
+].join('');
+
+var QM_CSS = [ CSS_TOKENS, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_RESPONSIVE ].join('\n');
+
+/* ------------------------------------------------------------------ */
+/* 6) 运行时：注入 + 明暗探测                                            */
+/* ------------------------------------------------------------------ */
+
+var STYLE_ID = 'qm-ui-theme';
+
+function injectOnce() {
+	if (typeof document === 'undefined' || !document.createElement)
+		return;
+	if (document.getElementById(STYLE_ID))
+		return;
+	var style = document.createElement('style');
+	style.id = STYLE_ID;
+	style.type = 'text/css';
+	style.appendChild(document.createTextNode(QM_CSS));
+	(document.head || document.documentElement).appendChild(style);
+}
+
+/* 解析 rgb()/rgba()/#hex 为亮度（0-1） */
+function luminance(value) {
+	if (!value)
+		return null;
+	var str = String(value).trim();
+	var m = str.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+	if (m)
+		return (0.299 * m[1] + 0.587 * m[2] + 0.114 * m[3]) / 255;
+	m = str.match(/^#([0-9a-f]{3})$/i);
+	if (m) {
+		var h = m[1];
+		return (0.299 * parseInt(h[0] + h[0], 16) + 0.587 * parseInt(h[1] + h[1], 16) +
+			0.114 * parseInt(h[2] + h[2], 16)) / 255;
+	}
+	m = str.match(/^#([0-9a-f]{6})$/i);
+	if (m) {
+		var n = parseInt(m[1], 16);
+		return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255;
+	}
+	return null;
+}
+
+/* 明暗探测：① 主题变量 → ② body 背景计算色 → ③ 系统偏好。
+ * 主题自带变量始终优先，探测结果只决定内置 fallback 调色板。 */
+function detectTone() {
+	var dark = false, decided = false;
+	try {
+		var root = window.getComputedStyle(document.documentElement);
+		var themeVar = (root.getPropertyValue('--background-color-normal') || '') ||
+			(root.getPropertyValue('--background-color-high') || '') ||
+			(root.getPropertyValue('--background-color') || '');
+		var lum = luminance(themeVar);
+		if (lum === null) {
+			var bodyBg = window.getComputedStyle(document.body).backgroundColor || '';
+			lum = luminance(bodyBg);
+		}
+		if (lum !== null) {
+			dark = lum < 0.5;
+			decided = true;
+		}
+	} catch (e) { /* 忽略：取不到就走系统偏好 */ }
+
+	if (!decided && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+		dark = true;
+
+	return dark ? 'dark' : 'light';
+}
+
+/* 整体的 try/catch 兜底：极简 DOM 替身（单元测试）或异常环境下一律静默跳过，
+ * 绝不让"注入皮肤"这件事本身把页面/测试搞崩。 */
+function apply() {
+	try {
+		if (typeof document === 'undefined' || !document.createElement)
+			return null;
+		injectOnce();
+		var body = document.body || document.documentElement;
+		if (body && body.classList) {
+			body.classList.add('qm-app');
+			body.classList.remove('qm-light');
+			body.classList.remove('qm-dark');
+			body.classList.add('qm-' + detectTone());
+		}
+	} catch (e) { /* 忽略 */ }
+	return null;
+}
+
+/* 视图内使用：注入样式表（幂等）并返回一个可直接放入节点数组的占位节点 */
+function stylesheet() {
+	apply();
+	return document.createElement('div');
+}
+
+/* ------------------------------------------------------------------ */
+/* 7) 组件构造helper（新代码可直接用，旧代码不受影响）                    */
+/* ------------------------------------------------------------------ */
+
+function el(tag, cls, data, attrs) {
+	var node = document.createElement(tag);
+	if (cls)
+		node.className = cls;
+	if (attrs)
+		for (var k in attrs)
+			node.setAttribute(k, attrs[k]);
+	if (data != null) {
+		if (data instanceof Array)
+			data.forEach(function(x) {
+				if (x == null) return;
+				node.appendChild(x instanceof Node ? x : document.createTextNode(String(x)));
+			});
+		else if (data instanceof Node)
+			node.appendChild(data);
+		else
+			node.innerHTML = String(data);
+	}
+	return node;
+}
+
+function card(opts) {
+	opts = opts || {};
+	var body = [];
+	if (opts.title) {
+		body.push(el('div', 'qm-card-head', [
+			el('div', '', [
+				el('div', 'qm-card-title', opts.icon ? [ opts.icon, opts.title ] : opts.title),
+				opts.sub ? el('div', 'qm-card-sub', opts.sub) : null
+			].filter(Boolean)),
+			opts.badge || null
+		].filter(Boolean)));
+	}
+	if (opts.body)
+		body = body.concat(opts.body instanceof Array ? opts.body : [ opts.body ]);
+	if (opts.foot)
+		body.push(el('div', 'qm-card-foot', opts.foot));
+	apply();
+	return el('section', 'qm-card' + (opts.flat ? ' is-flat' : ''), body);
+}
+
+function kv(pairs) {
+	return el('div', 'qm-kv', (pairs || []).map(function(p) {
+		return el('div', 'qm-kv-row', [
+			el('span', 'qm-kv-key', p[0]),
+			el('span', 'qm-kv-val', (p[1] == null || p[1] === '') ? '--' : String(p[1]))
+		]);
+	}));
+}
+
+function stat(label, value, sub) {
+	return el('div', 'qm-stat', [
+		el('span', 'qm-stat-label', label),
+		el('strong', 'qm-stat-val', (value == null || value === '') ? '--' : String(value)),
+		sub ? el('span', 'qm-stat-sub', sub) : null
+	].filter(Boolean));
+}
+
+function badge(text, tone) {
+	return el('span', 'qm-badge' + (tone ? ' is-' + tone : ''), text);
+}
+
+function alertBox(text, tone) {
+	return el('div', 'qm-alert' + (tone ? ' is-' + tone : ''), text);
+}
+
+function empty(text) {
+	return el('div', 'qm-empty', text);
+}
+
+function progress(pct, tone) {
+	var bar = el('div', 'qm-progress', el('i'));
+	bar.firstChild.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%';
+	if (tone)
+		bar.firstChild.style.background = 'var(--qm-' + tone + ')';
+	return bar;
+}
+
+/* 模块被 require 时立即注入一次：任何视图只要依赖 controls（本包所有视图都依赖），
+ * 皮肤就会先于内容渲染生效，无需逐个视图改写。 */
+try {
+	if (typeof document !== 'undefined' && document.body)
+		apply();
+} catch (e) { /* 忽略：非浏览器环境（如 Node 单元测试）不注入 */ }
+
+var API = {
+	css: function() { return QM_CSS; },
+	apply: apply,
+	stylesheet: stylesheet,
+	detectTone: detectTone,
+	card: card,
+	kv: kv,
+	stat: stat,
+	badge: badge,
+	alert: alertBox,
+	empty: empty,
+	progress: progress,
+	el: el
+};
+
+/* 供预览页 / 单元测试直接取 CSS 与 helper：
+ * Node 下可 require（本模块自带 baseclass 缺失兜底）；LuCI 内没有 module，不会生效。 */
+if (typeof module !== 'undefined' && module.exports)
+	module.exports = {
+		css: QM_CSS, tokens: CSS_TOKENS, base: CSS_BASE, components: CSS_COMPONENTS,
+		legacy: CSS_LEGACY, responsive: CSS_RESPONSIVE, api: API
+	};
+
+return (typeof baseclass !== 'undefined' && baseclass && baseclass.extend) ? baseclass.extend(API) : API;
