@@ -3,6 +3,14 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.5.0-2] - 2026-10-11
+
+### 维护
+- **版本号提升并触发 CI 重新编译**：`PKG_VERSION=2.5.0` / `PKG_RELEASE=2`，
+  用于产出带 QM UI v2 视觉层的 ipk / apk 包（内容与 2.5.0-1 一致，仅重新构建并发布）。
+- **CI 发布保留策略**：触发编译时沿用 `keep_releases=1`，发布后仅保留最近 1 个
+  Release（旧 Release 与对应 tag 自动清理）。
+
 ## [2.5.0-1] - 2026-10-11
 
 ### 新增
