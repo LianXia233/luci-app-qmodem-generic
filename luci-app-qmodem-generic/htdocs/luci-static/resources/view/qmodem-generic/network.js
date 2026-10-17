@@ -136,36 +136,59 @@ function bandItems(list) {
 	return list.map(bandItem).filter(Boolean);
 }
 
+/* 官方 neighborcell = LTE/NR 小区数组 + Feature/锁定状态等元数据，不能混为邻区。 */
 function neighborList(raw) {
-	if (!raw || typeof raw !== 'object')
-		return [];
-	var node = raw;
-	var wrappers = [ 'neighbor_cell', 'neighborcell', 'neighbour_cell', 'neighbor_cells',
-		'neighbourcell', 'neighbor', 'cells', 'list' ];
-	for (var i = 0; i < wrappers.length; i++) {
-		var v = ci(raw, [ wrappers[i] ]);
-		if (v && typeof v === 'object') { node = v; break; }
-	}
-	var out = [];
-	function walk(v, group) {
-		if (!v || typeof v !== 'object')
-			return;
-		if (Array.isArray(v)) {
-			v.forEach(function(x) { walk(x, group); });
-			return;
-		}
-		var keys = Object.keys(v);
-		if (!keys.length)
-			return;
-		var nested = keys.filter(function(k) { return v[k] && typeof v[k] === 'object'; });
-		if (nested.length === keys.length) {
-			keys.forEach(function(k) { walk(v[k], group || k); });
-			return;
-		}
-		out.push({ group: group || '', data: v });
-	}
-	walk(node, '');
-	return out;
+	var node = raw && (raw.neighborcell || raw.neighbor_cell || raw.neighbourcell || raw);
+	if (!node || typeof node !== 'object') return [];
+	var cells = [], grouped = false;
+	[ 'LTE', 'NR' ].forEach(function(group) {
+		if (!Array.isArray(node[group])) return;
+		grouped = true;
+		node[group].forEach(function(item) {
+			if (item && typeof item === 'object' && !Array.isArray(item))
+				cells.push({ group: group, data: item });
+		});
+	});
+	if (grouped || node.Feature || node.lockcell_status || node.lockcell_boot_hook)
+		return cells;
+	/* 兼容旧版直接返回的数组或单个小区对象。 */
+	if (Array.isArray(node))
+		return node.filter(function(item) { return item && typeof item === 'object'; })
+			.map(function(item) { return { group: pick(item, [ 'rat', 'type' ]), data: item }; });
+	if (ci(node, [ 'pci' ]) !== undefined && ci(node, [ 'arfcn', 'earfcn' ]) !== undefined)
+		return [ { group: pick(node, [ 'rat', 'type' ]), data: node } ];
+	return [];
+}
+
+var CELL_FIELD_ZH = {
+	unlock: '解除锁定', lockpci: '锁定 PCI', rebootmodem: '重启模组', manuallysearch: '手动搜索',
+	feature: '支持的操作', lockcellstatus: '锁小区状态', lockcellboothook: '开机锁小区',
+	enabled: '启用', delay: '延迟（秒）', lte: '4G LTE', nr: '5G NR',
+	ltefreq: '4G 频点', ltepci: '4G PCI', nrfreq: '5G 频点', nrpci: '5G PCI',
+	nrscs: '5G 子载波间隔', nrband: '5G 频段', status: '状态', rat: '网络制式',
+	locktype: '锁定类型', arfcn: '频点（ARFCN）', earfcn: '频点（EARFCN）',
+	pci: '物理小区标识（PCI）', band: '频段', scs: '子载波间隔',
+	rsrp: '信号强度（RSRP）', rsrq: '信号质量（RSRQ）', sinr: '信噪比（SINR）',
+	rssi: '接收信号强度（RSSI）', srxlev: '小区接收电平',
+	frequency: '频率', channel: '信道', cellid: '小区 ID', tac: '跟踪区码（TAC）',
+	cellreselpriority: '小区重选优先级'
+};
+function cellFieldLabel(key) {
+	var normalized = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+	return CELL_FIELD_ZH[normalized] || _(String(key));
+}
+function cellFieldValue(value) {
+	if (value === true || String(value).toLowerCase() === 'true') return _('是');
+	if (value === false || String(value).toLowerCase() === 'false') return _('否');
+	var key = String(value).trim().toLowerCase();
+	return { unlock: _('未锁定'), unlocked: _('未锁定'), locked: _('已锁定'),
+		lock: _('已锁定'), enabled: _('已启用'), disabled: _('已禁用'),
+		finish: _('已完成'), 'not finish': _('未完成') }[key] || shown(value);
+}
+function cellNode(raw) {
+	if (!raw || typeof raw !== 'object') return {};
+	var value = raw.neighborcell || raw.neighbor_cell || raw.neighbourcell;
+	return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
 function signalColorClass(value, kind) {
@@ -394,9 +417,11 @@ return view.extend({
 			/* 频率扫描终端卡片 */
 			'.mt-scan-panel{margin-top:12px;padding:16px;border-radius:14px;background:var(--qm-surface-3);color:var(--qm-accent-2);box-shadow:inset 0 2px 6px var(--qm-scrim)}',
 			'.mt-scan-raw{margin:0;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}',
+			'.mt-cell-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.mt-cell-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--qm-text-muted)}.mt-cell-field input,.mt-cell-field select{width:100%;box-sizing:border-box;min-height:36px;padding:6px 9px;border:1px solid var(--qm-border);background:var(--qm-surface);color:var(--qm-text);border-radius:9px}.mt-cell-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:14px}.mt-cell-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}.mt-cell-status{padding:12px;border:1px solid var(--qm-border-soft);border-radius:12px;background:var(--qm-surface-2)}',
 
 			/* 响应式 */
 			'@media(max-width:980px){.mt-net-metrics{grid-template-columns:repeat(2,1fr)}.mt-net-grid,.mt-control-grid{grid-template-columns:1fr}}',
+			'@media(max-width:680px){.mt-cell-fields,.mt-cell-meta{grid-template-columns:1fr}}',
 			'@media(max-width:680px){.mt-net-hero{flex-direction:column;align-items:flex-start}.mt-net-metrics{grid-template-columns:1fr}}'
 		].join(''));
 	},
@@ -588,10 +613,10 @@ return view.extend({
 				var csv = currentCsv();
 				controls.confirmModal(_('应用频段锁定'),
 					csv ? _('将 %s 锁定到频段 %s？移动数据会短暂中断。').format(bandClassLabel(bandClass), csv)
-						: _('解除 %s 的频段锁定？').format(bandClassLabel(bandClass),
+						: _('解除 %s 的频段锁定？').format(bandClassLabel(bandClass)),
 					function() {
 						return controls.setLockBand(section, { band_class: bandClass, lock_band: csv });
-					}, true));
+					}, true);
 			}
 		}, _('应用锁定'));
 
@@ -720,47 +745,238 @@ return view.extend({
 		]);
 	},
 
-	neighborSection: function(neighborRaw, disabled) {
-		var list = neighborList(neighborRaw);
-		var cards = list.map(function(item, index) {
+	neighborCards: function(raw, disabled) {
+		var self = this;
+		var cells = neighborList(raw);
+		if (!cells.length)
+			return E('div', { 'style': 'padding:14px 0;color:var(--qm-text-muted);font-size:12px' },
+				_('暂无扫描到的 LTE / NR 邻区。请确认模组已驻网，然后点击“扫描邻区”。'));
+		return E('div', { 'class': 'mt-lock-cell-grid' }, cells.map(function(item, index) {
 			var d = item.data;
 			var rat = pick(d, [ 'rat', 'network_mode', 'type' ]) || item.group || '';
 			var band = pick(d, [ 'band_name', 'band' ]);
-			var arfcn = pick(d, [ 'channel', 'arfcn', 'earfcn', 'freq', 'frequency' ]);
+			var arfcn = pick(d, [ 'arfcn', 'earfcn', 'channel', 'freq', 'frequency' ]);
 			var pci = pick(d, [ 'pci', 'physical_cell_id', 'physicalcellid' ]);
-			var rsrp = pick(d, [ 'rsrp' ]);
-			var rsrq = pick(d, [ 'rsrq' ]);
-			var sinr = pick(d, [ 'sinr', 'rssnr' ]);
+			var rsrp = pick(d, [ 'rsrp' ]), rsrq = pick(d, [ 'rsrq' ]), sinr = pick(d, [ 'sinr', 'rssnr' ]);
 			var used = [ 'rat', 'network_mode', 'type', 'band_name', 'band', 'channel', 'arfcn', 'earfcn',
 				'freq', 'frequency', 'pci', 'physical_cell_id', 'physicalcellid', 'rsrp', 'rsrq', 'sinr', 'rssnr' ];
 			var extra = Object.keys(d).filter(function(k) {
-				return used.indexOf(k.toLowerCase().replace(/[\s\-]/g, '_')) === -1
-					&& controls.hasValue(d[k]) && typeof d[k] !== 'object';
+				return used.indexOf(k.toLowerCase().replace(/[\s\-]/g, '_')) === -1 &&
+					controls.hasValue(d[k]) && typeof d[k] !== 'object';
 			}).map(function(k) {
-				return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, k), E('strong', {}, shown(d[k])) ]);
+				return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, cellFieldLabel(k)),
+					E('strong', {}, cellFieldValue(d[k])) ]);
 			});
-			var children = [
-				E('div', { 'class': 'mt-lock-cell-head' }, [
-					E('span', { 'class': 'mt-lock-cell-band' },
-						(band || rat || _('邻区 %d').format(index + 1)) + (arfcn ? ' · ' + arfcn : '')),
-					rat ? E('span', { 'class': 'mt-cell-role' }, rat) : null
-				])
-			];
-			if (rsrp !== '') children.push(signalBar(rsrp, 'rsrp', _('参考信号接收功率（RSRP）')));
-			if (rsrq !== '') children.push(signalBar(rsrq, 'rsrq', _('参考信号接收质量（RSRQ）')));
-			if (sinr !== '') children.push(signalBar(sinr, 'sinr', _('信号与干扰加噪声比（SINR）')));
-			if (pci) children.push(E('div', { 'style': 'margin-top:6px;font-size:11px;color:var(--qm-text-muted)' }, _('物理小区标识（PCI）: ') + pci));
+			var children = [ E('div', { 'class': 'mt-lock-cell-head' }, [
+				E('span', { 'class': 'mt-lock-cell-band' },
+					(band || rat || _('邻区 %d').format(index + 1)) + (arfcn ? ' · ' + arfcn : '')),
+				rat ? E('span', { 'class': 'mt-cell-role' }, rat) : null
+			]) ];
+			if (rsrp !== '') children.push(signalBar(rsrp, 'rsrp', _('RSRP')));
+			if (rsrq !== '') children.push(signalBar(rsrq, 'rsrq', _('RSRQ')));
+			if (sinr !== '') children.push(signalBar(sinr, 'sinr', _('SINR')));
+			if (pci) children.push(E('div', { 'style': 'margin-top:6px;font-size:11px;color:var(--qm-text-muted)' }, _('物理小区标识（PCI）：') + pci));
+			/* 只复制参数，绝不直接发锁小区命令。 */
+			if (pci && arfcn && !isDisabled(disabled, 'neighborcell'))
+				children.push(E('button', {
+					'type': 'button', 'class': 'btn cbi-button-action', 'style': 'margin-top:10px',
+					'click': function() { self.fillCellDraft(d, item.group || rat); }
+				}, _('填入锁定参数')));
 			return E('div', { 'class': 'mt-lock-cell-card' }, children.concat(extra));
-		});
+		}));
+	},
 
+	neighborSection: function(section, neighborRaw, disabled) {
+		var self = this, list = neighborList(neighborRaw);
+		var host = E('div', {}, this.neighborCards(neighborRaw, disabled));
+		var tip = E('div', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin-top:9px' },
+			_('扫描通过 QModem get_neighborcell 读取邻区，不会自动锁定或修改模组配置。'));
+		var button = E('button', {
+			'type': 'button', 'class': 'btn cbi-button-action',
+			'disabled': isDisabled(disabled, 'neighborcell') ? 'disabled' : null,
+			'click': function() {
+				button.disabled = true;
+				button.textContent = _('正在扫描…');
+				controls.getNeighborCellFresh(section).then(function(raw) {
+					if (!raw || !raw.neighborcell) throw new Error(_('模组未返回邻区接口数据，可能不支持此功能。'));
+					self.cellScanSnapshot = { section: section, raw: raw, expires: Date.now() + 45000 };
+					dom.content(host, self.neighborCards(raw, disabled));
+					if (self.cellStatusHost) dom.content(self.cellStatusHost, self.cellStatusContent(raw));
+					ui.addNotification(null, E('p', {}, _('邻区扫描完成，找到 %d 个小区。').format(neighborList(raw).length)), 'info');
+				}).catch(function(err) {
+					ui.addNotification(null, E('p', {}, _('扫描失败：%s').format((err && err.message) || String(err))), 'danger');
+				}).then(function() {
+					button.disabled = false;
+					button.textContent = _('扫描邻区');
+				});
+			}
+		}, _('扫描邻区'));
 		return E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' }, [
 			E('div', { 'class': 'mt-card-title' }, [
 				svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>'),
 				_('邻区信息（%d）').format(list.length)
 			]),
-			cards.length ? E('div', { 'class': 'mt-lock-cell-grid' }, cards)
-				: E('div', { 'style': 'padding:14px 0;color:var(--qm-text-muted);font-size:12px' }, _('本模组经 QModem 暂无邻区数据。'))
+			E('div', { 'style': 'display:flex;gap:10px;flex-wrap:wrap' }, [ button, tip ]),
+			host
 		]);
+	},
+
+	fillCellDraft: function(data, rat) {
+		var section = this.cellDraftSection;
+		if (!section) return;
+		var d = this.cellDraft || {};
+		d.rat = String(rat).toUpperCase().indexOf('NR') !== -1 ? '1' : '0';
+		d.pci = pick(data, [ 'pci', 'physical_cell_id' ]);
+		d.arfcn = pick(data, [ 'arfcn', 'earfcn', 'channel' ]);
+		d.band = pick(data, [ 'band', 'band_name' ]).replace(/^[nN]/, '');
+		d.scs = pick(data, [ 'scs' ]) || '0';
+		/* 源数据可能以 kHz 上报；锁定配置仍按官方枚举值，避免误填。 */
+		if ([ '0', '1', '2', '3', '4' ].indexOf(d.scs) < 0) d.scs = '0';
+		this.cellDraft = d;
+		var inputs = this.cellInputs;
+		if (inputs) {
+			[ 'rat', 'pci', 'arfcn', 'band', 'scs' ].forEach(function(k) {
+				if (inputs[k]) inputs[k].value = d[k];
+			});
+			if (inputs.update) inputs.update();
+			if (inputs.root && inputs.root.scrollIntoView) inputs.root.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}
+		ui.addNotification(null, E('p', {}, _('已填入小区参数，请核对后点击“应用锁小区”。')), 'info');
+	},
+
+	cellStatusContent: function(raw) {
+		var node = cellNode(raw);
+		var status = node.lockcell_status || {}, hook = node.lockcell_boot_hook || {}, feature = node.Feature || {};
+		function group(title, data) {
+			return E('div', { 'class': 'mt-cell-status' }, [
+				E('strong', { 'style': 'font-size:12px;color:var(--qm-accent)' }, title)
+			].concat(Object.keys(data).filter(function(k) { return data[k] !== null && data[k] !== ''; })
+				.map(function(k) {
+					return E('div', { 'class': 'mt-net-row' }, [
+						E('span', {}, cellFieldLabel(k)),
+						E('strong', {}, cellFieldValue(data[k]))
+					]);
+				})));
+		}
+		var statusRows = Object.keys(status).length ? status : { LTE: _('暂无状态'), NR: _('暂无状态') };
+		var hookRows = Object.keys(hook).length ? hook : { enabled: _('未上报') };
+		return E('div', {}, [
+			E('div', { 'class': 'mt-cell-meta' }, [
+				group(_('当前锁小区状态'), statusRows),
+				group(_('开机自动锁小区'), hookRows)
+			]),
+			Object.keys(feature).length ? E('details', { 'style': 'margin-top:10px' }, [
+				E('summary', { 'style': 'cursor:pointer;font-size:12px' }, _('查看模组支持的操作（官方编号）')),
+				group(_('支持的操作'), feature)
+			]) : null
+		]);
+	},
+
+	cellManagerSection: function(section, neighborRaw, disabled) {
+		var self = this, node = cellNode(neighborRaw);
+		var blocked = isDisabled(disabled, 'neighborcell');
+		var capable = Object.keys(node).length > 0 && !blocked;
+		if (this.cellDraftSection !== section) {
+			this.cellDraftSection = section;
+			this.cellDraft = { rat: '0', pci: '', arfcn: '', band: '', scs: '0',
+				en_boot_hook: controls.isEnabled((node.lockcell_boot_hook || {}).enabled) };
+		}
+		var draft = this.cellDraft;
+		function input(name, placeholder) {
+			var el = E('input', { 'type': 'text', 'class': 'cbi-input-text',
+				'value': draft[name] || '', 'placeholder': placeholder || '',
+				'disabled': capable ? null : 'disabled',
+				'input': function() { draft[name] = el.value; } });
+			return el;
+		}
+		var rat = E('select', { 'class': 'cbi-input-select', 'disabled': capable ? null : 'disabled' }, [
+			E('option', { 'value': '0' }, _('4G LTE')),
+			E('option', { 'value': '1' }, _('5G NR'))
+		]);
+		rat.value = draft.rat;
+		rat.addEventListener('change', function() { draft.rat = rat.value; update(); });
+		var pci = input('pci', 'PCI'), arfcn = input('arfcn', 'EARFCN / NR-ARFCN');
+		var band = input('band', '41 / N41'), scs = E('select', { 'class': 'cbi-input-select', 'disabled': capable ? null : 'disabled' },
+			[ [ '0', '15 kHz' ], [ '1', '30 kHz' ], [ '2', '60 kHz' ],
+			  [ '3', '120 kHz' ], [ '4', '240 kHz' ] ].map(function(item) {
+				return E('option', { 'value': item[0] }, item[1]);
+			}));
+		scs.value = draft.scs;
+		scs.addEventListener('change', function() { draft.scs = scs.value; });
+		var boot = E('input', { 'type': 'checkbox', 'checked': draft.en_boot_hook ? 'checked' : null,
+			'disabled': capable ? null : 'disabled',
+			'change': function() { draft.en_boot_hook = boot.checked; } });
+		function field(label, control) {
+			return E('label', { 'class': 'mt-cell-field' }, [ E('span', {}, label), control ]);
+		}
+		var bandField = field(_('5G 频段（必填）'), band), scsField = field(_('5G 子载波间隔'), scs);
+		function update() {
+			bandField.style.display = rat.value === '1' ? '' : 'none';
+			scsField.style.display = rat.value === '1' ? '' : 'none';
+		}
+		update();
+		var root = E('section', { 'class': 'mt-net-card', 'style': 'margin-bottom:16px' });
+		var host = E('div', {}, self.cellStatusContent(neighborRaw));
+		this.cellStatusHost = host;
+		this.cellInputs = { root: root, rat: rat, pci: pci, arfcn: arfcn, band: band, scs: scs, update: update };
+		function apply(unlock) {
+			var cfg = unlock ? { rat: '0', pci: '', arfcn: '', band: '', scs: '', en_boot_hook: '0' } : {
+				rat: rat.value, pci: pci.value.trim(), arfcn: arfcn.value.trim(),
+				band: band.value.trim(), scs: scs.value, en_boot_hook: boot.checked ? '1' : '0'
+			};
+			if (!unlock) {
+				var maxPci = cfg.rat === '1' ? 1007 : 503;
+				if (!/^[0-9]{1,7}$/.test(cfg.arfcn) || Number(cfg.arfcn) <= 0 ||
+					Number(cfg.arfcn) > 3279165 || !/^[0-9]{1,4}$/.test(cfg.pci) ||
+					Number(cfg.pci) > maxPci) {
+					ui.addNotification(null, E('p', {}, _('请输入有效的频点和 PCI（LTE: 0–503，NR: 0–1007）。')), 'warning');
+					return;
+				}
+				if (cfg.rat === '1' && !/^[nN]?[0-9]{1,5}$/.test(cfg.band)) {
+					ui.addNotification(null, E('p', {}, _('锁定 5G 小区需要填写有效频段，例如 N41。')), 'warning');
+					return;
+				}
+			}
+			controls.confirmModal(unlock ? _('解除小区锁定') : _('应用锁小区'),
+				unlock ? _('将解除模组的小区锁定，并清除其开机锁定规则。确定继续吗？')
+					: _('将锁定到所填的 %s 小区（频点 %s / PCI %s）。此操作可能中断移动网络，确定继续吗？')
+						.format(cfg.rat === '1' ? 'NR' : 'LTE', cfg.arfcn, cfg.pci),
+				function() {
+					return controls.setNeighborCell(section, cfg).then(function(result) {
+						var resultBody = result && (result.result || result);
+						var status = resultBody && (resultBody.setlockcell || resultBody.error);
+						if (!result || resultBody.error || (typeof status === 'string' && /(^|[\r\n\s,])ERROR([\r\n\s,]|$)/i.test(status)))
+							throw new Error(_('锁小区操作失败，模组未接受命令。'));
+						self.cellScanSnapshot = null;
+						return result;
+					});
+				}, false);
+		}
+		var buttons = E('div', { 'class': 'mt-cell-actions' }, [
+			E('button', { 'type': 'button', 'class': 'btn cbi-button-apply',
+				'disabled': capable ? null : 'disabled',
+				'click': function() { apply(false); } }, _('应用锁小区')),
+			E('button', { 'type': 'button', 'class': 'btn cbi-button-action',
+				'disabled': capable ? null : 'disabled',
+				'click': function() { apply(true); } }, _('解除小区锁定'))
+		]);
+		root.appendChild(E('div', {}, [
+			E('h3', { 'style': 'font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 6px' }, _('扫描与锁小区设置')),
+			E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted)' },
+				_('可手动填写小区参数，或在上方扫描结果中点击“填入锁定参数”。修改后可能暂时断网。')),
+			blocked ? E('div', { 'class': 'mt-control-note' }, _('QModem 已将此模组的锁小区功能标记为禁用。'))
+				: !capable ? E('div', { 'class': 'mt-control-note' }, _('模组未上报锁小区能力。可以尝试上方扫描，但不会允许盲目下发锁定命令。')) : null,
+			host,
+			E('div', { 'class': 'mt-cell-fields', 'style': 'margin-top:16px' }, [
+				field(_('网络制式'), rat), field(_('物理小区标识（PCI）'), pci),
+				field(_('频点（EARFCN / NR-ARFCN）'), arfcn), bandField, scsField
+			]),
+			E('label', { 'style': 'display:flex;align-items:center;gap:8px;margin-top:13px;font-size:12px' }, [
+				boot, _('开机后自动恢复小区锁定')
+			]),
+			buttons
+		]));
+		return root;
 	},
 
 	scanSection: function(section, atPort) {
@@ -839,6 +1055,8 @@ return view.extend({
 		});
 		var disabled = disabledSet(res.disabled);
 		var atPort = pick(plainObject(res.atCfg, 'at_cfg'), [ 'at_port' ]);
+		var neighborRaw = this.cellScanSnapshot && this.cellScanSnapshot.section === section &&
+			Date.now() < this.cellScanSnapshot.expires ? this.cellScanSnapshot.raw : res.neighbor;
 
 		var cell = controls.entryMap(entriesOf(res.cell));
 		var networkMode = pick(cell, [ 'network_mode' ]);
@@ -897,7 +1115,7 @@ return view.extend({
 		try {
 			rawDump = JSON.stringify({
 				section: section, cell_info: res.cell, mode: res.mode, network_prefer: res.prefer,
-				lockband: res.lockband, current_band: res.currentBand, neighbor_cell: res.neighbor,
+				lockband: res.lockband, current_band: res.currentBand, neighbor_cell: neighborRaw,
 				disabled_features: res.disabled, at_cfg: res.atCfg
 			}, null, 2);
 		} catch (e) {
@@ -970,7 +1188,8 @@ return view.extend({
 			this.currentBandSection(res.currentBand),
 
 			/* 邻区信息 */
-			this.neighborSection(res.neighbor, disabled),
+			this.neighborSection(section, neighborRaw, disabled),
+			this.cellManagerSection(section, neighborRaw, disabled),
 
 			/* 刷新按钮 */
 			E('div', { 'style': 'display:flex;gap:10px;margin:16px 0' }, [
