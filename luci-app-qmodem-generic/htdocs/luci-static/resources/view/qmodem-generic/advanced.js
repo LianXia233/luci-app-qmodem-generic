@@ -224,6 +224,7 @@ return view.extend({
 			'.qm-port-list{display:grid;gap:8px}.qm-port-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2)}',
 			'.qm-port-main{min-width:0;display:grid;gap:4px}.qm-port-main strong{font-size:13px;overflow-wrap:anywhere}.qm-port-main small{color:var(--qm-text-muted);font-size:11px;overflow-wrap:anywhere}',
 			'.qm-port-actions{display:flex;flex-wrap:wrap;gap:8px}.qm-port-actions button{white-space:nowrap}.qm-custom-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}',
+			'.qm-protocols{display:flex;flex-wrap:wrap;gap:8px}.qm-protocol-check{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--qm-border-soft);border-radius:9px;background:var(--qm-surface-2);font-size:12px;cursor:pointer}.qm-protocol-check input{margin:0}.qm-protocol-check.disabled{opacity:.45;cursor:not-allowed}.qm-custom-form .qm-template-note{font-size:11px;line-height:1.5;color:var(--qm-text-muted);margin-top:6px}.qm-custom-band-note{grid-column:1/-1;color:var(--qm-text-muted);font-size:11px;padding:4px 0 12px}',
 			'.qm-custom-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--qm-border-soft);padding:9px 0;font-size:12px}',
 
 			/* 响应式 */
@@ -436,11 +437,7 @@ return view.extend({
 			manufacturer_id: port.bus === 'usb' ? String(port.id || '').split(':')[0] : '',
 			model: /^[a-z0-9-]+$/i.test(model) ? model.toLowerCase() : ''
 		});
-		var panel = document.querySelector('.qm-custom-form');
-		if (panel) Object.keys(this.customDraft).forEach(function(key) {
-			var el = panel.querySelector('[data-custom-field="' + key + '"]');
-			if (el) el.value = this.customDraft[key];
-		}, this);
+		if (typeof this.fillCustomForm === 'function') this.fillCustomForm(this.customDraft);
 		ui.addNotification(null, E('p', {}, _('已把设备信息填入自定义配置，请核对型号与拨号协议。')));
 	},
 
@@ -482,39 +479,145 @@ return view.extend({
 	customCard: function(data) {
 		var self = this;
 		var draft = this.customDraft || { bus: 'usb', model: '', manufacturer: 'quectel',
-			manufacturer_id: '2c7c', platform: 'qualcomm', modes: 'qmi,mbim', pdp_index: '1' };
+			manufacturer_id: '2c7c', platform: 'qualcomm', modes: 'qmi,mbim', pdp_index: '1',
+			wcdma_band: '0', lte_band: '0', nsa_band: '0', sa_band: '0' };
 		this.customDraft = draft;
+		[ 'wcdma_band', 'lte_band', 'nsa_band', 'sa_band' ].forEach(function(key) {
+			if (draft[key] === undefined || draft[key] === null) draft[key] = '0';
+		});
+		var allPresets = data && data.presets || {};
+		var presets = allPresets.modem_support || allPresets;
+		var protocols = [
+			{ id: 'qmi', title: 'QMI', buses: [ 'usb', 'pcie' ] },
+			{ id: 'gobinet', title: 'GobiNet', buses: [ 'usb', 'pcie' ] },
+			{ id: 'mbim', title: 'MBIM', buses: [ 'usb', 'pcie' ] },
+			{ id: 'rmnet', title: 'RMNET', buses: [ 'usb', 'pcie' ] },
+			{ id: 'ecm', title: 'ECM', buses: [ 'usb' ] },
+			{ id: 'ncm', title: 'NCM', buses: [ 'usb' ] },
+			{ id: 'rndis', title: 'RNDIS', buses: [ 'usb' ] },
+			{ id: 'auto', title: _('自动（AUTO）'), buses: [ 'usb' ] }
+		];
 		var fields = {};
 		function field(key, node) {
 			node.setAttribute('data-custom-field', key);
-			node.addEventListener('input', function() { draft[key] = node.value; });
-			node.addEventListener('change', function() { draft[key] = node.value; });
+			function saveValue() { draft[key] = node.value; }
+			node.addEventListener('input', saveValue);
+			node.addEventListener('change', saveValue);
 			fields[key] = node;
 			return node;
 		}
 		var bus = field('bus', controls.select([ [ 'usb', 'USB' ], [ 'pcie', 'PCIe' ] ], draft.bus));
+		var template = E('select', { 'class': 'cbi-input-select' });
+		var templateNote = E('div', { 'class': 'qm-template-note' },
+			_('从设备已安装的 QModem 支持库读取；只复制配置，不修改原型号。选择后请填写新模组的实际型号。'));
+		function templateOptions() {
+			var group = presets[bus.value] || {};
+			var keys = Object.keys(group).filter(function(key) {
+				return group[key] && typeof group[key] === 'object' && Array.isArray(group[key].modes);
+			}).sort();
+			dom.content(template, [
+				E('option', { 'value': '' }, keys.length
+					? _('请选择 QModem 已支持的型号（复制配置）')
+					: _('当前支持库没有可用模板'))
+			].concat(keys.map(function(key) {
+				var name = group[key].manufacturer || '';
+				return E('option', { 'value': key }, key.toUpperCase() + (name ? ' · ' + name : ''));
+			})));
+			template.disabled = !keys.length;
+			template.value = '';
+		}
+		var checkboxes = [];
+		var protocolWrap = E('div', { 'class': 'qm-protocols' }, protocols.map(function(item) {
+			var box = E('input', { 'type': 'checkbox', 'value': item.id });
+			var label = E('label', { 'class': 'qm-protocol-check' }, [ box, item.title ]);
+			var ref = { id: item.id, buses: item.buses, box: box, label: label };
+			checkboxes.push(ref);
+			box.addEventListener('change', function() {
+				draft.modes = checkboxes.filter(function(x) { return x.box.checked && !x.box.disabled; })
+					.map(function(x) { return x.id; }).join(',');
+			});
+			return label;
+		}));
+		function bandField(key, title, example) {
+			return controls.row(title, field(key, E('input', { 'type': 'text', 'value': draft[key],
+				'placeholder': example, 'maxlength': '255' })));
+		}
 		var form = E('div', { 'class': 'qm-custom-form' }, [
 			controls.row(_('连接方式'), bus),
 			controls.row(_('模组型号'), field('model', E('input', { 'type': 'text', 'value': draft.model, 'placeholder': 'rg502q-ea' }))),
+			controls.row(_('复制 QModem 已有型号配置'), E('div', {}, [ template, templateNote ])),
 			controls.row(_('厂商标识'), field('manufacturer', E('input', { 'type': 'text', 'value': draft.manufacturer, 'placeholder': 'quectel' }))),
 			controls.row(_('USB 厂商 ID'), field('manufacturer_id', E('input', { 'type': 'text', 'value': draft.manufacturer_id, 'placeholder': '2c7c' }))),
 			controls.row(_('芯片平台'), field('platform', controls.select([
-				[ 'qualcomm', 'Qualcomm' ], [ 'mediatek', 'MediaTek' ], [ 'unisoc', 'Unisoc' ], [ 'lte', 'LTE' ]
+				[ 'qualcomm', 'Qualcomm' ], [ 'mediatek', 'MediaTek' ], [ 'unisoc', 'Unisoc' ],
+				[ 'lte', 'LTE' ], [ 'lte12', 'LTE12' ], [ 'hisilicon', 'HiSilicon' ], [ 'asrmicro', 'ASR Micro' ]
 			], draft.platform))),
-			controls.row(_('拨号协议'), field('modes', E('input', { 'type': 'text', 'value': draft.modes, 'placeholder': 'qmi,mbim' }))),
-			controls.row(_('PDP 序号'), field('pdp_index', E('input', { 'type': 'number', 'value': draft.pdp_index, 'min': '1', 'max': '16' })))
+			controls.row(_('PDP 序号'), field('pdp_index', E('input', { 'type': 'number', 'value': draft.pdp_index, 'min': '1', 'max': '16' }))),
+			controls.row(_('拨号协议（可多选）'), protocolWrap),
+			bandField('wcdma_band', _('3G WCDMA 频段'), '1/5/8'),
+			bandField('lte_band', _('4G LTE 频段'), '1/3/5/8/41'),
+			bandField('nsa_band', _('5G NSA 频段'), '41/78/79'),
+			bandField('sa_band', _('5G SA 频段'), '41/78/79'),
+			E('div', { 'class': 'qm-custom-band-note' },
+				_('频段使用数字，以 /、逗号或空格分隔，例如 1/3/5/8；0 表示未知或不支持。以上为模组支持能力，不是锁频指令。'))
 		]);
-		bus.addEventListener('change', function() {
+		function updateProtocols() {
+			var enabled = String(draft.modes || '').split(',').filter(Boolean);
+			checkboxes.forEach(function(ref) {
+				var allowed = ref.buses.indexOf(bus.value) !== -1;
+				ref.box.disabled = !allowed;
+				ref.box.checked = allowed && enabled.indexOf(ref.id) !== -1;
+				ref.label.classList[allowed ? 'remove' : 'add']('disabled');
+			});
+			draft.modes = checkboxes.filter(function(ref) { return ref.box.checked && !ref.box.disabled; })
+				.map(function(ref) { return ref.id; }).join(',');
+		}
+		function fillForm() {
+			Object.keys(fields).forEach(function(key) {
+				if (draft[key] !== undefined && draft[key] !== null) fields[key].value = String(draft[key]);
+			});
 			fields.manufacturer_id.disabled = bus.value === 'pcie';
-			if (bus.value === 'pcie') { draft.modes = 'qmi,mbim'; fields.modes.value = draft.modes; }
+			updateProtocols();
+		}
+		this.fillCustomForm = fillForm;
+		templateOptions();
+		fillForm();
+		bus.addEventListener('change', function() {
+			templateOptions();
+			fields.manufacturer_id.disabled = bus.value === 'pcie';
+			updateProtocols();
 		});
-		fields.manufacturer_id.disabled = bus.value === 'pcie';
+		template.addEventListener('change', function() {
+			var key = template.value, cfg = (presets[bus.value] || {})[key];
+			if (!key || !cfg) return;
+			var originalModel = String(draft.model || '').trim();
+			Object.assign(draft, {
+				/* 模板只能用于添加其他型号；QModem 已有定义不允许在这里覆写。 */
+				model: originalModel === key ? '' : originalModel,
+				manufacturer: String(cfg.manufacturer || draft.manufacturer || ''),
+				manufacturer_id: String(cfg.manufacturer_id || ''),
+				platform: String(cfg.platform || draft.platform || 'qualcomm'),
+				pdp_index: String(cfg.pdp_index || '1'),
+				modes: Array.isArray(cfg.modes) ? cfg.modes.join(',') : '',
+				wcdma_band: String(cfg.wcdma_band === undefined ? '0' : cfg.wcdma_band),
+				lte_band: String(cfg.lte_band === undefined ? '0' : cfg.lte_band),
+				nsa_band: String(cfg.nsa_band === undefined ? '0' : cfg.nsa_band),
+				sa_band: String(cfg.sa_band === undefined ? '0' : cfg.sa_band)
+			});
+			fillForm();
+			ui.addNotification(null, E('p', {}, _('已复制 %s 的厂商、协议和频段。请确认新模组型号后保存。').format(key)), 'info');
+		});
 		var entries = Array.isArray(data && data.entries) ? data.entries : [];
-		return controls.card(_('自定义模组配置'), _('型号请与模组 AT+CGMM 返回一致。此处补 QModem 识别定义，设备驱动仍由固件提供。'), [
+		return controls.card(_('自定义模组配置'),
+			_('支持从已安装 QModem 型号复制参数。型号需与 AT+CGMM 一致；不会覆盖 QModem 原有配置，设备驱动仍由固件提供。'), [
 			data && data.error ? E('div', { 'class': 'mt-control-note' }, data.error) : null,
 			form,
 			E('div', { 'class': 'mt-control-actions' }, E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function(ev) {
 				var button = ev.currentTarget;
+				if (!draft.modes) {
+					ui.addNotification(null, E('p', {}, _('请至少勾选一种与连接方式匹配的拨号协议。')), 'warning');
+					return;
+				}
 				button.disabled = true;
 				controls.saveCustomModel(Object.assign({}, draft)).then(function(result) {
 					if (!result || !result.success) throw new Error((result && result.error) || _('保存失败'));
@@ -527,7 +630,7 @@ return view.extend({
 					ui.addNotification(null, E('p', {}, _('配置操作未完成：%s').format(err.message || String(err))), 'warning');
 				}).then(function() { button.disabled = false; });
 			} }, _('保存并同步支持库'))),
-			E('div', { 'class': 'mt-control-note' }, _('USB ID 是厂商 VID（例如 2c7c），无需填写设备 PID；已有的官方型号不会被覆盖。候选串口请先确认可响应 AT。')),
+			E('div', { 'class': 'mt-control-note' }, _('USB 厂商 ID 只填写 VID（例如 2c7c）。已存在于官方 QModem 支持库中的同名型号不允许重复新增或覆盖。')),
 			entries.map(function(entry) {
 				return E('div', { 'class': 'qm-custom-entry' }, [
 					E('span', {}, entry.model + ' · ' + (entry.bus === 'pcie' ? 'PCIe' : 'USB') + ' · ' + (entry.modes || '--')),
@@ -543,7 +646,6 @@ return view.extend({
 			})
 		], true);
 	},
-
 	capabilityCard: function(section, res, disabled) {
 		var caps = plainObject(res.rebootCaps, 'reboot_caps');
 		var softValue = ci(caps, [ 'soft_reboot_caps', 'soft' ]);
