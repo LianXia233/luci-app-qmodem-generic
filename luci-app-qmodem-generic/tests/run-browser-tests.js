@@ -112,6 +112,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   if (scenario === 'empty' || scenario === 'absent') data = {};
   window.calls = [];
   let task = 0;
+  const tasks = {};
   const rpc = { declare: def => (...args) => {
     window.calls.push({ object: def.object, method: def.method, args });
     if (def.method === 'snapshot') {
@@ -119,8 +120,19 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
       for (const key of Object.keys(data)) domains[key] = { status: 'ready', stale: false, updated: Date.now() / 1000, ttl: 600, data: data[key] };
       return Promise.resolve({ config_section: args[0], now: Date.now() / 1000, domains });
     }
-    if (def.method === 'get_task') return Promise.resolve({ state: 'success', result: { response: 'AT+CGMI\r\nOK', success: true } });
-    if (['action', 'send_at', 'stats_reset'].includes(def.method)) return Promise.resolve({ task_id: 'test-' + (++task), state: 'running' });
+    if (def.method === 'get_task') return Promise.resolve(tasks[args[0]] || { state: 'missing' });
+    if (['action', 'send_at', 'stats_reset'].includes(def.method)) {
+      if (def.method === 'action' && args[1] === 'qmodem') {
+        const payload = args[3];
+        if (!payload || payload.config_section !== args[0]) return Promise.resolve({ error: 'explicit valid modem section required' });
+        if (['send_at','send_sms','do_reboot'].includes(args[2]) && (!payload.params || typeof payload.params !== 'object')) return Promise.resolve({ error: 'missing params object' });
+      }
+      const id = 'test-' + (++task);
+      tasks[id] = { config_section: args[0], state: window.atTaskFailure ? 'failed' : 'success',
+        error: window.atTaskFailure || null,
+        result: window.atTaskReply || { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } } };
+      return Promise.resolve({ task_id: id, state: 'running' });
+    }
     return Promise.resolve({});
   } };
   const ui = {
@@ -351,6 +363,62 @@ async function runDom() {
         assert(window.document.querySelector('#modal').innerText.includes('未提供通用的出厂重置接口'));
         assert.equal(window.calls.length, count, 'Opening reset instructions must not send a misleading reset command');
       }
+      if (viewName === 'terminal' && scenario !== 'absent') {
+        const input = app.querySelector('input[aria-label="AT 命令"]');
+        const output = app.querySelector('.qmodem-generic-output');
+        assert.equal(app.querySelectorAll('[data-at-command="AT^CHIPTEMP?"]').length, scenario === 'tdtech' ? 1 : 0, 'Private quick commands must match modem');
+        assert(app.querySelector('[data-at-command="AT+CSQ"]'), 'Common signal command must be vendor neutral');
+        assert([...app.querySelectorAll('button')].every(b => b.type === 'button'), 'Console buttons must not submit the enclosing LuCI form');
+        const before = window.calls.filter(c => ['action','send_at'].includes(c.method)).length;
+        input.value = 'ATI';
+        const first = window.currentView.sendCommand(output, input);
+        const duplicate = window.currentView.sendCommand(output, input);
+        assert.equal(input.disabled, true);
+        assert.equal(app.querySelector('.qm-at-state').classList.contains('is-busy'), true);
+        await Promise.all([first, duplicate]);
+        const submissions = window.calls.filter(c => ['action','send_at'].includes(c.method)).slice(before);
+        assert.equal(submissions.length, 1, 'Repeated clicks must create only one AT task');
+        const sent = submissions[0];
+        assert.equal(sent.args[0], '6_1', 'AT must target the selected dynamic modem');
+        if (sent.method === 'action') {
+          assert.equal(sent.args[3].config_section, '6_1');
+          assert.equal(sent.args[3].params.at, 'ATI');
+          assert.equal(sent.args[3].params.port, '/dev/ttyUSB1');
+        } else assert.equal(sent.args[1], 'ATI');
+        assert(output.textContent.includes('FM350-GL') && output.textContent.includes('OK'), 'Official at_cfg.res must display as plain response text');
+        assert(!output.textContent.includes('"at_cfg"'), 'Response pane must show the modem response, not the protocol envelope');
+        assert.equal(input.value, 'ATI', 'Keep commands for retry and saving');
+        assert.equal(input.disabled, false);
+        assert(app.querySelector('.qm-at-state.is-ok'));
+        const style = window.getComputedStyle(output);
+        assert(contrastRatio(style.color, style.backgroundColor) >= 4.5, 'Response text must have readable contrast');
+        window.atTaskReply = { at_cfg: { status: '1', res: '+CME ERROR: 10' } };
+        input.value = 'AT+BAD';
+        await window.currentView.sendCommand(output, input);
+        assert(app.querySelector('.qm-at-state.is-error'));
+        assert(output.querySelector('.is-error').textContent.includes('CME ERROR: 10'));
+        assert(contrastRatio(window.getComputedStyle(output.querySelector('.is-error')).color, style.backgroundColor) >= 4.5, 'Error text must also have readable contrast');
+        assert.equal(input.value, 'AT+BAD');
+        window.atTaskReply = { response: '<b>AT reply</b>\r\nOK' };
+        input.value = 'AT';
+        const enter = new window.KeyboardEvent('keydown', { key: 'Enter', cancelable: true, bubbles: true });
+        input.dispatchEvent(enter);
+        assert(enter.defaultPrevented, 'Enter must not submit the LuCI form');
+        await window.currentView.request;
+        assert(!output.querySelector('b') && output.textContent.includes('<b>AT reply</b>'), 'AT output must remain text');
+        window.atTaskFailure = 'AT port busy';
+        input.value = 'ATI';
+        await window.currentView.sendCommand(output, input);
+        assert(app.querySelector('.qm-at-state.is-error'));
+        assert(output.textContent.includes('AT port busy'));
+        assert.equal(input.disabled, false, 'Failed requests must re-enable typing');
+        window.currentView.clearButton.click();
+        assert(output.classList.contains('is-empty'));
+        assert(!output.textContent.includes('AT port busy'), 'Clear results must reset the pane');
+      }
+      if (viewName === 'status' && scenario !== 'absent') {
+        assert.deepEqual([...app.querySelectorAll('.qm-shortcut-item')].map(a => a.getAttribute('href').split('/').pop()), ['connection','network','system'], 'Restyled shortcuts preserve their page destinations');
+      }
       if (viewName === 'sms' && scenario === 'empty') {
         const newButton = [...app.querySelectorAll('button')].find(el => el.textContent.trim() === '新短信');
         assert(newButton); newButton.click();
@@ -361,6 +429,18 @@ async function runDom() {
     } finally { await window.happyDOM.close(); }
   }
   console.log(`PASS: ${cases} DOM page cases. Browser layout and real hardware remain unverified.`);
+}
+
+function contrastRatio(foreground, background) {
+  function luminance(color) {
+    const hex = /^#([a-f0-9]{6})$/i.exec(color);
+    const rgb = hex ? [0,2,4].map(i => parseInt(hex[1].slice(i,i+2),16)) : (color.match(/[\d.]+/g) || []).slice(0,3).map(Number);
+    assert.equal(rgb.length, 3, 'Expected resolved CSS color: ' + color);
+    const channels = rgb.map(c => { c /= 255; return c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)**2.4; });
+    return channels[0]*0.2126 + channels[1]*0.7152 + channels[2]*0.0722;
+  }
+  const a = luminance(foreground), b = luminance(background);
+  return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
 }
 
 if (process.argv[2] === '--dom') {

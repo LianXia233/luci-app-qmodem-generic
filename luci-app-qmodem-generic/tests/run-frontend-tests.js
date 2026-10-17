@@ -166,11 +166,18 @@ function makeRuntime() {
 			return { queued: (p && p.domains) || [], running: 0 };
 
 		if (method === 'action' || method === 'send_at') {
+			if (method === 'action' && p.object === 'qmodem') {
+				if (!p.args || !p.args.config_section || p.args.config_section !== p.config_section)
+					return { error: 'explicit valid modem section required' };
+				if (['send_at', 'send_sms', 'do_reboot'].indexOf(p.method) !== -1 && (!p.args.params || typeof p.args.params !== 'object'))
+					return { error: 'missing params object' };
+			}
 			var id = 'task-' + (++taskSeq);
 			tasks[id] = {
 				task_id: id,
 				config_section: (p && p.config_section) || 'modem1',
 				operation: (method === 'send_at') ? 'send_at' : ((p && p.method) || ''),
+				payload: p,
 				state: 'running',
 				progress: 0,
 				started: Date.now(),
@@ -189,8 +196,13 @@ function makeRuntime() {
 			if (t._polls >= 3) {
 				t.state = 'success';
 				t.progress = 100;
-				if (t.operation === 'send_at')
-					t.result = { response: 'AT+CGMI\r\nQuectel\r\n\r\nOK', result: 'success', ret: 0 };
+				if (t.operation === 'send_at') {
+					var command = t.payload.at || (t.payload.args && t.payload.args.params.at);
+					if (command === 'AT+TASKFAIL') { t.state = 'failed'; t.error = 'AT port busy'; }
+					else if (command === 'AT+BAD') t.result = { at_cfg: { status: '1', res: '\r\n+CME ERROR: 10\r\n' } };
+					else if (t.payload.args) t.result = { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } };
+					else t.result = { response: 'AT+CGMI\r\nQuectel\r\n\r\nOK', result: 'success', ret: 0 };
+				}
 				else if (t.operation === 'stats_reset')
 					t.result = { success: true, reset: true };
 				else if (t.operation === 'support_sync')
@@ -515,6 +527,48 @@ function testActions(rt, controls) {
 	});
 }
 
+function testActionPayloads() {
+	console.log('\n[4b] 真实 QModem 参数形态：动态模组、指定端口、嵌套 params 与返回错误');
+	var rt = makeRuntime(), controls = loadControls(rt);
+	var cases = [
+		{ method:'send_at', run:function() { return controls.sendAt('6_1', '/dev/ttyUSB1', 'ATI'); }, section:'6_1', key:'params', value:{at:'ATI',port:'/dev/ttyUSB1'} },
+		{ method:'send_at', run:function() { return controls.sendAt('6_2', '/dev/ttyUSB2', 'AT+CSQ', true); }, section:'6_2', key:'params', value:{at:'AT+CSQ',port:'/dev/ttyUSB2',use_ubus_flag:'1'} },
+		{ method:'send_sms', run:function() { return controls.sendSms('6_1', '10010', '测试短信'); }, section:'6_1', key:'params', value:{phone_number:'10010',message_content:'测试短信'} },
+		{ method:'set_mode', run:function() { return controls.setMode('6_2', 'ncm'); }, section:'6_2', key:'mode', value:'ncm' },
+		{ method:'set_lockband', run:function() { return controls.setLockBand('6_1', {band_class:'LTE',lock_band:'3,7'}); }, section:'6_1', key:'params', value:{band_class:'LTE',lock_band:'3,7'} },
+		{ method:'do_reboot', run:function() { return controls.doReboot('6_1', 'soft'); }, section:'6_1', key:'params', value:{method:'soft'} },
+		{ method:'modem_dial', run:function() { return controls.modemDial('6_2'); }, section:'6_2' }
+	];
+	return cases.reduce(function(chain, c) {
+		return chain.then(function() {
+			rt.resetCalls();
+			return c.run().then(function(result) {
+				var call = rt.calls.filter(function(x) { return x.object === 'qmodem_cache' && x.method === 'action'; })[0];
+				ok(c.method + ' 已创建后台任务', !!call);
+				assertEq(c.method + ' 队列目标保留动态配置节', call.params.config_section, c.section);
+				assertEq(c.method + ' QModem 载荷带显式配置节', call.params.args.config_section, c.section);
+				if (c.key) assertEq(c.method + ' 参数结构与 RPC 约定一致', JSON.stringify(call.params.args[c.key]), JSON.stringify(c.value));
+				if (c.method === 'send_at') assertEq('官方 at_cfg.res 被解析为响应正文', result.response, 'Fibocom\r\nFM350-GL\r\nOK');
+			});
+		});
+	}, Promise.resolve()).then(function() {
+		assertEq('平铺 response 优先于 result 状态', controls.atResponseText({result:'success',response:'OK'}), 'OK');
+		assertEq('兼容旧版 result 字符串', controls.atResponseText({result:'ATI\r\nOK'}), 'ATI\r\nOK');
+		assertEq('兼容数组响应', controls.atResponseText(['ATI','OK']), 'ATI\nOK');
+		return controls.sendAt('6_1', '/dev/ttyUSB1', 'AT+BAD').then(function() {
+			ok('模组 CME ERROR 必须 reject', false);
+		}, function(err) { ok('模组 CME ERROR 被如实返回', /CME ERROR: 10/.test(err.message)); });
+	}).then(function() {
+		rt.resetCalls();
+		return controls.sendAt('6_1', '', 'AT+TASKFAIL').then(function() {
+			ok('已接收的失败 AT 任务必须 reject', false);
+		}, function(err) {
+			assertEq('AT 任务失败保留原错误', err.message, 'AT port busy');
+			assertEq('已进入队列的失败命令不重复直发', rt.countCalls('qmodem', 'send_at'), 0);
+		});
+	});
+}
+
 function testNoSlowPathDeclared(rt, controls) {
 	console.log('\n[5] 慢对象方法都带 nobatch（不会被拖进批量 POST）');
 	var src = fs.readFileSync(path.join(RES, 'qmodem-generic/controls.js'), 'utf8');
@@ -755,6 +809,7 @@ var rt = makeRuntime();
 
 testBootstrap(rt)
 	.then(function(controls) { return testActions(rt, controls); })
+	.then(testActionPayloads)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
 	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })

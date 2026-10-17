@@ -486,8 +486,10 @@ function qmodemAction(section, method, args, directFn, timeoutMs) {
 	if (!cacheLayerUsable())
 		return withTimeoutReject(directFn(), DIRECT_RPC_TIMEOUT, _('Modem request timed out'));
 
+	/* 外层 config_section 供任务队列加锁；args 会原样交给 QModem，必须也带目标。 */
+	var payload = Object.assign({}, args || {}, { config_section: section });
 	return runTask(function() {
-		return callTaskAction(section, 'qmodem', method, args || {});
+		return callTaskAction(section, 'qmodem', method, payload);
 	}, timeoutMs || 150000).then(function(result) {
 		touch(section);
 		return result;
@@ -1091,29 +1093,69 @@ function syncSupport(section) {
  * 缓存层不可用时自动退回直连（带超时）。
  */
 
+/* 兼容官方 at_cfg.res、平铺 response 及旧版 result 字符串。 */
+function atResponseText(raw) {
+	if (raw == null) return '';
+	if (typeof raw === 'string') return raw;
+	if (Array.isArray(raw)) return raw.map(atResponseText).filter(Boolean).join('\n');
+	if (typeof raw !== 'object') return String(raw);
+	var keys = [ 'response', 'at_response', 'res', 'output', 'stdout' ];
+	for (var i = 0; i < keys.length; i++)
+		if (typeof raw[keys[i]] === 'string' && raw[keys[i]] !== '') return raw[keys[i]];
+	if (raw.at_cfg && typeof raw.at_cfg === 'object') return atResponseText(raw.at_cfg);
+	for (var j = 0; j < 2; j++) {
+		var value = raw[j ? 'data' : 'result'];
+		if (value != null && (typeof value === 'object' || (typeof value === 'string' && !/^(?:success|error|failed)$/i.test(value))))
+			return atResponseText(value);
+	}
+	if (typeof raw.message === 'string') return raw.message;
+	return '';
+}
+
+function normalizeAtResult(raw) {
+	var text = atResponseText(raw);
+	var cfg = raw && typeof raw === 'object' && raw.at_cfg;
+	var error = raw && typeof raw === 'object' && (raw.error || raw.success === false || /^(?:error|failed)$/i.test(raw.result || ''));
+	if (cfg && (cfg.status === '0' || cfg.status === 0 || cfg.status === false)) error = true;
+	if (/(?:^|[\r\n])\s*(?:ERROR|\+(?:CME|CMS) ERROR[^\r\n]*)\s*(?:$|[\r\n])/i.test(text)) error = true;
+	if (error) {
+		var reason = (typeof error === 'string' ? error : '') || text || _('模组未返回有效响应，请检查 AT 端口。');
+		var err = new Error(reason);
+		err.response = raw;
+		throw err;
+	}
+	return raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.assign({}, raw, { response: text }) : raw;
+}
+
 /* 发送 AT 命令。atPort 可为空，由 QModem 自行选择默认端口。 */
 function sendAt(section, atPort, command, useUbus) {
 	var params = { at: command };
 	if (atPort) params.port = atPort;
-	if (useUbus !== undefined && useUbus !== null) params.use_ubus = useUbus;
+	if (useUbus !== undefined && useUbus !== null) params.use_ubus_flag = isEnabled(useUbus) ? '1' : '0';
 	var direct = function() { return withTimeoutReject(callSendAt(section, params), DIRECT_RPC_TIMEOUT, _('AT command timed out')); };
 
 	if (!cacheLayerUsable())
-		return direct();
+		return direct().then(normalizeAtResult);
 
 	/* 无端口/无 use_ubus 时走 qmodem_cache.send_at（后端串行化 AT 通道） */
 	if (!atPort && (useUbus === undefined || useUbus === null)) {
-		return runTask(function() { return callTaskSendAt(section, command); }, 30000).then(function(res) {
+		var accepted = false;
+		return runTask(function() {
+			return callTaskSendAt(section, command).then(function(task) { accepted = !!(task && task.task_id); return task; });
+		}, 30000).then(function(res) {
 			touch(section);
 			return res;
-		}, direct);
+		}, function(err) {
+			if (accepted) throw err;
+			return direct();
+		}).then(normalizeAtResult);
 	}
-	return qmodemAction(section, 'send_at', params, direct, 30000);
+	return qmodemAction(section, 'send_at', { params: params }, direct, 30000).then(normalizeAtResult);
 }
 
 function sendSms(section, phoneNumber, content) {
 	var args = { phone_number: phoneNumber, message_content: content };
-	return qmodemAction(section, 'send_sms', args,
+	return qmodemAction(section, 'send_sms', { params: args },
 		function() { return withTimeoutReject(callSendSms(section, args), DIRECT_RPC_TIMEOUT, _('Sending SMS timed out')); }, 60000);
 }
 function sendRawPdu(section, command) {
@@ -1146,7 +1188,7 @@ function setSimSlot(section, slot) {
 }
 function doReboot(section, method) {
 	var args = { method: method || 'soft' };
-	return qmodemAction(section, 'do_reboot', args,
+	return qmodemAction(section, 'do_reboot', { params: args },
 		function() { return withTimeoutReject(callDoReboot(section, args), DIRECT_RPC_TIMEOUT, _('Reboot request timed out')); }, 180000);
 }
 function clearDialLog(section) {
@@ -1817,6 +1859,7 @@ return baseclass.extend({
 	syncSupport: syncSupport,
 
 	sendAt: sendAt,
+	atResponseText: atResponseText,
 	sendSms: sendSms,
 	sendRawPdu: sendRawPdu,
 	deleteSms: deleteSms,

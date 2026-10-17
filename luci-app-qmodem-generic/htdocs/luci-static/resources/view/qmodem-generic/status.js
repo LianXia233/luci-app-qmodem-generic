@@ -380,11 +380,17 @@ return view.extend({
 			'.qm-traffic-chart-svg{width:100%;height:115px;display:block}',
 
 			/* 快捷导航 */
-			'.qm-shortcuts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}',
-			'.qm-shortcut-item{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;color:inherit;text-decoration:none}',
-			'.qm-shortcut-item strong{display:block;font-size:13px;color:var(--qm-text)}',
-			'.qm-shortcut-item span{display:block;font-size:11px;color:var(--qm-text-muted);margin-top:3px}',
-			'.qm-shortcut-item i{font-style:normal;font-size:18px;color:var(--qm-accent);font-weight:700}',
+			'.qm-app .qm-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}',
+			'.qm-app .qm-shortcut-item{position:relative;display:flex;align-items:center;gap:14px;min-width:0;min-height:102px;padding:18px 20px;overflow:hidden;color:var(--qm-text);text-decoration:none;background:linear-gradient(115deg,var(--qm-surface),var(--qm-surface-2));transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}',
+			'.qm-app .qm-shortcut-item::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--qm-accent-gradient)}',
+			'.qm-app .qm-shortcut-item:hover,.qm-app .qm-shortcut-item:focus-visible{transform:translateY(-2px);border-color:var(--qm-accent-border);box-shadow:var(--qm-shadow-md);text-decoration:none}',
+			'.qm-app .qm-shortcut-icon{display:flex;align-items:center;justify-content:center;flex:0 0 42px;height:42px;border-radius:13px;background:var(--qm-accent-soft);color:var(--qm-accent)}',
+			'.qm-app .qm-shortcut-icon svg{width:23px;height:23px;stroke:currentColor}',
+			'.qm-app .qm-shortcut-copy{flex:1;min-width:0}.qm-app .qm-shortcut-copy strong{display:block;font-size:14px;color:var(--qm-text);line-height:1.5}',
+			'.qm-app .qm-shortcut-copy span{display:block;font-size:12px;color:var(--qm-text-muted);margin-top:4px;line-height:1.6;white-space:normal}',
+			'.qm-app .qm-shortcut-arrow{display:flex;align-items:center;justify-content:center;flex:0 0 26px;height:26px;color:var(--qm-accent)}',
+			'.qm-app .qm-shortcut-arrow svg{width:18px;height:18px}',
+			'@media(max-width:820px){.qm-app .qm-shortcuts{grid-template-columns:1fr}.qm-app .qm-shortcut-item{min-height:88px;padding:16px}}',
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.qm-grid-3{grid-template-columns:1fr 1fr}.qm-address-card{grid-column:1/-1}.qm-traffic-layout{grid-template-columns:repeat(3,1fr)}.qm-traffic-chart-box{grid-column:1/-1}}',
@@ -977,12 +983,19 @@ return view.extend({
 	},
 
 	shortcut: function(title, description, path) {
+		var kind = path.split('/').pop();
+		var paths = {
+			connection: '<path d="M7 3v14m-4-4 4 4 4-4M17 21V7m-4 4 4-4 4 4"/>',
+			network: '<path d="M3 17h2v4H3zm5-5h2v9H8zm5-5h2v14h-2zm5-4h2v18h-2z"/>',
+			system: '<path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="9" y="11" width="6" height="7" rx="1"/>'
+		};
 		return E('a', { 'class': 'qm-glass-card qm-shortcut-item', 'href': L.url(path) }, [
-			E('div', {}, [
+			E('span', { 'class': 'qm-shortcut-icon', 'aria-hidden': 'true' }, svgNode('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (paths[kind] || paths.connection) + '</svg>')),
+			E('div', { 'class': 'qm-shortcut-copy' }, [
 				E('strong', {}, title),
 				E('span', {}, description)
 			]),
-			E('i', {}, '→')
+			E('span', { 'class': 'qm-shortcut-arrow', 'aria-hidden': 'true' }, svgNode('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>'))
 		]);
 	},
 
@@ -1081,10 +1094,10 @@ return view.extend({
 			isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
 
 			/* 快捷跳转 */
-			E('div', { 'class': 'qm-shortcuts' }, [
-				this.shortcut(_('移动数据'), _('APN、拨号、IP 详情与会话计数'), 'admin/modem/qmodem-generic/connection'),
-				this.shortcut(_('射频与小区'), _('频段、小区、射频策略与诊断'), 'admin/modem/qmodem-generic/network'),
-				this.shortcut(_('模组与 SIM'), _('模组身份、SIM 信息与维护'), 'admin/modem/qmodem-generic/system')
+			E('nav', { 'class': 'qm-shortcuts', 'aria-label': _('常用功能') }, [
+				this.shortcut(_('移动数据'), _('APN 与拨号，查看 IP 和连接状态'), 'admin/modem/qmodem-generic/connection'),
+				this.shortcut(_('无线与小区'), _('信号、小区和频段设置'), 'admin/modem/qmodem-generic/network'),
+				this.shortcut(_('模组与 SIM 卡'), _('设备信息、SIM 卡与维护'), 'admin/modem/qmodem-generic/system')
 			]),
 
 			/* 原始底层完整信息 */
