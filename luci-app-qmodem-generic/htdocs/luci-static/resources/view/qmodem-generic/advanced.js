@@ -131,64 +131,76 @@ function svgNode(xmlString) {
 
 return view.extend({
 	DOMAINS: [ 'network', 'device', 'status', 'support' ],
-	POLL_INTERVAL: 10000,
+	/* 支持库/硬件拓扑不需要每十秒重建一次；普通模组状态仍来自已有缓存。 */
+	POLL_INTERVAL: 90000,
+	AUX_CACHE_MS: 120000,
 
 	load: function() {
 		var self = this;
 		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
 			self.section = ctx.section;
-			return self.collect(ctx);
+			/* 大型 JSON 支持库和串口映射通过单独 Promise 后台加载，不阻塞首屏。 */
+			self.initialAuxPromise = self.loadAuxiliary();
+			return self.collect(ctx, true);
 		});
 	},
 
-	collect: function(ctx) {
+	loadAuxiliary: function() {
+		var self = this, now = Date.now();
+		if (this.auxPromise && now - (this.auxUpdated || 0) < this.AUX_CACHE_MS)
+			return this.auxPromise;
+		this.auxUpdated = now;
 		var errors = [];
-		var section = ctx.section;
-		var self = this;
-		var portsPromise = this.portsUpdated && Date.now() - this.portsUpdated < 30000
-			? Promise.resolve(this.portsCache)
-			: guard(controls.getSupportPorts(), '串口映射', errors).then(function(value) {
-				self.portsCache = value || { ports: [] };
-				self.portsUpdated = Date.now();
-				return self.portsCache;
-			});
-
-		return Promise.all([
+		this.auxPromise = Promise.all([
 			guard(controls.getSupportStatus(), '模组支持库', errors),
-			portsPromise,
+			guard(controls.getSupportPorts(), '串口映射', errors),
 			guard(controls.getCustomModels(), '自定义型号', errors)
-		])
-		.then(function(rr) {
-			var support = rr[0] || {};
-			var ports = rr[1] || { ports: [] };
-			var custom = rr[2] || { entries: [] };
+		]).then(function(values) {
+			self.auxData = {
+				support: values[0] || {},
+				ports: values[1] || { ports: [] },
+				custom: values[2] || { entries: [], presets: {} },
+				errors: errors
+			};
+			return self.auxData;
+		});
+		return this.auxPromise;
+	},
 
-			if (!section)
-				return { section: null, support: support, ports: ports, custom: custom, errors: errors };
-
+	collect: function(ctx, quick) {
+		var section = ctx.section, self = this;
+		var aux = quick
+			? Promise.resolve(this.auxData || {
+				support: {}, ports: { ports: [] },
+				custom: { entries: [], presets: {}, loading: true }, errors: []
+			})
+			: this.loadAuxiliary();
+		return aux.then(function(meta) {
+			if (!section) return {
+				section: null, support: meta.support, ports: meta.ports, custom: meta.custom,
+				errors: (meta.errors || []).slice()
+			};
+			var errors = (meta.errors || []).slice();
 			return Promise.all([
 				guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
 				guard(controls.getRebootCaps(section), '重启能力', errors),
 				guard(controls.getAtCfg(section), 'AT 端口配置', errors),
 				guard(controls.getBaseInfo(section), '基本信息', errors),
 				guard(controls.getCopyright(section), '版权信息', errors)
-			]).then(function(r) {
+			]).then(function(result) {
 				return {
-					section: section,
-					support: support,
-					ports: ports,
-					custom: custom,
-					disabled: r[0],
-					rebootCaps: r[1],
-					atCfg: r[2],
-					base: r[3],
-					copyright: r[4],
-					errors: errors
+					section: section, support: meta.support,
+					ports: meta.ports, custom: meta.custom,
+					disabled: result[0], rebootCaps: result[1], atCfg: result[2],
+					base: result[3], copyright: result[4], errors: errors
 				};
 			});
 		}).catch(function(err) {
-			errors.push('加载失败：' + ((err && err.message) || String(err)));
-			return { section: null, support: {}, ports: { ports: [] }, custom: { entries: [] }, errors: errors };
+			return {
+				section: section, support: {}, ports: { ports: [] },
+				custom: { entries: [], presets: {}, loading: true },
+				errors: [ '读取高级设置失败：' + ((err && err.message) || String(err)) ]
+			};
 		});
 	},
 
@@ -380,7 +392,7 @@ return view.extend({
 			});
 		});
 		var selector = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%;margin-top:8px' }, [
-			E('option', { 'value': '' }, entries.length ? _('选择型号查看配置（只读）') : _('未获取到 QModem 支持库内容'))
+			E('option', { 'value': '' }, entries.length ? _('选择型号查看配置（只读）') : (custom && custom.loading ? _('支持库正在后台读取…') : _('未获取到 QModem 支持库内容')))
 		].concat(entries.map(function(item, i) {
 			return E('option', { 'value': String(i) },
 				(item.bus === 'pcie' ? 'PCIe · ' : 'USB · ') + item.model.toUpperCase());
@@ -660,7 +672,7 @@ return view.extend({
 		});
 		var entries = Array.isArray(data && data.entries) ? data.entries : [];
 		return controls.card(_('自定义模组配置'),
-			_('可以新增或编辑自定义型号。保存时会同时更新用户 JSON 与 QModem 支持库，并自动备份。'), [
+			_('可以新增或编辑自定义型号。保存时同时更新两处 JSON 并自动备份；支持库在后台加载。'), [
 			data && data.error ? E('div', { 'class': 'mt-control-note' }, data.error) : null,
 			form,
 			editHint,
@@ -748,12 +760,29 @@ return view.extend({
 	},
 
 	render: function(res) {
-		return controls.liveView(this, res, {
+		var self = this;
+		var holder = controls.liveView(this, res, {
 			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect
 		});
+		/* 首屏绘制后再填充支持库；页面已切换或输入框正在编辑时不打断操作。 */
+		this.auxHolder = holder;
+		if (this.initialAuxPromise) {
+			this.initialAuxPromise.then(function(meta) {
+				if (self.auxHolder !== holder) return;
+				var active = document.activeElement;
+				if (active && holder.contains && holder.contains(active) &&
+					/^(input|textarea|select)$/i.test(active.tagName || ''))
+					return;
+				dom.content(holder, self.paintContent(Object.assign({}, res, meta)));
+			}).catch(function(err) {
+				ui.addNotification(null, E('p', {},
+					_('后台加载支持库失败：%s').format((err && err.message) || String(err))), 'warning');
+			});
+		}
+		return holder;
 	},
 
 	paintContent: function(res) {
