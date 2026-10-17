@@ -52,7 +52,17 @@ save_model() {
 		esac
 		_clean=$(printf '%s' "$_raw" | tr ',; ' '///' | sed 's#//*#/#g;s#^/##;s#/$##')
 		[ -n "$_clean" ] || _clean=0
-		[ "${#_clean}" -le 255 ] && printf '%s' "$_clean" | grep -Eq '^[0-9]+(/[0-9]+)* \
+		[ "${#_clean}" -le 255 ] && printf '%s' "$_clean" | grep -Eq '^[0-9]+(/[0-9]+)*$' || {
+			error "$_band_name 频段只允许数字，以 /、逗号或空格分隔"; return;
+		}
+		case "$_band_name" in
+			wcdma) _wcdma="$_clean" ;;
+			lte) _lte="$_clean" ;;
+			nsa) _nsa="$_clean" ;;
+			sa) _sa="$_clean" ;;
+		esac
+	done
+	for _library in "${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_support.json}" \
 		"${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"; do
 		[ -f "$_library" ] || continue
 		if jsonfilter -i "$_library" -e "@.modem_support.$_bus.$_model" 2>/dev/null | grep -q .; then
@@ -136,201 +146,6 @@ list_models() {
 		printf '{}'
 	fi
 	printf '}\n'
-}
-
-# 返回 tty 的物理设备：先找 USB 父节点，再找 PCIe BDF；不会把 USB 控制器误当成模组。
-device_info() {
-	_sys=$(readlink -f "$1/device" 2>/dev/null)
-	[ -n "$_sys" ] || return 1
-	_cur="$_sys"
-	while [ "$_cur" != / ] && [ -n "$_cur" ]; do
-		if [ -r "$_cur/idVendor" ] && [ -r "$_cur/idProduct" ]; then
-			_bus=usb
-			_id="$(cat "$_cur/idVendor"):$(cat "$_cur/idProduct")"
-			_location=$(basename "$_cur")
-			_product=$(cat "$_cur/product" 2>/dev/null)
-			return 0
-		fi
-		_cur="${_cur%/*}"
-	done
-	_cur="$_sys"
-	while [ "$_cur" != / ] && [ -n "$_cur" ]; do
-		case "$(basename "$_cur")" in
-			????:??:??.?)
-				if [ -r "$_cur/vendor" ] && [ -r "$_cur/device" ]; then
-					_bus=pcie
-					_id="$(cat "$_cur/vendor" | sed 's/^0x//'):$(cat "$_cur/device" | sed 's/^0x//')"
-					_location=$(basename "$_cur")
-					_product=''
-					return 0
-				fi ;;
-		esac
-		_cur="${_cur%/*}"
-	done
-	return 1
-}
-
-port_sections() {
-	uci -q show qmodem 2>/dev/null | sed -n "s/^qmodem\.\([A-Za-z0-9_-]*\)='\{0,1\}modem-device'\{0,1\}$/\1/p"
-}
-
-ports() {
-	_sections=$(port_sections)
-	_first=1
-	printf '{"ports":['
-	for _entry in "$SYS_TTY"/ttyUSB[0-9]* "$SYS_TTY"/ttyACM[0-9]* "$SYS_TTY"/mhi_* "$SYS_WWAN"/*at*; do
-		[ -e "$_entry/device" ] || continue
-		_port="$DEV_DIR/$(basename "$_entry")"
-		[ -c "$_port" ] || continue
-		device_info "$_entry" || continue
-		_port_bus="$_bus"; _port_id="$_id"; _port_location="$_location"; _port_product="$_product"
-		_model=''; _confirmed=0; _section=''
-		for _s in $_sections; do
-			_at=$(uci -q get "qmodem.$_s.at_port" 2>/dev/null)
-			_override=$(uci -q get "qmodem.$_s.override_at_port" 2>/dev/null)
-			_valid=$(uci -q get "qmodem.$_s.valid_at_ports" 2>/dev/null)
-			if [ "$_port" = "$_at" ] || [ "$_port" = "$_override" ]; then
-				_confirmed=1; _section="$_s"
-			else
-				case " $_valid " in *" $_port "*) _confirmed=1; _section="$_s" ;; esac
-			fi
-			# 其它串口可继承同一物理设备已识别的型号，但仍标记为候选口。
-			if [ -z "$_section" ] && [ -n "$_at" ]; then
-				_peer="$SYS_TTY/$(basename "$_at")"
-				[ -e "$_peer/device" ] || _peer="$SYS_WWAN/$(basename "$_at")"
-				if [ -e "$_peer/device" ] && device_info "$_peer" &&
-					[ "$_bus" = "$_port_bus" ] && [ "$_location" = "$_port_location" ]; then
-					_section="$_s"
-				fi
-			fi
-			[ -n "$_section" ] || continue
-			_model=$(uci -q get "qmodem.$_s.model" 2>/dev/null)
-			[ -n "$_model" ] || _model=$(uci -q get "qmodem.$_s.name" 2>/dev/null)
-			break
-		done
-		[ -n "$_model" ] || _model="$_port_product"
-		[ "$_first" = 1 ] || printf ','
-		_first=0
-		printf '{"port":"%s","bus":"%s","id":"%s","location":"%s","model":"%s","section":"%s","confirmed":%s}' \
-			"$(quote "$_port")" "$_port_bus" "$(quote "$_port_id")" "$(quote "$_port_location")" \
-			"$(quote "$_model")" "$(quote "$_section")" "$_confirmed"
-	done
-	printf ']}\n'
-}
-
-probe() {
-	_input=$(cat)
-	_port=$(printf '%s' "$_input" | jsonfilter -e '@.port' 2>/dev/null)
-	case "$_port" in "$DEV_DIR"/ttyUSB[0-9]*|"$DEV_DIR"/ttyACM[0-9]*|"$DEV_DIR"/mhi_*|"$DEV_DIR"/wwan*at*) ;; *) error '串口路径无效'; return ;; esac
-	_name=$(basename "$_port")
-	_entry="$SYS_TTY/$_name"
-	[ -e "$_entry/device" ] || _entry="$SYS_WWAN/$_name"
-	[ -e "$_entry/device" ] && [ -c "$_port" ] && device_info "$_entry" || { error '串口不属于可识别的 USB/PCIe 设备'; return; }
-	for _s in $(port_sections); do
-		_at=$(uci -q get "qmodem.$_s.at_port" 2>/dev/null)
-		_override=$(uci -q get "qmodem.$_s.override_at_port" 2>/dev/null)
-		_valid=$(uci -q get "qmodem.$_s.valid_at_ports" 2>/dev/null)
-		{ [ "$_port" = "$_at" ] || [ "$_port" = "$_override" ]; } && { error '该串口已由 QModem 管理，请使用 AT 控制台'; return; }
-		case " $_valid " in *" $_port "*) error '该串口已由 QModem 管理，请使用 AT 控制台'; return ;; esac
-	done
-	command -v tom_modem >/dev/null 2>&1 || { error '未找到 tom_modem，无法读取型号'; return; }
-	_lock="at.$(printf '%s' "$_port" | tr '/.' '__')"
-	qm_lock "$_lock" 0 || { error '该串口正忙，请稍后再试'; return; }
-	trap 'qm_unlock_all' EXIT INT TERM
-	_out=$(timeout 5 tom_modem -d "$_port" -o a -c 'AT+CGMM' -t 2 2>/dev/null | tr -d '\r')
-	qm_unlock "$_lock"
-	trap - EXIT INT TERM
-	_model=$(printf '%s\n' "$_out" | sed '/^[[:space:]]*$/d;/^[Aa][Tt]+[Cc][Gg][Mm][Mm]$/d;/^[Oo][Kk]$/d;/^[Ee][Rr][Rr][Oo][Rr]$/d;s/^+CGMM:[[:space:]]*//' | head -n 1 | cut -c 1-96)
-	case "$_model" in ''|*ERROR*|*error*) error '串口未返回模组型号，可能不是 AT 口'; return ;; esac
-	printf '{"success":true,"model":"%s"}\n' "$(quote "$_model")"
-}
-
-case "$1" in
-	save) save_model ;;
-	delete) delete_model ;;
-	list) list_models ;;
-	ports) ports ;;
-	probe) probe ;;
-	*) error '未知操作' ;;
-esac
- || {
-			error "$_band_name 频段只允许数字，以 /、逗号或空格分隔"; return;
-		}
-		case "$_band_name" in
-			wcdma) _wcdma="$_clean" ;;
-			lte) _lte="$_clean" ;;
-			nsa) _nsa="$_clean" ;;
-			sa) _sa="$_clean" ;;
-		esac
-	done
-	for _library in "${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_support.json}" \
-		"${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"; do
-		[ -f "$_library" ] || continue
-		if jsonfilter -i "$_library" -e "@.modem_support.$_bus.$_model" 2>/dev/null | grep -q .; then
-			error '这个型号已在当前连接方式的支持库中，无需重复添加'; return
-		fi
-	done
-	case "$_modes" in ''|*[!a-z,]*) error '拨号协议格式无效'; return ;; esac
-	[ "${#_modes}" -le 64 ] || { error '拨号协议列表过长'; return; }
-	case "$_modes" in ,*|*,|*,,*) error '拨号协议列表不能包含空项'; return ;; esac
-	_modes_json=''; _seen=','
-	_old_ifs="$IFS"; IFS=,
-	for _mode in $_modes; do
-		case "$_mode" in qmi|gobinet|mbim) ;;
-			ecm|rndis|ncm) [ "$_bus" = usb ] || { IFS="$_old_ifs"; error 'PCIe 不接受 USB 拨号协议'; return; } ;;
-			*) IFS="$_old_ifs"; error '包含未支持的拨号协议'; return ;;
-		esac
-		case "$_seen" in *",$_mode,"*) continue ;; esac
-		_seen="$_seen$_mode,"
-		[ -z "$_modes_json" ] || _modes_json="$_modes_json, "
-		_modes_json="$_modes_json\"$_mode\""
-	done
-	IFS="$_old_ifs"
-	[ -n "$_modes_json" ] || { error '请至少选择一种拨号协议'; return; }
-	_dest="$CUSTOM_DIR/$_bus/$_model.json"
-	[ ! -e "$_dest" ] || { error '该连接方式下的型号配置已存在'; return; }
-	( umask 022; mkdir -p "$CUSTOM_DIR/$_bus" ) || { error '无法创建自定义配置目录'; return; }
-	_tmp="$_dest.tmp.$$"
-	{
-		printf '{\n    "modem_support": {\n        "%s": {\n            "%s": {\n' "$_bus" "$_model"
-		[ "$_bus" = usb ] && printf '                "manufacturer_id": "%s",\n' "$_vid"
-		printf '                "manufacturer": "%s",\n                "platform": "%s",\n                "data_interface": "%s",\n' "$_vendor" "$_platform" "$_bus"
-		printf '                "pdp_index": "%s",\n                "wcdma_band": "0",\n                "lte_band": "0",\n' "$_pdp"
-		printf '                "nsa_band": "0",\n                "sa_band": "0",\n                "modes": [%s]\n            }\n        }\n    }\n}\n' "$_modes_json"
-	} > "$_tmp" || { rm -f "$_tmp"; error '写入配置失败'; return; }
-	jsonfilter -i "$_tmp" -e '@.modem_support' >/dev/null 2>&1 || { rm -f "$_tmp"; error '生成的配置无法解析'; return; }
-	ln "$_tmp" "$_dest" 2>/dev/null || { rm -f "$_tmp"; error '配置已被另一个请求创建或保存失败'; return; }
-	rm -f "$_tmp"
-	printf '{"success":true,"bus":"%s","model":"%s"}\n' "$_bus" "$_model"
-}
-
-delete_model() {
-	_input=$(cat)
-	_bus=$(printf '%s' "$_input" | jsonfilter -e '@.bus' 2>/dev/null)
-	_model=$(printf '%s' "$_input" | jsonfilter -e '@.model' 2>/dev/null)
-	case "$_bus" in usb|pcie) ;; *) error '连接方式无效'; return ;; esac
-	valid_model "$_model" || { error '型号无效'; return; }
-	_dest="$CUSTOM_DIR/$_bus/$_model.json"
-	[ -f "$_dest" ] || { error '未找到这条自定义配置'; return; }
-	rm -f "$_dest" || { error '删除失败'; return; }
-	printf '{"success":true}\n'
-}
-
-list_models() {
-	_first=1
-	printf '{"entries":['
-	for _f in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
-		[ -f "$_f" ] || continue
-		_bus=$(basename "$(dirname "$_f")")
-		_model=$(basename "$_f" .json)
-		valid_model "$_model" || continue
-		_vid=$(sed -n 's/.*"manufacturer_id": "\([0-9a-f]*\)".*/\1/p' "$_f" | head -n 1)
-		_modes=$(sed -n 's/.*"modes": \[\(.*\)\].*/\1/p' "$_f" | tr -d '" ')
-		[ "$_first" = 1 ] || printf ','
-		_first=0
-		printf '{"bus":"%s","model":"%s","manufacturer_id":"%s","modes":"%s"}' "$_bus" "$_model" "$_vid" "$_modes"
-	done
-	printf ']}\n'
 }
 
 # 返回 tty 的物理设备：先找 USB 父节点，再找 PCIe BDF；不会把 USB 控制器误当成模组。
