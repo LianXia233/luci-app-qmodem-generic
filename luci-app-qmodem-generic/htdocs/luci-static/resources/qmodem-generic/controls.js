@@ -1453,17 +1453,43 @@ function setSmsStorage(section, storage) {
 	return qmodemAction(section, 'set_sms_storage', { storage: storage },
 		function() { return withTimeoutReject(callSetSmsStorage(section, storage), DIRECT_RPC_TIMEOUT, _('Setting SMS storage timed out')); }, 60000);
 }
+/*
+ * 官方 QModem 对拨号/挂断/重拨的响应为 {"result":{"status":"1"|"0"}}。
+ * task 成功只代表 ubus 请求执行完，不能误认 status=0 的失败为成功。
+ * 在旧固件缺少任务层时，这三种操作使用较长直连超时，不被普通 8s RPC 截断。
+ */
+function requireDialActionSuccess(raw, operation) {
+	var result = raw && raw.result && typeof raw.result === 'object' ? raw.result : raw;
+	if (!result || typeof result !== 'object')
+		throw new Error(operation + _('：QModem 未返回操作结果。'));
+	var status = result.status;
+	if (raw.error || result.error || raw.success === false || result.success === false ||
+		status === '0' || status === 0 || status === false ||
+		typeof status === 'string' && /^(error|failed|failure)$/i.test(status))
+		throw new Error(operation + _('失败：') + String(result.error || raw.error || result.message || _('QModem 拒绝执行该操作。')));
+	if (!(status === '1' || status === 1 || status === true ||
+		status === 'success' || result.success === true || raw.success === true))
+		throw new Error(operation + _('：QModem 未确认操作成功。'));
+	return raw;
+}
+function modemConnectionAction(section, method, directFn, timeoutMs, label) {
+	var action = cacheLayerUsable()
+		? qmodemAction(section, method, {}, directFn, timeoutMs)
+		: withTimeoutReject(directFn(), timeoutMs, label + _('超时，操作可能仍在执行，请检查连接状态。'));
+	return action.then(function(result) {
+		var accepted = requireDialActionSuccess(result, label);
+		touch(section);
+		return accepted;
+	});
+}
 function modemDial(section) {
-	return qmodemAction(section, 'modem_dial', {},
-		function() { return withTimeoutReject(callModemDial(section), DIRECT_RPC_TIMEOUT, _('Dial request timed out')); }, 180000);
+	return modemConnectionAction(section, 'modem_dial', function() { return callModemDial(section); }, 120000, _('开始拨号'));
 }
 function modemHang(section) {
-	return qmodemAction(section, 'modem_hang', {},
-		function() { return withTimeoutReject(callModemHang(section), DIRECT_RPC_TIMEOUT, _('Hangup request timed out')); }, 120000);
+	return modemConnectionAction(section, 'modem_hang', function() { return callModemHang(section); }, 90000, _('挂断连接'));
 }
 function modemRedial(section) {
-	return qmodemAction(section, 'modem_redial', {},
-		function() { return withTimeoutReject(callModemRedial(section), DIRECT_RPC_TIMEOUT, _('Redial request timed out')); }, 180000);
+	return modemConnectionAction(section, 'modem_redial', function() { return callModemRedial(section); }, 120000, _('重新拨号'));
 }
 
 /* 与 modem 无关：直接调用即可 */
