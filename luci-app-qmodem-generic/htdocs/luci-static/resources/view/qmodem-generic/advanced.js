@@ -3,15 +3,16 @@
 'require ui';
 'require dom';
 'require qmodem-generic.controls as controls';
+'require qmodem-generic.theme as theme';
 
 var E = controls.element;
 
 /*
- * 高级设置（Advanced Settings）— 现代白色毛玻璃 (Glassmorphism) + 动态硬件总线 SVG 重构
+ * 高级设置 — 外观配色、硬件连接、能力诊断与专有设置。
  * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（由 qmodem-generic.controls 封装）：
  *    get_disabled_features / get_reboot_caps / get_at_cfg / get_copyright /
- *    base_info / get_mode / get_network_prefer / get_lockband
- * 控制动作：do_reboot / set_mode / set_network_prefer / set_lockband / send_at。
+ *    base_info / get_copyright
+ * 外观仅保存于浏览器；专有硬件设置仍经 send_at 下发。
  */
 
 function guard(promise, label, errors) {
@@ -62,10 +63,6 @@ function disabledSet(raw) {
 	return list.map(function(x) { return String(x).toLowerCase().replace(/[\s_\-]/g, ''); });
 }
 
-function isDisabled(list, name) {
-	return list.indexOf(String(name).toLowerCase().replace(/[\s_\-]/g, '')) !== -1;
-}
-
 function atText(raw) {
 	if (raw === undefined || raw === null)
 		return '';
@@ -82,43 +79,6 @@ function atText(raw) {
 		try { return JSON.stringify(raw, null, 2); } catch (e) { return String(raw); }
 	}
 	return String(raw);
-}
-
-function bandItem(item) {
-	if (item === undefined || item === null)
-		return null;
-	if (typeof item !== 'object') {
-		var id = String(item).trim();
-		return id ? { id: id, name: id } : null;
-	}
-	var bid = ci(item, [ 'band_id', 'bandid', 'id', 'band' ]);
-	var bname = ci(item, [ 'band_name', 'bandname', 'name' ]);
-	if (bid === undefined && bname === undefined)
-		return null;
-	var idStr = String(bid !== undefined ? bid : bname).trim();
-	return idStr ? { id: idStr, name: String(bname !== undefined && bname !== '' ? bname : idStr) } : null;
-}
-
-function bandItems(list) {
-	if (!Array.isArray(list))
-		return [];
-	return list.map(bandItem).filter(Boolean);
-}
-
-var BAND_CLASS_LABEL = {
-	GW: _('2G / 3G（GSM / WCDMA）'),
-	LTE: _('4G LTE'),
-	NRNSA: _('5G NR（NSA 非独立组网）'),
-	NRSA: _('5G NR（SA 独立组网）')
-};
-
-var MODE_LABEL = {
-	auto: _('自动'), ecm: 'ECM', ncm: 'NCM', rndis: 'RNDIS',
-	mbim: 'MBIM', qmi: 'QMI', gobinet: 'GobiNet', ppp: 'PPP'
-};
-
-function modeLabel(key) {
-	return MODE_LABEL[String(key).toLowerCase()] || String(key).toUpperCase();
 }
 
 var FEATURE_LABEL = {
@@ -148,7 +108,7 @@ var FEATURE_LABEL = {
 
 function featureLabel(name) {
 	var key = String(name).toLowerCase().replace(/[\s_\-]/g, '');
-	return FEATURE_LABEL[key] ? (FEATURE_LABEL[key] + '（' + name + '）') : String(name);
+	return FEATURE_LABEL[key] || String(name);
 }
 
 function svgNode(xmlString) {
@@ -187,9 +147,6 @@ return view.extend({
 				guard(controls.getRebootCaps(section), '重启能力', errors),
 				guard(controls.getAtCfg(section), 'AT 端口配置', errors),
 				guard(controls.getBaseInfo(section), '基本信息', errors),
-				guard(controls.getMode(section), '网络模式', errors),
-				guard(controls.getNetworkPrefer(section), '网络优选', errors),
-				guard(controls.getLockBand(section), '锁频段', errors),
 				guard(controls.getCopyright(section), '版权信息', errors)
 			]).then(function(r) {
 				return {
@@ -199,10 +156,7 @@ return view.extend({
 					rebootCaps: r[1],
 					atCfg: r[2],
 					base: r[3],
-					mode: r[4],
-					prefer: r[5],
-					lockband: r[6],
-					copyright: r[7],
+					copyright: r[4],
 					errors: errors
 				};
 			});
@@ -231,9 +185,6 @@ return view.extend({
 
 			/* 动态 SVG 硬件总线拓扑 */
 			'.mt-adv-topo-card{padding:20px 24px;margin-bottom:16px}',
-			'.mt-adv-topo-svg{width:100%;height:100px;display:block}',
-			'@keyframes qmBusDash{to{stroke-dashoffset:-36}}',
-			'.qm-bus-stream{stroke-dasharray:7,5;animation:qmBusDash 1.4s linear infinite}',
 
 			/* 警告与提示卡片 */
 			'.mt-hardware-warning{margin-bottom:14px;color:var(--qm-warn);background:var(--qm-warn-soft);border:1px solid var(--qm-warn-border);border-radius:14px;padding:12px 18px;font-size:12.5px;display:flex;align-items:center;gap:10px}',
@@ -250,18 +201,6 @@ return view.extend({
 			'.mt-hardware-cap{padding:3px 10px;border-radius:999px;background:var(--qm-danger-soft);color:var(--qm-danger);font-size:10.5px;font-weight:700;border:1px solid var(--qm-danger-border)}',
 			'.mt-hardware-cap.ok{background:var(--qm-ok-soft);color:var(--qm-ok);border-color:var(--qm-ok-border)}',
 
-			/* 频段锁定网格卡片 */
-			'.mt-hardware-bands{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px}',
-			'.mt-hardware-band{padding:18px}',
-			'.mt-hardware-band h4{margin:0 0 4px;font-size:14.5px;font-weight:750;color:var(--qm-text)}',
-			'.mt-hardware-band p{margin:0 0 12px;color:var(--qm-text-muted);font-size:11px;line-height:1.45}',
-			'.mt-band-options{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}',
-			'.mt-band-option{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:46px;padding:6px 4px;border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2);cursor:pointer;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;transition:all .15s ease;-webkit-user-select:none;user-select:none}',
-			'.mt-band-option:hover{border-color:var(--qm-accent-border);background:var(--qm-surface)}',
-			'.mt-band-option.checked{border-color:var(--qm-accent);background:var(--qm-accent-soft);color:var(--qm-accent);box-shadow:inset 0 0 0 1px var(--qm-accent)}',
-			'.mt-band-option input{position:absolute;width:0;height:0;opacity:0;pointer-events:none}',
-			'.mt-band-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}',
-
 			/* 底部开发者工具条 */
 			'.mt-hardware-tools{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-top:18px}',
 			'.mt-hardware-tool-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px}',
@@ -270,43 +209,57 @@ return view.extend({
 			'.mt-hardware-raw{background:var(--qm-surface-3);padding:16px;border-radius:14px;color:var(--qm-accent-2);font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
 
 			/* 响应式 */
-			'@media(max-width:980px){.mt-control-grid,.mt-hardware-bands{grid-template-columns:1fr}}',
+			'@media(max-width:980px){.mt-control-grid{grid-template-columns:1fr}}',
 			'@media(max-width:680px){.mt-hardware-head{flex-direction:column;align-items:flex-start}.mt-hardware-tools{flex-direction:column;align-items:flex-start}.mt-hardware-tool-actions{width:100%;justify-content:flex-start}}'
 		].join(''));
 	},
 
-	/* 动态 SVG 总线与硬件控制器拓扑 */
-	renderSvgBusTopo: function() {
-		var svgStr = [
-			'<svg class="mt-adv-topo-svg" viewBox="0 0 540 86">',
-			'  <!-- 节点 1: 主机处理器与总线 (Host Controller) -->',
-			'  <g transform="translate(15, 14)">',
-			'    <rect x="0" y="0" width="125" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <rect x="12" y="16" width="24" height="24" rx="5" fill="#0072f5"/>',
-			'    <text x="44" y="27" font-size="12" font-weight="750" fill="#0f172a">Host Processor</text>',
-			'    <text x="44" y="42" font-size="10" fill="#64748b">PCIe / USB 3.0</text>',
-			'  </g>',
-			'  <!-- 动态总线通道 1 -->',
-			'  <line x1="140" y1="42" x2="215" y2="42" stroke="#0072f5" stroke-width="2.6" class="qm-bus-stream"/>',
-			'  <!-- 节点 2: QModem 硬件接入与控制中枢 -->',
-			'  <g transform="translate(215, 14)">',
-			'    <rect x="0" y="0" width="135" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="22" cy="28" r="6" fill="#10b981"/>',
-			'    <text x="36" y="27" font-size="12" font-weight="750" fill="#0f172a">QModem Bus Ctrl</text>',
-			'    <text x="36" y="42" font-size="10" fill="#64748b">AT &amp; Channel Mgr</text>',
-			'  </g>',
-			'  <!-- 动态总线通道 2 -->',
-			'  <line x1="350" y1="42" x2="415" y2="42" stroke="#10b981" stroke-width="2.6" class="qm-bus-stream" style="animation-duration:1.2s;"/>',
-			'  <!-- 节点 3: 模组端基带射频硬件 -->',
-			'  <g transform="translate(415, 14)">',
-			'    <rect x="0" y="0" width="115" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="20" cy="28" r="6" fill="#0ea5e9"/>',
-			'    <text x="34" y="27" font-size="12" font-weight="750" fill="#0f172a">Cellular Core</text>',
-			'    <text x="34" y="42" font-size="10" fill="#64748b">Hardware Target</text>',
-			'  </g>',
-			'</svg>'
-		].join('');
-		return svgNode(svgStr);
+	/* 自适应节点使用文本排版，长名称和手机竖屏均不会截字。 */
+	renderBusTopo: function() {
+		return theme.topology([
+			{ title: _('主机系统'), sub: _('USB / PCIe 硬件连接') },
+			{ title: _('QModem 管理服务'), sub: _('指令交互与通道管理') },
+			{ title: _('蜂窝通信模组'), sub: _('移动网络接入') }
+		]);
+	},
+
+	appearanceCard: function() {
+		var appearance = theme.getAppearance();
+		var tone = controls.select([
+			[ 'auto', _('跟随系统主题') ], [ 'light', _('浅色') ], [ 'dark', _('深色') ]
+		], appearance.tone);
+		tone.setAttribute('aria-label', _('明暗模式'));
+		var status = E('p', { 'class': 'qm-appearance-status', 'role': 'status' },
+			_('选择后立即生效，并记住当前浏览器的选择。'));
+		var buttons = [];
+		function save() {
+			appearance.tone = tone.value;
+			var persisted = theme.setAppearance(appearance);
+			buttons.forEach(function(button) {
+				var selected = button.getAttribute('data-palette') === appearance.palette;
+				button.classList.toggle('is-selected', selected);
+				button.setAttribute('aria-pressed', String(selected));
+			});
+			status.textContent = persisted ? _('外观设置已保存到当前浏览器。') : _('外观已应用，当前浏览器未允许保存设置。');
+		}
+		buttons = theme.palettes().map(function(palette) {
+			return E('button', {
+				'type': 'button', 'class': 'qm-palette-option' + (appearance.palette === palette.id ? ' is-selected' : ''),
+				'data-palette': palette.id, 'aria-pressed': String(appearance.palette === palette.id),
+				'style': '--qm-preview-gradient:' + palette.gradient,
+				'click': function() { appearance.palette = palette.id; save(); }
+			}, [
+				E('span', { 'class': 'qm-palette-swatch', 'aria-hidden': 'true' }),
+				E('strong', {}, _(palette.name)), E('small', {}, _(palette.sub))
+			]);
+		});
+		tone.addEventListener('change', save);
+		var card = controls.card(_('外观主题'), _('设置移动网络页面的配色与明暗模式。'), [
+			E('div', { 'class': 'qm-appearance-options', 'role': 'group', 'aria-label': _('页面配色') }, buttons),
+			controls.row(_('明暗模式'), tone), status
+		], true);
+		card.classList.add('qm-appearance-card');
+		return card;
 	},
 
 	atRun: function(section, atPort, command, okMessage) {
@@ -454,272 +407,12 @@ return view.extend({
 			: [];
 
 		return controls.card(_('模组能力'),
-			_('由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性已隐藏或降级只读。'), [
+			_('根据 QModem 上报显示功能限制与可用的重启方式。'), [
 				controls.state(_('配置节'), section),
 				controls.state(_('软重启（AT 复位）'), controls.hasValue(softValue) ? (soft ? _('支持') : _('不支持')) : ''),
 				controls.state(_('硬重启（断电复位）'), controls.hasValue(hardValue) ? (hard ? _('支持') : _('不支持')) : ''),
 				E('div', { 'class': 'mt-hardware-caps' }, chips)
 			]);
-	},
-
-	rebootCard: function(section, res) {
-		var caps = plainObject(res.rebootCaps, 'reboot_caps');
-		var soft = controls.isEnabled(ci(caps, [ 'soft_reboot_caps', 'soft' ]));
-		var hard = controls.isEnabled(ci(caps, [ 'hard_reboot_caps', 'hard' ]));
-
-		function rebootButton(method, label, cls, supported, message) {
-			return E('button', {
-				'type': 'button',
-				'class': 'btn ' + cls,
-				'disabled': supported ? null : 'disabled',
-				'click': function() {
-					if (!supported)
-						return ui.addNotification(null, E('p', {}, _('本模组经 QModem 不支持该重启方式。')), 'warning');
-					controls.confirmModal(label, message, function() {
-						return controls.doReboot(section, method).catch(function(err) {
-							ui.addNotification(null, E('p', {},
-								_('重启模组失败：%s').format((err && err.message) || String(err))), 'danger');
-							throw err;
-						});
-					}, true);
-				}
-			}, label);
-		}
-
-		return controls.card(_('模组重启'),
-			_('经 QModem 的 do_reboot 重启模组。重启期间移动数据会中断，请勿断电。'), [
-				E('div', { 'class': 'mt-control-actions' }, [
-					rebootButton('soft', _('软重启模组'), 'cbi-button-action', soft,
-						_('模组将执行软复位并重新注册网络，移动数据会中断约 30 秒。')),
-					rebootButton('hard', _('硬重启模组'), 'cbi-button-negative', hard,
-						_('模组将断电复位。可能同时影响 PCIe/USB 链路。'))
-				]),
-				(!soft && !hard) ? E('div', { 'class': 'mt-control-note' },
-					_('本模组经 QModem 未上报任何可用的重启方式。')) : null
-			]);
-	},
-
-	modeCard: function(section, modeRaw, disabled) {
-		if (isDisabled(disabled, 'setmode'))
-			return controls.card(_('网络模式'), _('模组对外呈现的拨号模式。'), [
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用拨号模式切换。'))
-			]);
-
-		var mode = plainObject(modeRaw, 'mode');
-		var keys = controls.flagKeys(mode);
-		var active = '';
-		keys.forEach(function(k) { if (controls.isEnabled(mode[k])) active = k; });
-
-		var buttons = keys.map(function(k) {
-			var isActive = (String(k).toLowerCase() === String(active).toLowerCase());
-			return E('button', {
-				'type': 'button',
-				'class': 'btn ' + (isActive ? 'cbi-button-apply' : 'cbi-button-action'),
-				'disabled': isActive ? 'disabled' : null,
-				'click': function() {
-					controls.confirmModal(_('切换网络模式'),
-						_('将模组拨号模式切换为 %s？切换过程中移动数据会短暂中断。').format(modeLabel(k)),
-						function() {
-							return controls.setMode(section, k).catch(function(err) {
-								ui.addNotification(null, E('p', {},
-									_('切换网络模式失败：%s').format((err && err.message) || String(err))), 'danger');
-								throw err;
-							});
-						}, true);
-				}
-			}, isActive ? _('当前：%s').format(modeLabel(k)) : _('切换为 %s').format(modeLabel(k)));
-		});
-
-		return controls.card(_('网络模式'),
-			_('模组对外呈现的拨号模式（由 QModem get_mode / set_mode 提供）。'), [
-				controls.state(_('当前模式'), active ? modeLabel(active) : '--'),
-				keys.length ? E('div', { 'class': 'mt-control-actions' }, buttons)
-					: E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 未上报可用的网络模式。'))
-			]);
-	},
-
-	preferCard: function(section, preferRaw, disabled) {
-		if (isDisabled(disabled, 'networkprefer') || isDisabled(disabled, 'setnetworkprefer'))
-			return controls.card(_('网络优选'), _('选择模组允许驻网的制式。'), [
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用网络优选。'))
-			]);
-
-		var prefer = plainObject(preferRaw, 'network_prefer');
-		var order = [ '3G', '4G', '5G' ];
-		var keys = controls.flagKeys(prefer);
-		keys = keys.filter(function(k) { return order.indexOf(k) !== -1; })
-			.sort(function(a, b) { return order.indexOf(a) - order.indexOf(b); });
-		if (!keys.length) return controls.card(_('网络优选'), '', [ E('p', {}, _('QModem 暂未提供可设置的网络制式。')) ]);
-
-		var boxes = {};
-		var options = keys.map(function(k) {
-			var box = E('input', {
-				'type': 'checkbox',
-				'value': k,
-				'checked': controls.isEnabled(prefer[k]) ? 'checked' : null
-			});
-			boxes[k] = box;
-			var lbl = E('label', { 'class': 'mt-band-option' + (controls.isEnabled(prefer[k]) ? ' checked' : '') }, [ box, E('span', {}, k) ]);
-			box.addEventListener('change', function() {
-				lbl.classList[box.checked ? 'add' : 'remove']('checked');
-			});
-			return lbl;
-		});
-
-		return controls.card(_('网络优选'),
-			_('选择模组允许驻网的制式（由 QModem get_network_prefer / set_network_prefer 提供）。至少保留一项。'), [
-				E('div', { 'class': 'mt-band-options' }, options),
-				E('div', { 'class': 'mt-control-actions' }, E('button', {
-					'type': 'button', 'class': 'btn cbi-button-apply',
-					'click': function() {
-						var checked = keys.filter(function(k) { return boxes[k] && boxes[k].checked; });
-						if (!checked.length)
-							return ui.addNotification(null, E('p', {}, _('请至少选择一种网络制式。')), 'warning');
-						controls.confirmModal(_('修改网络优选'),
-							_('将允许驻网的制式设置为 %s？移动数据会短暂中断。').format(checked.join(' / ')),
-							function() {
-								return controls.setNetworkPrefer(section, JSON.stringify(checked)).catch(function(err) {
-									ui.addNotification(null, E('p', {},
-										_('设置网络优选失败：%s').format((err && err.message) || String(err))), 'danger');
-									throw err;
-								});
-							}, true);
-					}
-				}, _('应用网络优选')))
-			]);
-	},
-
-	lockBandPanel: function(section, bandClass, data) {
-		var label = BAND_CLASS_LABEL[bandClass] || bandClass;
-		var available = bandItems(ci(data, [ 'available_band', 'availableband', 'bands' ]));
-		var locked = bandItems(ci(data, [ 'lock_band', 'lockband', 'locked_band' ]));
-		var lockedIds = {};
-		locked.forEach(function(item) { lockedIds[item.id] = true; });
-
-		if (!available.length) {
-			available = locked.slice();
-			if (!available.length)
-				return E('section', { 'class': 'mt-adv-card mt-hardware-band' }, [
-					E('h4', {}, label),
-					E('p', {}, _('本模组经 QModem 未上报该类别的可用频段。'))
-				]);
-		}
-
-		var boxes = [];
-		var options = available.map(function(item) {
-			var box = E('input', {
-				'type': 'checkbox',
-				'value': item.id,
-				'checked': lockedIds[item.id] ? 'checked' : null
-			});
-			var lbl = E('label', { 'class': 'mt-band-option' + (lockedIds[item.id] ? ' checked' : '') }, [ box, E('span', {}, item.name) ]);
-			box.addEventListener('change', function() {
-				lbl.classList[box.checked ? 'add' : 'remove']('checked');
-			});
-			boxes.push(box);
-			return lbl;
-		});
-
-		return E('section', { 'class': 'mt-adv-card mt-hardware-band' }, [
-			E('h4', {}, label),
-			E('p', {}, _('已锁定 %d 个频段，共 %d 个可用频段。不勾选任何频段表示解除锁定。')
-				.format(locked.length, available.length)),
-			E('div', { 'class': 'mt-band-options' }, options),
-			E('div', { 'class': 'mt-band-actions' }, [
-				E('button', {
-					'type': 'button', 'class': 'btn',
-					'click': function() {
-						boxes.forEach(function(b) { b.checked = false; b.parentElement.classList.remove('checked'); });
-					}
-				}, _('清空')),
-				E('button', {
-					'type': 'button', 'class': 'btn',
-					'click': function() {
-						boxes.forEach(function(b) { b.checked = true; b.parentElement.classList.add('checked'); });
-					}
-				}, _('全选')),
-				E('button', {
-					'type': 'button', 'class': 'btn cbi-button-apply',
-					'click': function() {
-						var csv = boxes.filter(function(b) { return b.checked; })
-							.map(function(b) { return b.value; }).join(',');
-						controls.confirmModal(_('应用频段锁定'),
-							csv ? _('将 %s 锁定到频段 %s？移动数据会短暂中断。').format(label, csv)
-								: _('解除 %s 的频段锁定？').format(label),
-							function() {
-								return controls.setLockBand(section, { band_class: bandClass, lock_band: csv })
-									.catch(function(err) {
-										ui.addNotification(null, E('p', {},
-											_('设置频段锁定失败：%s').format((err && err.message) || String(err))), 'danger');
-										throw err;
-									});
-							}, true);
-					}
-				}, _('应用锁定'))
-			])
-		]);
-	},
-
-	lockBandSection: function(section, lockRaw, disabled) {
-		var head = E('div', { 'class': 'mt-control-section-head' }, [
-			E('h3', {}, _('频段锁定')),
-			E('p', {}, _('限制模组可使用的频段（由 QModem get_lockband / set_lockband 提供）。日常使用建议保持不锁定。'))
-		]);
-
-		if (isDisabled(disabled, 'lockband'))
-			return E('section', { 'class': 'mt-control-section' }, [
-				head,
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 已禁用频段锁定。'))
-			]);
-
-		var lockband = plainObject(lockRaw, 'lockband');
-		var classes = [ 'GW', 'LTE', 'NRNSA', 'NRSA' ].filter(function(k) {
-			return lockband[k] && typeof lockband[k] === 'object';
-		});
-		Object.keys(lockband).forEach(function(k) {
-			if (classes.indexOf(k) === -1 && lockband[k] && typeof lockband[k] === 'object')
-				classes.push(k);
-		});
-
-		if (!classes.length)
-			return E('section', { 'class': 'mt-control-section' }, [
-				head,
-				E('div', { 'class': 'mt-control-note' }, _('本模组经 QModem 暂无可用的锁频段数据。'))
-			]);
-
-		var self = this;
-		return E('section', { 'class': 'mt-control-section' }, [
-			head,
-			E('div', { 'class': 'mt-hardware-bands' }, classes.map(function(k) {
-				return self.lockBandPanel(section, k, lockband[k]);
-			}))
-		]);
-	},
-
-	passthroughCard: function(section, atPort) {
-		var input = E('input', { 'class': 'cbi-input-text', 'placeholder': 'AT^SETMODE?' });
-		var output = E('pre', { 'class': 'mt-hardware-raw', 'style': 'margin-top:12px;max-height:220px' },
-			_('尚未下发命令。'));
-
-		return controls.card(_('AT 透传控制台'),
-			_('经 QModem 的 send_at 向模组下发任意 AT 命令，用于模块私有设置与调试。'), [
-				controls.row(_('AT 命令'), input),
-				E('div', { 'class': 'mt-control-actions' }, E('button', {
-					'type': 'button', 'class': 'btn cbi-button-action',
-					'click': function() {
-						var command = (input.value || '').trim();
-						if (!command)
-							return ui.addNotification(null, E('p', {}, _('请输入 AT 命令。')), 'warning');
-						output.textContent = _('正在下发，请稍候…');
-						controls.sendAt(section, atPort, command).then(function(r) {
-							output.textContent = atText(r) || _('模组未返回内容。');
-						}).catch(function(err) {
-							output.textContent = _('下发失败：%s').format((err && err.message) || String(err));
-						});
-					}
-				}, _('下发命令'))),
-				output
-			], true);
 	},
 
 	render: function(res) {
@@ -751,9 +444,10 @@ return view.extend({
 				E('section', { 'class': 'mt-adv-card mt-hardware-head' }, [
 					E('div', {}, [
 						E('h2', {}, _('高级设置')),
-						E('p', {}, _('模组能力、重启与无线策略，全部经 QModem 的 qmodem ubus 下发。'))
+						E('p', {}, _('外观配色、硬件连接与模组支持库。'))
 					])
 				]),
+				this.appearanceCard(),
 				E('div', { 'class': 'alert-message warning mt-hardware-warning' },
 					_('未检测到模组（请确认 QModem 已识别该设备）。')),
 				E('section', { 'class': 'mt-control-section' }, [
@@ -772,7 +466,6 @@ return view.extend({
 		var atCfg = plainObject(res.atCfg, 'at_cfg');
 		var atPort = pick(atCfg, [ 'at_port' ]) || controls.findEntry(controls.entryList(res.base), 'at_port') || '';
 		var baseMap = controls.entryMap(controls.entryList(res.base));
-		var cr = plainObject(res.copyright, 'copyright');
 
 		var rawDump;
 		try {
@@ -782,9 +475,6 @@ return view.extend({
 				reboot_caps: res.rebootCaps,
 				at_cfg: res.atCfg,
 				base_info: res.base,
-				mode: res.mode,
-				network_prefer: res.prefer,
-				lockband: res.lockband,
 				copyright: res.copyright
 			}, null, 2);
 		} catch (e) {
@@ -803,26 +493,23 @@ return view.extend({
 			/* 顶部 Hero 玻璃卡片 */
 			E('section', { 'class': 'mt-adv-card mt-hardware-head' }, [
 				E('div', {}, [
-					E('h2', {}, _('高级设置与硬件控制')),
-					E('p', {}, _('硬件总线模式、重启能力、驻网策略与底层 AT 透传调试。'))
+					E('h2', {}, _('高级设置与外观')),
+					E('p', {}, _('调整页面配色，查看硬件连接与模组支持情况。'))
 				])
 			])
 		].concat(warnings).concat([
-			/* 动态 SVG 硬件总线拓扑 */
+			this.appearanceCard(),
+
+			/* 硬件连接示意 */
 			E('section', { 'class': 'mt-adv-card mt-adv-topo-card' }, [
 				E('div', { 'class': 'mt-control-section-head', 'style': 'margin-bottom:10px' }, [
 					E('h3', {}, [
 						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>'),
-						_('硬件总线与数据通路架构')
+						_('硬件连接与数据通路')
 					]),
-					E('p', {}, _('主机处理器、QModem 守护进程与模组蜂窝核心交互链路'))
+					E('p', {}, _('主机、管理服务与蜂窝模组之间的逻辑连接示意。'))
 				]),
-				this.renderSvgBusTopo()
-			]),
-
-			E('div', { 'class': 'mt-hardware-warning' }, [
-				svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'),
-				_('修改硬件接口档位可能同时中断移动数据与模组管理通道。应用前请记录当前取值。')
+				this.renderBusTopo()
 			]),
 
 			/* 模组支持库 */
@@ -839,29 +526,13 @@ return view.extend({
 			/* 模组能力与重启 */
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
-					E('h3', {}, _('模组能力与维护')),
+					E('h3', {}, _('能力与诊断')),
 					E('p', {}, _('QModem 上报的特性支持情况与重启能力。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
-					this.capabilityCard(section, res, disabled),
-					this.rebootCard(section, res)
+					this.capabilityCard(section, res, disabled)
 				])
 			]),
-
-			/* 无线策略 (模式与优选) */
-			E('section', { 'class': 'mt-control-section' }, [
-				E('div', { 'class': 'mt-control-section-head' }, [
-					E('h3', {}, _('无线策略')),
-					E('p', {}, _('拨号模式与驻网制式，使用 QModem 的专用方法下发。'))
-				]),
-				E('div', { 'class': 'mt-control-grid' }, [
-					this.modeCard(section, res.mode, disabled),
-					this.preferCard(section, res.prefer, disabled)
-				])
-			]),
-
-			/* 频段锁定 */
-			this.lockBandSection(section, res.lockband, disabled),
 
 			/* 专有 AT 指令按已验证的型号展示，不能跨品牌下发。 */
 			controls.supportsTdTechAt(section, res.base) ? E('section', { 'class': 'mt-control-section' }, [
@@ -937,15 +608,16 @@ return view.extend({
 					})
 				])
 			]) : null,
-			this.passthroughCard(section, atPort),
 
 			/* 诊断与开发者工具 */
 			E('section', { 'class': 'mt-adv-card mt-hardware-tools' }, [
 				E('div', {}, [
-					E('h3', { 'style': 'margin:0 0 4px;font-size:15px;font-weight:750;color:var(--qm-text)' }, _('诊断与开发者工具')),
-					E('p', { 'style': 'margin:0;color:var(--qm-text-muted);font-size:12px' }, _('查看模组设备参数，或直接向模组发送 AT 命令。'))
+					E('h3', { 'style': 'margin:0 0 4px;font-size:15px;font-weight:750;color:var(--qm-text)' }, _('常用功能入口')),
+					E('p', { 'style': 'margin:0;color:var(--qm-text-muted);font-size:12px' }, _('无线设置、SIM 管理与 AT 调试请在对应页面操作。'))
 				]),
 				E('div', { 'class': 'mt-hardware-tool-actions' }, [
+					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/network') }, _('无线与小区')),
+					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/system') }, _('模组与 SIM 卡')),
 					E('a', { 'class': 'btn', 'href': L.url('admin/modem/qmodem-generic/settings') }, _('设备参数设置')),
 					E('a', { 'class': 'btn cbi-button-action', 'href': L.url('admin/modem/qmodem-generic/terminal') }, _('AT 控制台')),
 					E('button', {

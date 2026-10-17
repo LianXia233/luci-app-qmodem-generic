@@ -94,7 +94,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
       network_prefer: { network_prefer: { '4G': '1', '5G': '1' } }, lockband: { lockband },
       disabled_features: { disabled_features: [] }, neighborcell: {} },
     device: { at_cfg: { at_cfg: { at_port: config.at_port, ports: [config.at_port] } }, info: { modem_info: base.concat(sim) },
-      reboot_caps: { reboot_caps: { soft_reboot_caps: 1, hard_reboot_caps: 0 } } },
+      reboot_caps: { reboot_caps: { soft_reboot_caps: 1, hard_reboot_caps: scenario === 'tdtech' ? 1 : 0 } } },
     stats: { usage: { available: 0 }, daily: { available: true, today_rx: 0, today_tx: 0, total_rx: 0, total_tx: 0, days: [] } },
     qos: {}, radio: {}, sms: { get_sms: { sms: [] } },
     support: { available: 1, path: '/usr/share/qmodem/modem_support.json', builtin: ['rg520n-cn'], added: [], missing: [] }
@@ -162,12 +162,13 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
     return modules[name] = new Function('baseclass', 'view', 'rpc', 'uci', 'ui', 'dom', 'form', 'controls', 'theme', 'L', '_', sources[name])(
       baseclass, baseclass, rpc, uci, ui, dom, form,
       name.startsWith('view/') ? load('qmodem-generic/controls') : null,
-      name === 'qmodem-generic/controls' ? load('qmodem-generic/theme') : null,
+      name !== 'qmodem-generic/theme' ? load('qmodem-generic/theme') : null,
       L, s => translations[s] || s
     );
   }
   const controls = load('qmodem-generic/controls');
   window.controls = controls;
+  window.qmTheme = load('qmodem-generic/theme');
   // Both versions of LuCI must work: a broken legacy E must never be invoked.
   window.E = () => { throw new Error('global E must not be used'); };
   const view = load('view/qmodem-generic/' + viewName);
@@ -270,6 +271,7 @@ async function runDom() {
       while ((node = walker.nextNode())) if (!['STYLE', 'SCRIPT', 'PRE'].includes(node.parentElement.tagName))
         assert(!/^(null|undefined|nullnull)$/.test(node.textContent.trim()), `${viewName}/${scenario}: null node`);
       assert(!window.initialCalls.some(c => ['qmodem', 'qos', 'luci-rpc'].includes(c.object)), `${viewName}/${scenario}: read touched modem`);
+      assert.equal(window.document.body.getAttribute('data-qm-palette'), 'ocean', 'Default palette must be blue/green');
       let fired = false;
       const button = window.controls.element('button', { click: () => { fired = true; } }, 'check');
       button.click();
@@ -283,6 +285,61 @@ async function runDom() {
       if (viewName === 'status') assert(![...app.querySelectorAll('.qm-list-row')].some(row => /QoS 等级|签约速率/.test(row.innerText)), 'Missing QoS must hide');
       if (scenario === 'sparse' && viewName === 'network') assert([...app.querySelectorAll('.mt-net-row')].some(row => row.innerText.includes('PCI') && row.lastElementChild.innerText === '0'), 'Valid PCI 0 must display');
       if (viewName === 'advanced' && scenario !== 'absent') assert.equal(text.includes('USB 数据模式'), scenario === 'tdtech', 'Private commands must match model');
+      if (viewName === 'advanced') {
+        assert.equal(app.querySelectorAll('.qm-palette-option').length, 4, 'Theme choices remain available with no modem');
+        assert(!app.querySelector('input[placeholder="AT^SETMODE?"]'), 'AT console lives on its dedicated page');
+        assert(![...app.querySelectorAll('button')].some(b => /软重启模组|硬重启模组|应用网络优选|应用锁定|切换为/.test(b.textContent)), 'Advanced must not duplicate radio and reboot actions');
+        const callCount = window.calls.length;
+        app.querySelector('[data-palette="violet"]').click();
+        assert.equal(window.document.body.getAttribute('data-qm-palette'), 'violet');
+        assert.equal(app.querySelector('[data-palette="violet"]').getAttribute('aria-pressed'), 'true');
+        const tone = app.querySelector('select[aria-label="明暗模式"]');
+        window.document.documentElement.style.setProperty('--background-color-high', '#ffffff');
+        window.document.documentElement.style.setProperty('--text-color-high', '#16202c');
+        tone.value = 'dark'; tone.dispatchEvent(new window.Event('change'));
+        assert(window.document.body.classList.contains('qm-dark'), 'Explicit dark mode must apply immediately');
+        assert.match(window.getComputedStyle(app.querySelector('.qm-appearance-card')).backgroundColor.replace(/\s/g, ''), /^(#161f29|rgb\(22,31,41\))$/, 'Manual dark mode must override a light LuCI surface');
+        assert.equal(JSON.parse(window.localStorage.getItem('qmodem-generic-appearance')).tone, 'dark');
+        assert.equal(window.calls.length, callCount, 'Changing appearance must not call the modem');
+        const reloadTheme = () => new window.Function('baseclass', sources['qmodem-generic/theme'])({ extend: v => v });
+        let reloaded = reloadTheme();
+        assert.equal(reloaded.getAppearance().palette, 'violet', 'Palette survives reloading the module');
+        assert.equal(reloaded.getAppearance().tone, 'dark', 'Tone survives reload');
+        const rerendered = window.currentView.appearanceCard();
+        assert.equal(rerendered.querySelector('[aria-pressed="true"]').getAttribute('data-palette'), 'violet', 'Polling preserves selected palette');
+        window.localStorage.setItem('qmodem-generic-appearance', '{broken');
+        reloaded = reloadTheme();
+        assert.equal(reloaded.getAppearance().palette, 'ocean', 'Broken settings fall back to default');
+        window.localStorage.setItem('qmodem-generic-appearance', JSON.stringify({ palette: 'unknown', tone: 'invalid' }));
+        reloaded = reloadTheme();
+        assert.equal(reloaded.getAppearance().palette, 'ocean');
+        assert.equal(reloaded.getAppearance().tone, 'auto');
+        Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new Error('Storage disabled'); } });
+        reloaded = reloadTheme();
+        assert.equal(reloaded.getAppearance().palette, 'ocean');
+        assert.equal(reloaded.setAppearance({ palette: 'blue', tone: 'light' }), false);
+        assert.equal(window.document.body.getAttribute('data-qm-palette'), 'blue', 'Theme still applies with storage blocked');
+      }
+      if (['advanced', 'system'].includes(viewName) && scenario !== 'absent') {
+        const topology = app.querySelector('.qm-topology');
+        assert.equal(topology.querySelectorAll('.qm-topology-node').length, 3);
+        assert.equal(topology.querySelectorAll('.qm-topology-link').length, 2);
+        for (const title of topology.querySelectorAll('.qm-topology-title'))
+          assert.equal(window.getComputedStyle(title).whiteSpace, 'normal', 'Topology labels must wrap');
+        assert(!/Host Processor|Bus Ctrl|Cellular Core|Hardware Target/.test(topology.textContent), 'Topology nodes must use Chinese labels');
+      }
+      if (viewName === 'system' && scenario !== 'absent') {
+        const grid = app.querySelector('.qm-system-info-grid');
+        assert.equal(grid.children.length, 3, 'Three information cards fill their own grid');
+        assert(!grid.textContent.includes('SIM 与射频控制'), 'Full-width controls must not hold empty grid columns open');
+        assert.equal([...app.querySelectorAll('button')].filter(b => b.textContent === '硬重启模组').length, scenario === 'tdtech' ? 1 : 0, 'Hard reboot is moved here only when supported');
+        const unknown = window.currentView.renderChipTopo('', undefined, '');
+        assert.equal(unknown.querySelectorAll('.qm-topology-link.is-idle').length, 2, 'Unknown SIM must not show an active link');
+        assert.equal(unknown.querySelectorAll('.qm-topology-title')[2].textContent, 'SIM 卡槽', 'Missing slot must not invent slot zero');
+        const escaped = window.currentView.renderChipTopo('<b>9</b>', undefined, 'READY');
+        assert(!escaped.querySelector('b'), 'Dynamic slot text cannot create markup');
+        assert.equal(app.querySelectorAll('.qm-topology-link:not(.is-idle)').length, scenario === 'empty' ? 0 : 2, 'Ready SIM enables both animated links');
+      }
       if (viewName === 'network' && scenario === 'full') {
         assert(!text.includes('切换为 ECM') && !text.includes('切换为 NCM'), 'No invented modem modes');
         for (const el of app.querySelectorAll('.mt-locksum-chips')) assert.equal(window.getComputedStyle(el).display, 'flex', 'Bands wrap in flex rows');
