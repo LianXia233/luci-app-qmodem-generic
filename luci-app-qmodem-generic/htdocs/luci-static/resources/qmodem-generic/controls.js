@@ -953,22 +953,59 @@ function getDns(section) {
 }
 
 /*
- * 短信列表不在 worker 的周期采集范围内（部分模组读短信很慢），
- * 因此：缓存命中就直接用；没有缓存则后台排任务 + 先返回空列表，
- * 由页面的轮询在数据到位后补上。绝不为了首屏去同步读 SIM。
+ * 旧版 QModem 没有 qmodem.sms 服务。有些固件的短信缓存一直为 missing，
+ * 即使官方 qmodem.get_sms 可以正常读取。
+ * 仅旧版且无有效缓存时直读，30 秒内复用结果与未完成请求，避免每轮轮询
+ * 都占用 AT 串口；新版 qmodem.sms 数据库 / direct 模式逻辑不变。
  */
-function getSms(section) {
+var LEGACY_SMS_TTL = 30000;
+var LEGACY_SMS_TIMEOUT = 18000;
+var legacySmsStore = {};
+var legacySmsInFlight = {};
+
+function readLegacySms(section) {
+	var saved = legacySmsStore[section];
+	if (saved && Date.now() - saved.ts < LEGACY_SMS_TTL)
+		return Promise.resolve(saved.value);
+	if (legacySmsInFlight[section])
+		return legacySmsInFlight[section];
+
+	var task = withTimeoutReject(callGetSms(section), LEGACY_SMS_TIMEOUT,
+		_('读取旧版 QModem 短信超时，请检查模组 AT 端口。')).then(function(result) {
+		if (!result || typeof result !== 'object' ||
+			(Array.isArray(result) && !result.length) ||
+			result.error || result.status === 'error')
+			throw new Error((result && result.error) || _('旧版 QModem 未返回有效短信数据。'));
+		legacySmsStore[section] = { ts: Date.now(), value: result };
+		return result;
+	});
+	legacySmsInFlight[section] = task.then(function(result) {
+		delete legacySmsInFlight[section];
+		return result;
+	}, function(err) {
+		delete legacySmsInFlight[section];
+		throw err;
+	});
+	return legacySmsInFlight[section];
+}
+
+function getSms(section, legacyMode) {
 	return fetchSnapshot(section, ['sms']).then(function(snap) {
 		var env = envelopeOf(snap, 'sms');
-		if (snap && env && env.data && env.data.get_sms) {
+		var cached = env && env.data && env.data.get_sms;
+		if (cached && typeof cached === 'object' && Object.keys(cached).length) {
 			if (env.stale || env.status === 'missing') requestRefresh(section, ['sms']);
-			return env.data.get_sms;
+			return cached;
 		}
+
+		/* 已确认旧版短信服务：缓存缺失时从官方旧接口直接读取。 */
+		if (legacyMode)
+			return readLegacySms(section);
 
 		if (!snap)
 			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
 
-		requestRefresh(section, ['sms'], true);
+		requestRefresh(section, ['sms']);
 		return {};
 	});
 }
@@ -1020,7 +1057,7 @@ function getSmsInbox(section) {
 	return getSmsServiceConfig(section).then(function(config) {
 		/* direct 模式仍读后台缓存，首屏不通过新服务同步访问串口。 */
 		if (!config || config.mode === 'direct')
-			return getSms(section).then(function(raw) {
+			return getSms(section, !config).then(function(raw) {
 				if (raw && raw.error) throw new Error(raw.error);
 				return Object.assign({}, Array.isArray(raw) ? { messages: raw } : (raw || {}), {
 					_smsSource: 'modem', _smsConfig: config

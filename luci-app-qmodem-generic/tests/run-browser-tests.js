@@ -111,6 +111,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   }
   if (scenario === 'empty' || scenario === 'absent') data = {};
   if (scenario === 'sms_legacy') data.sms.get_sms = { sms: { msg: [{ index:0, sender:'10010', content:'SIM 保留短信', timestamp:'26/10/17,20:10:00+32' }] } };
+  if (scenario === 'sms_legacy_missing') delete data.sms;
   window.calls = [];
   window.notifications = [];
   let task = 0;
@@ -122,6 +123,8 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
       {port:'/dev/wwan0at0', bus:'pcie', id:'17cb:0308', location:'0000:01:00.0', model:'RG650E-EU', section:'', confirmed:0}
     ] });
     if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve({ entries: [] });
+    if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy_missing')
+      return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
         return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'));
@@ -285,7 +288,7 @@ async function run() {
 async function runDom() {
   const { Window } = await import(require.resolve('happy-dom'));
   let cases = 0;
-  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech', 'sms_database', 'sms_database_error', 'sms_legacy']) for (const viewName of views) {
+  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech', 'sms_database', 'sms_database_error', 'sms_legacy', 'sms_legacy_missing']) for (const viewName of views) {
     if (scenario.startsWith('sms_') && viewName !== 'sms') continue;
     const window = new Window({ url: 'http://qmodem.test', width, height: 1000 });
     try {
@@ -500,6 +503,10 @@ async function runDom() {
         assert(text.includes('SMS database is unavailable'));
         assert(text.includes('短信读取失败'));
         assert(!text.includes('模组内短信：0'), 'Database errors must not be shown as an empty SIM inbox');
+      }
+      if (viewName === 'sms' && scenario === 'sms_legacy_missing') {
+        assert(text.includes('模组内短信：1 条') && text.includes('旧版直读短信'), 'Missing SMS cache must fall back to legacy qmodem.get_sms');
+        assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_sms').length, 1, 'Legacy SMS should not be read repeatedly during page load');
       }
       if (viewName === 'sms' && scenario === 'sms_legacy') {
         assert(text.includes('模组内短信：1 条') && text.includes('SIM 保留短信'), 'Legacy nested sms.msg responses must remain supported');

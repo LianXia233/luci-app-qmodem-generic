@@ -36,6 +36,7 @@ function makeRuntime() {
 	var ubusDelayMs = 0;       /* 模拟 qmodem 对象（AT 驱动）的慢速 */
 	var cacheDelayMs = 0;
 	var smsApi = null;
+	var modemSmsApi = null;
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -118,6 +119,8 @@ function makeRuntime() {
 			var body;
 			if (object === 'qmodem.sms') {
 				body = smsApi ? smsApi(method, p) : { __rpcError: 'RPC call to qmodem.sms/config_get failed with ubus code 4: Not found' };
+			} else if (object === 'qmodem' && method === 'get_sms' && modemSmsApi) {
+				body = modemSmsApi(method, p);
 			} else if (object === 'qmodem_cache' || object === 'qmodem_stats' || object === 'qmodem_support') {
 				body = handleCache(method, p);
 			} else if (object === 'qmodem' || object === 'qos' ||
@@ -425,6 +428,7 @@ function makeRuntime() {
 		setUbusDelay: function(ms) { ubusDelayMs = ms; },
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
 		setSmsApi: function(handler) { smsApi = handler; },
+		setModemSmsApi: function(handler) { modemSmsApi = handler; },
 		setSnapshot: function(s) { snapshot = s; },
 		setSnapshotEmpty: function() { cacheEmpty = true; },
 		setSnapshotFull: function() { cacheEmpty = false; },
@@ -626,6 +630,22 @@ async function testSmsSources() {
 	var rpcDenied = runtime(function() { return {__rpcError:'RPC call to qmodem.sms/config_get failed with error -32000: Access denied'}; });
 	await rejects('LuCI -32000 非缺失类错误不得误回退', rpcDenied.controls.getSmsInbox('6_1'), /Access denied/);
 	assertEq('权限故障不会触发旧版短信读取', rpcDenied.rt.countCalls('qmodem_cache','snapshot'), 0);
+	/* 西瓜皮实机：get_sms 有数据，qmodem_cache.get_sms 为 missing。 */
+	var cacheMissing = runtime();
+	cacheMissing.rt.setModemSmsApi(function() {
+		return { msg: [{ index:0, sender:'10010', content:'西瓜皮真实接口短信' }] };
+	});
+	var legacyReply = await cacheMissing.controls.getSmsInbox('8_1');
+	assertEq('缓存 missing 时旧版短信直接读取成功', legacyReply.msg[0].content, '西瓜皮真实接口短信');
+	var legacyCall = cacheMissing.rt.calls.filter(function(c) { return c.object === 'qmodem' && c.method === 'get_sms'; });
+	assertEq('旧版读取携带动态模组配置节', legacyCall[0].params.config_section, '8_1');
+	await cacheMissing.controls.getSmsInbox('8_1');
+	assertEq('30 秒内不重复访问 AT 短信串口', cacheMissing.rt.countCalls('qmodem','get_sms'), 1);
+	assertEq('旧版直读时不并行触发 worker 抢占 AT', cacheMissing.rt.countCalls('qmodem_cache','refresh'), 0);
+	var oldError = runtime();
+	oldError.rt.setModemSmsApi(function() { return {__rpcError:'old sms port failed'}; });
+	await rejects('旧版接口读取失败会正确显示错误', oldError.controls.getSmsInbox('8_1'), /old sms port failed/);
+
 	var direct = runtime(function() { return {mode:'direct'}; });
 	direct.rt.setUbusDelay(8000);
 	var started = Date.now();

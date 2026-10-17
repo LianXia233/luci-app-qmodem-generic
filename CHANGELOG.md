@@ -3,6 +3,12 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.5.0-10] - 2026-10-17
+
+- 西瓜皮实机反馈 `qmodem.get_sms` 可直接返回短信，但 `qmodem_cache.get_sms` 仍为 `missing`；旧版 QModem 的短信视图在无有效缓存时改走官方直读接口，不再错误显示 0 条。
+- 旧版直读增加 30 秒结果缓存、并发去重、18 秒超时和错误提示；不再同时排队补采抢占 AT 串口。
+- 新版短信数据库及 direct 模式继续按原设计运行，未改动官方 QModem、短信数据、设置、发送和删除接口；补充缺失缓存场景回归测试。
+
 ## [2.5.0-9] - 2026-10-17
 
 - 修复 LuCI 25.12 返回 `-32000: Object not found` 时未回退旧版 QModem 短信接口的问题，兼容西瓜皮等仅提供 `qmodem.get_sms` 的固件。
