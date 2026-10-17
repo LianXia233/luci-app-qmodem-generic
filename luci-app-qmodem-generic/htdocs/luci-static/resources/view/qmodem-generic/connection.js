@@ -384,16 +384,46 @@ return view.extend({
 		]);
 	},
 
-	runAction: function(fn, success) {
-		ui.showModal(_('请稍候…'), [ E('p', { 'class': 'spinning' }, _('正在下发连接操作…')) ]);
-		return Promise.resolve(fn()).then(function() {
+	runAction: function(fn, label) {
+		var self = this;
+		if (this.connectionBusy)
+			return Promise.resolve(null);
+		this.connectionBusy = true;
+		ui.showModal(_('正在执行%s…').format(label), [
+			E('p', { 'class': 'spinning' }, _('操作已经交给 QModem，请等待模组返回结果。'))
+		]);
+		return Promise.resolve().then(fn).then(function() {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {}, success));
-			window.setTimeout(function() { window.location.reload(); }, 1200);
-		}).catch(function(err) {
+			ui.addNotification(null, E('p', {},
+				_('%s命令已被 QModem 接受，实际连接状态将在刷新后更新。').format(label)), 'info');
+			/* 不直接把“命令成功”当作“网络已经连通”。 */
+			window.setTimeout(function() { window.location.reload(); }, 1300);
+		}, function(err) {
 			ui.hideModal();
+			ui.addNotification(null, E('p', {}, _('%s失败：%s').format(label,
+				(err && err.message) || String(err))), 'danger');
+		}).then(function() { self.connectionBusy = false; }, function(err) {
+			self.connectionBusy = false;
 			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 		});
+	},
+
+	confirmConnectionAction: function(title, message, fn) {
+		var self = this;
+		if (this.connectionBusy) return;
+		ui.showModal(title, [
+			E('p', {}, message),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('取消')),
+				' ',
+				E('button', { 'type': 'button', 'class': 'btn cbi-button-negative',
+					'click': function() {
+						ui.hideModal();
+						return self.runAction(fn, title);
+					}
+				}, _('确定执行'))
+			])
+		]);
 	},
 
 	loadLog: function(details, output, section) {
@@ -559,32 +589,34 @@ return view.extend({
 				/* 地址面板与拨号状态 */
 				self.addressPanel(res),
 
-				/* 快捷操作动作按钮条 (带 SVG 矢量图标) */
+				/* 手动拨号控制：显式 button 类型，避免 LuCI CBI 表单误提交。 */
 				E('div', { 'class': 'mtconn-actions-bar' }, [
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-primary',
-						'click': function() { return self.runAction(function() { return controls.modemDial(section); }, _('已开始拨号。')); }
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-primary',
+						'click': function() {
+							return self.runAction(function() { return controls.modemDial(section); }, _('开始拨号'));
+						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>'),
 						_('开始拨号')
 					]),
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-danger',
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-danger',
 						'click': function() {
-							return controls.confirmModal(_('挂断移动数据'), _('确认现在断开移动数据连接？'), function() {
-								return controls.modemHang(section);
-							});
+							return self.confirmConnectionAction(_('挂断连接'),
+								_('确定断开当前移动数据连接？'),
+								function() { return controls.modemHang(section); });
 						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'),
 						_('挂断连接')
 					]),
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-secondary',
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-secondary',
 						'click': function() {
-							return controls.confirmModal(_('重新拨号'), _('重拨期间移动数据将短暂中断。是否继续？'), function() {
-								return controls.modemRedial(section);
-							});
+							return self.confirmConnectionAction(_('重新拨号'),
+								_('将短暂断开并重新建立移动网络连接，确定继续？'),
+								function() { return controls.modemRedial(section); });
 						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'),
@@ -608,7 +640,7 @@ return view.extend({
 						E('button', {
 							'type': 'button',
 							'class': 'mtconn-btn mtconn-btn-primary',
-							'click': ui.createHandlerFn(self, function() { return self.saveApn(); })
+							'click': function(ev) { return self.saveApn(ev && ev.currentTarget); }
 						}, [
 							svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'),
 							_('保存 APN 设置')
