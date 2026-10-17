@@ -1,6 +1,6 @@
-name: Build IPK & APK
+name: Build APK
 
-# 手动触发：编译完成后把 IPK / APK 一并上传到 Release
+# 手动触发：只用一套 25.12 SDK，成功后同时保留 Actions 下载包和 Release 附件
 on:
   workflow_dispatch:
     inputs:
@@ -8,11 +8,6 @@ on:
         description: 'Release tag（留空则自动使用 v<版本>-build<运行号>）'
         required: false
         default: ''
-      publish_release:
-        description: '编译成功后创建/更新 Release'
-        type: boolean
-        required: false
-        default: true
       prerelease:
         description: '标记为预发布(pre-release)'
         type: boolean
@@ -33,6 +28,8 @@ permissions:
 
 env:
   PKG_DIR: luci-app-qmodem-generic
+  SDK_TAG: immortalwrt-25.12-apk
+  SDK_DIR: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
 
 jobs:
   # ---------------------------------------------------------------- 静态检查
@@ -71,23 +68,12 @@ jobs:
           grep -q "\"$key\"" "$menu"
           echo "menu.d 的 depends.acl 与 acl.d 一致"
 
-  # ---------------------------------------------------------------- 编译矩阵
+  # ---------------------------------------------------------------- 单套 APK 构建
   build:
-    name: ${{ matrix.tag }}
+    # 包内只有 LuCI 资源和脚本，LUCI_PKGARCH=all；x86 SDK 不限制安装设备架构
+    name: Build APK (ImmortalWrt 25.12)
     needs: lint
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.optional }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # ImmortalWrt 25.12 及更新版本使用 apk → 产物为 .apk（兼容基线 25.12+，不再构建 24.10 及更早）
-          - tag: immortalwrt-25.12-apk
-            sdk_dir: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
-            optional: false
-          - tag: immortalwrt-snapshot-apk
-            sdk_dir: https://downloads.immortalwrt.org/snapshots/targets/x86/64
-            optional: true
 
     steps:
       - uses: actions/checkout@v4
@@ -105,10 +91,10 @@ jobs:
         id: sdk-info
         run: |
           mkdir -p "$GITHUB_WORKSPACE/sdk"
-          curl -fsSL "${{ matrix.sdk_dir }}/sha256sums" -o sha256sums
+          curl -fsSL "$SDK_DIR/sha256sums" -o sha256sums
           SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.(zst|xz)' sha256sums | head -n1)
           if [ -z "$SDK_FILE" ]; then
-            echo "::error::未能在 ${{ matrix.sdk_dir }}/sha256sums 中找到 SDK"
+            echo "::error::未能在 $SDK_DIR/sha256sums 中找到 SDK"
             exit 1
           fi
           SDK_HASH=$(grep " \*\?$SDK_FILE\$" sha256sums | awk '{print $1}')
@@ -120,12 +106,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.sdk-info.outputs.file }}
-          key: sdk-archive-${{ matrix.tag }}-${{ steps.sdk-info.outputs.hash }}
+          key: sdk-archive-${{ env.SDK_TAG }}-${{ steps.sdk-info.outputs.hash }}
 
       - name: Download & Verify SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          curl -fSL --retry 3 "${{ matrix.sdk_dir }}/${{ steps.sdk-info.outputs.file }}" -o "${{ steps.sdk-info.outputs.file }}"
+          curl -fSL --retry 3 "$SDK_DIR/${{ steps.sdk-info.outputs.file }}" -o "${{ steps.sdk-info.outputs.file }}"
           grep " \*\?${{ steps.sdk-info.outputs.file }}\$" sha256sums | sha256sum -c -
 
       - name: Extract SDK
@@ -167,33 +153,52 @@ jobs:
 
       - name: Collect artifacts
         run: |
+          set -euo pipefail
           out="$GITHUB_WORKSPACE/output"
           mkdir -p "$out"
           found=0
-          while IFS= read -r f; do
-            cp "$f" "$out/${{ matrix.tag }}__$(basename "$f")"
+          while IFS= read -r -d '' f; do
+            cp "$f" "$out/$(basename "$f")"
             found=$((found+1))
-          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f \( -name '*qmodem-generic*.ipk' -o -name '*qmodem-generic*.apk' \))
-          
-          echo "共产出 $found 个包"
+          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f -name '*qmodem-generic*.apk' -print0)
+
+          echo "共产出 $found 个 APK 包"
           ls -lh "$out"
-          if [ "$found" -eq 0 ]; then
-            echo "::error::未找到任何 ipk/apk 产物"
+          if [ -z "$(find "$out" -maxdepth 1 -type f -name "${PKG_DIR}-*.apk" -print -quit)" ]; then
+            echo "::error::未找到 ${PKG_DIR} 主包，不能只上传翻译包或空目录"
             exit 1
           fi
 
       - uses: actions/upload-artifact@v4
+        id: apk
         with:
-          name: packages-${{ matrix.tag }}
-          path: output/*
+          name: qmodem-generic-apk
+          path: output/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Show APK download
+        env:
+          ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+        run: |
+          {
+            echo '## APK 已生成'
+            echo
+            echo "[下载本次 APK 压缩包]($ARTIFACT_URL)（解压后安装主包）"
+            echo
+            echo "[Releases 下载页]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)（发布步骤成功后可直接下载 APK）"
+            echo
+            echo '构建环境：ImmortalWrt 25.12 SDK；包架构：all。'
+            echo
+            for f in output/*.apk; do
+              echo "- $(basename "$f")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------- 发布
   release:
     name: Publish release
     needs: build
-    if: ${{ inputs.publish_release }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -201,8 +206,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: packages-*
-          merge-multiple: true
+          name: qmodem-generic-apk
 
       - name: Resolve tag & notes
         id: meta
@@ -245,7 +249,7 @@ jobs:
             echo
             echo "### 安装"
             echo '```sh'
-            echo '# apk（ImmortalWrt 25.12 / snapshot）'
+            echo '# apk（ImmortalWrt 25.12 / 25.12-SNAPSHOT）'
             echo 'apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
             echo '```'
             echo
@@ -281,13 +285,16 @@ jobs:
           name: ${{ steps.meta.outputs.name }}
           body_path: release-notes.md
           prerelease: ${{ inputs.prerelease }}
-          files: dist/*
+          files: dist/*.apk
           fail_on_unmatched_files: true
+
+      - name: Show release download
+        run: |
+          echo "APK 已发布：[打开 Releases 下载]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)" >> "$GITHUB_STEP_SUMMARY"
 
       # 发布后清理历史 Release，避免长期累积。
       # releases 接口按创建时间倒序返回，跳过前 KEEP 个即可保留最新。
       - name: Clean up old releases
-        if: ${{ inputs.publish_release }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -1,6 +1,6 @@
 # luci-app-qmodem-generic
 
-[![Build IPK & APK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
+[![Build APK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
@@ -157,11 +157,13 @@ make package/luci-app-qmodem-generic/compile V=s
 
 ## GitHub Actions 自动构建
 
-仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build IPK & APK → Run workflow）：
+仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build APK → Run workflow）：
 
 1. `lint` — JS 语法（`node --check`）、JSON 解析、`msgfmt` 校验、ACL/菜单一致性检查
-2. `build` — ImmortalWrt SDK 矩阵编译：`immortalwrt-25.12-apk`（必需）、`immortalwrt-snapshot-apk`（允许失败）
-3. `release` — 把所有产物上传到 Release（tag 可在触发时指定，留空则自动生成）
+2. `build` — 只用 ImmortalWrt 25.12 SDK 编译一套 APK；包架构为 `all`，可用于对应环境的 ARM / x86 设备
+3. `release` — 编译成功后自动把 APK 上传到 Release（tag 可在触发时指定，留空则自动生成）
+
+下载位置：运行摘要中的「下载本次 APK 压缩包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的 APK 附件。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
 
 ## 界面主题与响应式（QM UI v2）
 

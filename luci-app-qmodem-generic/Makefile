@@ -21,7 +21,7 @@ LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem
 # 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）。
 # 注意：OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法（package-metadata.pl
 # 会把 `(>=` / `25.12)` 当作不存在的包名，导致 make defconfig 失败），因此 25.12+
-# 基线由 CI 编译矩阵（仅 25.12 + snapshot）与文档强制，此处保持无版本约束写法。
+# 基线由 CI 的 25.12 SDK 与文档约定，此处保持无版本约束写法。
 LUCI_DEPENDS:=+luci-base +qmodem
 LUCI_PKGARCH:=all
 
