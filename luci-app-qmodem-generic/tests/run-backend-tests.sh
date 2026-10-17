@@ -441,6 +441,32 @@ t_custom_support() {
 	assert_json "list custom USB model" "$_out" '@.entries[0].model' rg-future
 	_out=$($TEST_SH "$SBIN/qmodem-modem-support" --json)
 	assert_true "custom model injected into both buses" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg-future\" in d[b] for b in (\"usb\",\"pcie\"))'"
+	# 编辑自定义型号时同时更新用户 JSON 与 QModem JSON，保留备份与其它定义
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim,ncm","pdp_index":"1","wcdma_band":"1/5/8","lte_band":"3/8/41","nsa_band":"41/78","sa_band":"41/78/79"}')
+	assert_json "edit own USB custom definition" "$_out" '@.success' true
+	assert_true "edit updates both custom and QModem without losing unrelated models" \
+		"python3 -c 'import json; import os; c=json.load(open(\"$WORK/custom-modems/usb/rg-future.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; q=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert c == q[\"usb\"][\"rg-future\"]; assert c[\"lte_band\"] == \"3/8/41\"; assert c[\"modes\"] == [\"qmi\",\"mbim\",\"ncm\"]; assert \"rg502q-ea\" in q[\"usb\"]'"
+	assert_true "QModem and custom JSON backups created" \
+		"test -f '$WORK/modem_support.json.bak' && test -f '$WORK/custom-modems/usb/rg-future.json.bak'"
+	_out=$(rpcd_call qmodem_support custom_list '{}')
+	assert_json "edited custom entry reports synchronized" "$_out" '@.entries[0].state' synced
+
+	# 模拟第三方更改 QModem 条目；自定义编辑不得覆盖外部更改
+	jq --indent 4 '.modem_support.usb["rg-future"].lte_band="9"' \
+		"$WORK/modem_support.json" > "$WORK/other-change.json"
+	cp "$WORK/other-change.json" "$WORK/modem_support.json"
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1","lte_band":"1/3/5"}')
+	assert_json "reject overwrite of external QModem changes" "$_out" '@.success' false
+	assert_true "rejected conflict preserves both existing definitions" \
+		"python3 -c 'import json; c=json.load(open(\"$WORK/custom-modems/usb/rg-future.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; q=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; assert c[\"lte_band\"] == \"3/8/41\"; assert q[\"lte_band\"] == \"9\"'"
+	# 恢复模拟的外部改动，后续测试沿用正常支持库
+	cp "$WORK/modem_support.json.bak" "$WORK/modem_support.json"
+	# 备份为编辑前版本，重新同步到最新用户定义后继续执行其他测试
+	jq --indent 4 --slurpfile custom "$WORK/custom-modems/usb/rg-future.json" \
+		'.modem_support.usb["rg-future"] = $custom[0].modem_support.usb["rg-future"]' \
+		"$WORK/modem_support.json" > "$WORK/final.json"
+	cp "$WORK/final.json" "$WORK/modem_support.json"
+
 	_out=$(rpcd_call qmodem_support custom_delete '{"bus":"pcie","model":"rg-future"}')
 	assert_json "remove PCIe custom source" "$_out" '@.success' true
 	assert_true "removing source keeps official support entries" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert \"rg-future\" in d[\"pcie\"]'"
