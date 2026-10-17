@@ -467,6 +467,16 @@ t_custom_support() {
 		"$WORK/modem_support.json" > "$WORK/final.json"
 	cp "$WORK/final.json" "$WORK/modem_support.json"
 
+	# 插件自带的预设 JSON 可通过编辑创建持久化覆盖文件，官方源定义不修改
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg502q-ea","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,gobinet,mbim","pdp_index":"1","wcdma_band":"1/3/5","lte_band":"3/8/41","nsa_band":"41/78","sa_band":"41/78"}')
+	assert_json "edit built-in custom profile by creating persistent JSON override" "$_out" '@.success' true
+	assert_true "custom override and QModem have same builtin-edited definition" \
+		"python3 -c 'import json; a=json.load(open(\"$WORK/custom-modems/usb/rg502q-ea.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; b=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; assert a == b; assert b[\"lte_band\"] == \"3/8/41\"'"
+	_out=$($TEST_SH "$SBIN/qmodem-modem-support" --status)
+	assert_json "legacy merge/status still reads QModem after jq 4-space edit" "$_out" '@.available' 1
+	assert_true "package-provided immutable extra JSON remains intact" \
+		"python3 -c 'import json; a=json.load(open(\"$ROOT/usr/share/qmodem-generic/extra_modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; assert a[\"lte_band\"] != \"3/8/41\"'"
+
 	_out=$(rpcd_call qmodem_support custom_delete '{"bus":"pcie","model":"rg-future"}')
 	assert_json "remove PCIe custom source" "$_out" '@.success' true
 	assert_true "removing source keeps official support entries" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert \"rg-future\" in d[\"pcie\"]'"
