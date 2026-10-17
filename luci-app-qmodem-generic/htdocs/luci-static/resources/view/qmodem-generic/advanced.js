@@ -401,54 +401,34 @@ return view.extend({
 	customLibraryCard: function(support, custom) {
 		var self = this;
 		support = support || {};
-
-		var available = String(support.available) === '1';
-		var skipped = support.skipped || [];
-		var missing = support.missing || [];
-		var builtin = [].concat(skipped).concat(missing);
-		if (Array.isArray(support.details) && support.details.length) {
-			var label = function(x) { return (x.bus === 'pcie' ? 'PCIe ' : 'USB ') + String(x.model || '').toUpperCase(); };
-			builtin = support.details.map(label);
-			skipped = support.details.filter(function(x) { return x.state === 'skipped' || x.state === 'added'; }).map(label);
-			missing = support.details.filter(function(x) { return x.state === 'missing'; }).map(label);
+		var entries = Array.isArray(custom && custom.entries) ? custom.entries : [];
+		var saved = entries.filter(function(x) { return x.state === 'synced'; });
+		var missing = entries.filter(function(x) { return x.state === 'missing'; });
+		var conflicts = entries.filter(function(x) { return x.state === 'conflict'; });
+		function names(items) {
+			return items.map(function(x) {
+				return (x.bus === 'pcie' ? 'PCIe ' : 'USB ') + String(x.model || '').toUpperCase();
+			}).join('、') || _('无');
 		}
-		var path = support.path || '/usr/share/qmodem/modem_support.json';
-
-		var body = [];
-
-		if (!available) {
-			body.push(E('div', { 'class': 'mt-control-note' },
-				_('未检测到 QModem 的模组支持库（%s）。请确认已安装 QModem。').format(path)));
-		} else if (support.error) {
-			body.push(E('div', { 'class': 'mt-control-note' },
-				_('读取支持库失败：%s').format(support.error)));
-		} else {
-			body.push(controls.state(_('支持库路径'), path));
-			body.push(controls.state(_('自定义库型号'), builtin.length ? builtin.join('、') : '--'));
-			body.push(controls.state(_('已同步的自定义型号'), skipped.length ? skipped.join('、') : _('无')));
-			body.push(missing.length
-				? E('div', { 'class': 'mt-control-note' },
-					_('以下自定义型号尚未写入支持库：%s。同步后需重启 QModem 或设备。').format(missing.join('、')))
-				: E('div', { 'class': 'mt-control-note' },
-					_('自定义型号均已存在于 QModem 支持库。')));
-		}
-
-		body.push(E('div', { 'class': 'mt-control-actions' }, [
-			E('button', {
-				'type': 'button',
-				'class': 'btn cbi-button-apply',
-				'click': function() { self.supportSync(); }
-			}, _('同步支持库')),
-			E('button', {
-				'type': 'button',
-				'class': 'btn',
-				'click': function() { window.location.reload(); }
-			}, _('刷新状态'))
-		]));
-
 		return controls.card(_('自定义模组库'),
-			_('由插件内置 JSON 和 /etc/qmodem-generic/modems 下的用户 JSON 组成；修改自定义型号会同步更新 QModem 支持库。'),
-			body, true);
+			_('插件内置预设 JSON + 用户持久化 JSON；修改自定义型号时自动备份，并同步更新 QModem 支持库。'), [
+				controls.state(_('内置预设路径'), '/usr/share/qmodem-generic/extra_modem_support.json'),
+				controls.state(_('用户配置路径'), '/etc/qmodem-generic/modems/{usb,pcie}/*.json'),
+				controls.state(_('自定义库型号'), names(entries)),
+				controls.state(_('已同步的自定义型号'), names(saved)),
+				missing.length ? E('div', { 'class': 'mt-control-note' },
+					_('未同步：%s。点击同步可以补录到 QModem。').format(names(missing))) : null,
+				conflicts.length ? E('div', { 'class': 'mt-control-note' },
+					_('冲突（不允许覆盖）：%s。QModem 已有同名但定义不同的型号。').format(names(conflicts))) : null,
+				!missing.length && !conflicts.length ? E('div', { 'class': 'mt-control-note' },
+					_('全部自定义定义已写入 QModem 支持库。')) : null,
+				E('div', { 'class': 'mt-control-actions' }, [
+					E('button', { 'type':'button', 'class':'btn cbi-button-apply',
+						'click': function() { self.supportSync(); } }, _('同步自定义库')),
+					E('button', { 'type':'button', 'class':'btn',
+						'click': function() { window.location.reload(); } }, _('刷新状态'))
+				])
+			], true);
 	},
 
 	supportSync: function() {
@@ -474,6 +454,7 @@ return view.extend({
 	usePortForCustom: function(port) {
 		var model = String(port.model || '').trim();
 		this.customDraft = Object.assign(this.customDraft || {}, {
+			edit: '0',
 			bus: port.bus,
 			manufacturer_id: port.bus === 'usb' ? String(port.id || '').split(':')[0] : '',
 			model: /^[a-z0-9-]+$/i.test(model) ? model.toLowerCase() : ''
