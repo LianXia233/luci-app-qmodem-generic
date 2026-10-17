@@ -276,8 +276,8 @@ return view.extend({
 			'.mt-sms-bubblewrap.in .mt-sms-bubble{background:var(--qm-glass);border:1px solid var(--qm-border-soft);color:var(--qm-text);border-bottom-left-radius:4px;box-shadow:0 2px 8px var(--qm-shadow-color)}',
 			'.mt-sms-bubblewrap.out .mt-sms-bubble{background:var(--qm-accent-gradient);color:var(--qm-on-hero);border-bottom-right-radius:4px;box-shadow:0 4px 14px var(--qm-accent-border)}',
 			'.mt-sms-bubbledate{font-size:9.5px;margin-top:5px;opacity:.7;text-align:right}',
-			'.mt-sms-delete{border:0;background:transparent;color:var(--qm-text-muted);cursor:pointer;font-size:14px;padding:4px;opacity:0;transition:all .2s ease;border-radius:6px}',
-			'.mt-sms-bubblewrap:hover .mt-sms-delete{opacity:1;color:var(--qm-danger)}',
+			'.mt-sms-delete{border:1px solid var(--qm-border-soft);background:var(--qm-surface);color:var(--qm-text-muted);cursor:pointer;font-size:15px;min-width:30px;min-height:30px;padding:4px;opacity:.72;transition:all .2s ease;border-radius:8px}',
+			'.mt-sms-bubblewrap:hover .mt-sms-delete,.mt-sms-delete:focus-visible{opacity:1;color:var(--qm-danger);border-color:var(--qm-danger)}',
 
 			/* 输入与发送区 */
 			'.mt-sms-compose{border-top:1px solid var(--qm-border-soft);padding:16px 20px;background:var(--qm-glass)}',
