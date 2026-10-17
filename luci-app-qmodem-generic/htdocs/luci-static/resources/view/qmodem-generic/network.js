@@ -793,8 +793,10 @@ return view.extend({
 			_('扫描通过 QModem get_neighborcell 读取邻区，不会自动锁定或修改模组配置。'));
 		var button = E('button', {
 			'type': 'button', 'class': 'btn cbi-button-action',
-			'disabled': isDisabled(disabled, 'neighborcell') ? 'disabled' : null,
+			'disabled': (isDisabled(disabled, 'neighborcell') || self.cellScanBusy) ? 'disabled' : null,
 			'click': function() {
+				if (self.cellScanBusy) return;
+				self.cellScanBusy = true;
 				button.disabled = true;
 				button.textContent = _('正在扫描…');
 				controls.getNeighborCellFresh(section).then(function(raw) {
@@ -806,6 +808,7 @@ return view.extend({
 				}).catch(function(err) {
 					ui.addNotification(null, E('p', {}, _('扫描失败：%s').format((err && err.message) || String(err))), 'danger');
 				}).then(function() {
+					self.cellScanBusy = false;
 					button.disabled = false;
 					button.textContent = _('扫描邻区');
 				});
@@ -830,6 +833,8 @@ return view.extend({
 		d.arfcn = pick(data, [ 'arfcn', 'earfcn', 'channel' ]);
 		d.band = pick(data, [ 'band', 'band_name' ]).replace(/^[nN]/, '');
 		d.scs = pick(data, [ 'scs' ]) || '0';
+		/* 将邻区上报的实际 kHz 换算成 QModem 官方枚举值。 */
+		d.scs = ({ '15': '0', '30': '1', '60': '2', '120': '3', '240': '4' })[d.scs.replace(/[^0-9]/g, '')] || d.scs;
 		/* 源数据可能以 kHz 上报；锁定配置仍按官方枚举值，避免误填。 */
 		if ([ '0', '1', '2', '3', '4' ].indexOf(d.scs) < 0) d.scs = '0';
 		this.cellDraft = d;
@@ -875,7 +880,8 @@ return view.extend({
 	cellManagerSection: function(section, neighborRaw, disabled) {
 		var self = this, node = cellNode(neighborRaw);
 		var blocked = isDisabled(disabled, 'neighborcell');
-		var capable = Object.keys(node).length > 0 && !blocked;
+		/* 仅 LTE/NR 空数组不能证明支持锁小区；官方支持的厂商会返回锁定状态。 */
+		var capable = !blocked && (Object.prototype.hasOwnProperty.call(node, 'lockcell_status') || !!node.Feature);
 		if (this.cellDraftSection !== section) {
 			this.cellDraftSection = section;
 			this.cellDraft = { rat: '0', pci: '', arfcn: '', band: '', scs: '0',
@@ -945,7 +951,7 @@ return view.extend({
 					return controls.setNeighborCell(section, cfg).then(function(result) {
 						var resultBody = result && (result.result || result);
 						var status = resultBody && (resultBody.setlockcell || resultBody.error);
-						if (!result || resultBody.error || (typeof status === 'string' && /(^|[\r\n\s,])ERROR([\r\n\s,]|$)/i.test(status)))
+						if (!result || resultBody.error || (typeof status === 'string' && /\bERROR\b/i.test(status)))
 							throw new Error(_('锁小区操作失败，模组未接受命令。'));
 						self.cellScanSnapshot = null;
 						return result;
