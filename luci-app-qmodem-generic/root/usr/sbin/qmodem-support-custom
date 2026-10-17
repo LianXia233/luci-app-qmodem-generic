@@ -18,6 +18,77 @@ valid_hex4() {
 	return 1
 }
 
+
+# 将插件自定义 JSON 原子同步到官方 QModem 支持库。只允许更新原自定义定义匹配的条目。
+SUPPORT="$QMODEM_SUPPORT_FILE"
+[ -n "$SUPPORT" ] || SUPPORT=/usr/share/qmodem/modem_support.json
+EXTRA="$QMODEM_EXTRA_SUPPORT_FILE"
+[ -n "$EXTRA" ] || EXTRA=/usr/share/qmodem-generic/extra_modem_support.json
+LOCKDIR="$QMODEM_SUPPORT_LOCKDIR"
+[ -n "$LOCKDIR" ] || LOCKDIR=/var/run/qmodem-modem-support.lock
+
+has_entry() {
+	jq -e --arg bus "$2" --arg model "$3" '.modem_support[$bus] | type == "object" and has($model)' "$1" >/dev/null 2>&1
+}
+matches_source() {
+	jq -ne --arg bus "$3" --arg model "$4" --slurpfile official "$1" --slurpfile source "$2" \
+		'$official[0].modem_support[$bus][$model] == $source[0].modem_support[$bus][$model]' >/dev/null 2>&1
+}
+apply_custom() {
+	[ -f "$SUPPORT" ] && jq -e '.modem_support.usb and .modem_support.pcie' "$SUPPORT" >/dev/null 2>&1 ||
+		{ rm -f "$_tmp"; error 'QModem 支持库不存在或 JSON 格式错误'; return; }
+	mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || { rm -f "$_tmp"; error '无法创建锁目录'; return; }
+	mkdir "$LOCKDIR" 2>/dev/null || { rm -f "$_tmp"; error '支持库同步正在进行，请稍后重试'; return; }
+	# 不触碰其它配置项，编辑期间拒绝并发同步；正常/失败均释放锁
+	_original=''
+	[ -f "$_dest" ] && _original="$_dest"
+	if [ -z "$_original" ] && [ -f "$EXTRA" ] && has_entry "$EXTRA" "$_bus" "$_model"; then _original="$EXTRA"; fi
+	if [ "$_edit" = 1 ] && [ -z "$_original" ]; then
+		error '只能编辑自定义库中已收录的型号，不能修改 QModem 官方原生型号'
+		rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+	fi
+	if [ "$_edit" != 1 ] && [ -n "$_original" ]; then
+		error '自定义库已存在该型号，请选择编辑'
+		rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+	fi
+	if has_entry "$SUPPORT" "$_bus" "$_model"; then
+		if [ -z "$_original" ] || ! matches_source "$SUPPORT" "$_original" "$_bus" "$_model"; then
+			error '官方支持库条目与自定义源不同，禁止覆盖，请先检查冲突'
+			rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+		fi
+	fi
+	_target_tmp="$SUPPORT.custom.$$"
+	if ! jq --arg bus "$_bus" --arg model "$_model" --slurpfile data "$_tmp" \
+		'.modem_support[$bus][$model] = $data[0].modem_support[$bus][$model]' "$SUPPORT" > "$_target_tmp" 2>/dev/null ||
+		! jq -e --arg bus "$_bus" --arg model "$_model" \
+		'.modem_support[$bus][$model].modes | type == "array"' "$_target_tmp" >/dev/null 2>&1; then
+		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		error '生成支持库失败，原始文件未更改'; return
+	fi
+	# 备份是更新的前置条件；原来 QModem 的其它型号都由 jq 原样保留
+	if ! cp -p "$SUPPORT" "$SUPPORT.bak" 2>/dev/null; then
+		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		error '无法备份 QModem 支持库，已取消'; return
+	fi
+	if [ -f "$_dest" ] && ! cp -p "$_dest" "$_dest.bak" 2>/dev/null; then
+		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		error '无法备份自定义 JSON，已取消'; return
+	fi
+	if ! cat "$_target_tmp" > "$SUPPORT" 2>/dev/null ||
+		! jq -e '.modem_support.usb and .modem_support.pcie' "$SUPPORT" >/dev/null 2>&1; then
+		cp -p "$SUPPORT.bak" "$SUPPORT" 2>/dev/null || true
+		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		error '更新 QModem 支持库失败，已尝试回滚备份'; return
+	fi
+	if ! mv -f "$_tmp" "$_dest" 2>/dev/null; then
+		cp -p "$SUPPORT.bak" "$SUPPORT" 2>/dev/null || true
+		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		error '保存自定义 JSON 失败，已尝试恢复 QModem 备份'; return
+	fi
+	rm -f "$_target_tmp"; rmdir "$LOCKDIR"
+	printf '{"success":true,"bus":"%s","model":"%s","updated":%s,"synced":true}\n' "$_bus" "$_model" "$_edit"
+}
+
 # 文件名与子目录只来自上述白名单；每个文件就是一个 QModem 支持库条目。
 save_model() {
 	_input=$(cat)
@@ -28,6 +99,8 @@ save_model() {
 	_vid=$(printf '%s' "$_input" | jsonfilter -e '@.manufacturer_id' 2>/dev/null | tr 'A-F' 'a-f')
 	_modes=$(printf '%s' "$_input" | jsonfilter -e '@.modes' 2>/dev/null)
 	_pdp=$(printf '%s' "$_input" | jsonfilter -e '@.pdp_index' 2>/dev/null)
+	_edit=$(printf '%s' "$_input" | jsonfilter -e '@.edit' 2>/dev/null)
+	[ "$_edit" = 1 ] || _edit=0
 	_wcdma=$(printf '%s' "$_input" | jsonfilter -e '@.wcdma_band' 2>/dev/null)
 	_lte=$(printf '%s' "$_input" | jsonfilter -e '@.lte_band' 2>/dev/null)
 	_nsa=$(printf '%s' "$_input" | jsonfilter -e '@.nsa_band' 2>/dev/null)
@@ -62,13 +135,6 @@ save_model() {
 			sa) _sa="$_clean" ;;
 		esac
 	done
-	for _library in "${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_support.json}" \
-		"${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"; do
-		[ -f "$_library" ] || continue
-		if jsonfilter -i "$_library" -e "@.modem_support.$_bus.$_model" 2>/dev/null | grep -q .; then
-			error '这个型号已在当前连接方式的支持库中，无需重复添加'; return
-		fi
-	done
 	case "$_modes" in ''|*[!a-z,]*) error '拨号协议格式无效'; return ;; esac
 	[ "${#_modes}" -le 64 ] || { error '拨号协议列表过长'; return; }
 	case "$_modes" in ,*|*,|*,,*) error '拨号协议列表不能包含空项'; return ;; esac
@@ -87,7 +153,6 @@ save_model() {
 	IFS="$_old_ifs"
 	[ -n "$_modes_json" ] || { error '请至少选择一种拨号协议'; return; }
 	_dest="$CUSTOM_DIR/$_bus/$_model.json"
-	[ ! -e "$_dest" ] || { error '该连接方式下的型号配置已存在'; return; }
 	( umask 022; mkdir -p "$CUSTOM_DIR/$_bus" ) || { error '无法创建自定义配置目录'; return; }
 	_tmp="$_dest.tmp.$$"
 	{
@@ -98,9 +163,7 @@ save_model() {
 		printf '                "nsa_band": "%s",\n                "sa_band": "%s",\n                "modes": [%s]\n            }\n        }\n    }\n}\n' "$_nsa" "$_sa" "$_modes_json"
 	} > "$_tmp" || { rm -f "$_tmp"; error '写入配置失败'; return; }
 	jsonfilter -i "$_tmp" -e '@.modem_support' >/dev/null 2>&1 || { rm -f "$_tmp"; error '生成的配置无法解析'; return; }
-	ln "$_tmp" "$_dest" 2>/dev/null || { rm -f "$_tmp"; error '配置已被另一个请求创建或保存失败'; return; }
-	rm -f "$_tmp"
-	printf '{"success":true,"bus":"%s","model":"%s"}\n' "$_bus" "$_model"
+	apply_custom
 }
 
 delete_model() {
