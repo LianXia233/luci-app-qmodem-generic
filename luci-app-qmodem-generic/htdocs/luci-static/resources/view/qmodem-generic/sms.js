@@ -8,7 +8,8 @@ var E = controls.element;
 
 /*
  * 短信（Messages）— 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 交互重构
- * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（封装于 qmodem-generic.controls）：
+ * 数据与动作经由 QModem 官方接口（封装于 qmodem-generic.controls）：
+ *    qmodem.sms → 数据库收发记录；服务不存在/direct 模式时使用下面的旧接口
  *    get_sms   → 会话列表 / 消息内容
  *    send_sms  → 发送短信
  *    delete_sms→ 删除模组内短信
@@ -35,34 +36,28 @@ function pick(item, keys) {
 }
 
 function smsEntries(raw) {
-	var list = [];
-	if (Array.isArray(raw))
-		list = raw;
-	else if (raw && Array.isArray(raw.sms))
-		list = raw.sms;
-	else if (raw && raw.sms && typeof raw.sms === 'object')
-		list = Object.keys(raw.sms).map(function(key) { return raw.sms[key]; });
-	else if (raw && Array.isArray(raw.messages))
-		list = raw.messages;
-
-	return list.filter(function(item) { return item && typeof item === 'object'; });
+	if (Array.isArray(raw)) return raw.filter(function(item) { return item && typeof item === 'object' && !Array.isArray(item); });
+	if (!raw || typeof raw !== 'object') return [];
+	var keys = [ 'messages', 'received', 'msg', 'sms' ];
+	for (var i = 0; i < keys.length; i++)
+		if (raw[keys[i]] && typeof raw[keys[i]] === 'object') return smsEntries(raw[keys[i]]);
+	return Object.keys(raw).map(function(key) { return raw[key]; }).filter(function(item) {
+		return item && typeof item === 'object' && !Array.isArray(item) && pick(item, [ 'content', 'text', 'sender', 'recipient', 'index', 'id' ]) !== '';
+	});
 }
 
 function atText(res) {
-	if (res == null)
-		return '';
-	if (typeof res === 'string')
-		return res;
-	var text = pick(res, [ 'response', 'result', 'at_response', 'output', 'data', 'message' ]);
-	if (typeof text === 'string')
-		return text;
-	try { return JSON.stringify(res); } catch (e) { return String(res); }
+	return controls.atResponseText(res);
 }
 
 function formatTime(value) {
 	var text = String(value == null ? '' : value).replace(/"/g, '').trim();
 	if (!text)
 		return '';
+	if (/^\d{10,13}$/.test(text)) {
+		var date = new Date(Number(text) * (text.length <= 10 ? 1000 : 1));
+		if (!isNaN(date.getTime())) return '%s-%s-%s %s:%s'.format(date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0'), String(date.getHours()).padStart(2, '0'), String(date.getMinutes()).padStart(2, '0'));
+	}
 
 	var m = text.match(/^(\d{2})\/(\d{2})\/(\d{2})\s*,?\s*(\d{2}):(\d{2})/);
 	if (m)
@@ -75,36 +70,41 @@ function formatTime(value) {
 	return text.replace(/[+-]\d{2}$/, '').trim();
 }
 
-function normalizeMessage(item, position) {
+function normalizeMessage(item, position, source) {
 	var rawIndex = pick(item, [ 'index', 'idx', 'id', 'sms_index', 'message_index' ]);
-	var index = (rawIndex === '' ? String(position) : String(rawIndex));
+	var indexes = (Array.isArray(rawIndex) ? rawIndex : rawIndex === '' ? [] : [ rawIndex ]).map(String).filter(function(index) { return /^\d+$/.test(index); });
+	var index = indexes[0] || '';
 	var status = String(pick(item, [ 'status', 'state', 'stat', 'type' ]) || '');
 	var number = String(pick(item, [ 'sender', 'number', 'phone_number', 'phone', 'from', 'address', 'oa', 'recipient' ]) || '');
 	var text = String(pick(item, [ 'content', 'text', 'message', 'message_content', 'body', 'msg' ]) || '');
 	var date = formatTime(pick(item, [ 'time', 'date', 'timestamp', 'datetime', 'send_time', 'received' ]));
 	var outgoing = /sent|sto|out/i.test(status) && !/rec/i.test(status);
-	var order = Number(index);
+	var timestamp = Number(item.timestamp);
+	var order = timestamp > 0 ? timestamp * (timestamp < 1e12 ? 1000 : 1) : Date.parse(date.replace(' ', 'T')) || Number(index) || position;
 
 	return {
 		index: index,
-		indexes: [ index ],
+		indexes: indexes,
+		source: source || 'modem',
 		number: number || '未知号码',
 		date: date,
 		text: text,
 		status: status,
 		direction: outgoing ? 'out' : 'in',
+		unread: !outgoing && source === 'database' && !controls.isEnabled(item.is_read),
+		failed: outgoing && (item.success === false || item.success === 0 || item.success === '0'),
 		order: isFinite(order) ? order : position
 	};
 }
 
 function parseMessages(raw) {
-	return smsEntries(raw).map(normalizeMessage).sort(function(a, b) {
+	return smsEntries(raw).map(function(item, position) { return normalizeMessage(item, position, raw && raw._smsSource); }).sort(function(a, b) {
 		return (a.order || 0) - (b.order || 0);
 	});
 }
 
 function groupMessages(messages) {
-	var groups = {};
+	var groups = Object.create(null);
 	messages.forEach(function(msg) { (groups[msg.number] || (groups[msg.number] = [])).push(msg); });
 	return Object.keys(groups).map(function(number) {
 		return { number: number, messages: groups[number].sort(function(a, b) { return (a.order || 0) - (b.order || 0); }) };
@@ -125,7 +125,7 @@ return view.extend({
 			return JSON.parse(window.localStorage.getItem('modem.sms.sent') || window.localStorage.getItem('sms_sent_messages_cache') || '[]').map(function(item) {
 				return item && item.content ? { number: item.number, text: item.content, date: item.time, order: Date.parse(item.time) || 0 } : item;
 			}).filter(function(item) { return item && item.number && item.text; }).map(function(item) {
-				item.direction = 'out'; item.indexes = []; return item;
+				item.direction = 'out'; item.source = 'browser'; item.indexes = []; return item;
 			});
 		} catch (e) { return []; }
 	},
@@ -201,7 +201,7 @@ return view.extend({
 			return { section: null, errors: errors };
 
 		return Promise.all([
-			guard(controls.getSms(section), '读取短信失败', errors),
+			guard(controls.getSmsInbox(section), '读取短信失败', errors),
 			guard(controls.getSimInfo(section), '读取 SIM 信息失败', errors),
 			guard(controls.getAtCfg(section), '读取 AT 端口配置失败', errors)
 		]).then(function(results) {
@@ -244,6 +244,8 @@ return view.extend({
 			'.mt-sms-contact-number{font-weight:750;font-size:12.5px;color:var(--qm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
 			'.mt-sms-contact-date{font-size:10px;color:var(--qm-text-muted);flex-shrink:0}',
 			'.mt-sms-contact-preview{font-size:11px;color:var(--qm-text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+			'.mt-sms-unread{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:var(--qm-accent);color:var(--qm-on-hero);font-size:10px}',
+			'.mt-sms-source-note{font-size:12px;line-height:1.6;color:var(--qm-text-muted);margin:0 0 14px}',
 
 			/* 右侧消息气泡与对话区 */
 			'.mt-sms-chat{display:flex;flex-direction:column;min-width:0;background:var(--qm-glass)}',
@@ -293,13 +295,12 @@ return view.extend({
 		].join(''));
 	},
 
-	removeMessages: function(indexes) {
+	removeMessages: function(messages) {
 		var self = this;
 		var chain = Promise.resolve();
-		(indexes || []).forEach(function(index) {
+		(messages || []).forEach(function(message) {
 			chain = chain.then(function() {
-				var value = Number(index);
-				return controls.deleteSms(self.section, isFinite(value) ? value : index);
+				return controls.deleteSmsMessage(self.section, message);
 			});
 		});
 		return chain;
@@ -307,6 +308,8 @@ return view.extend({
 
 	settingsModal: function(messages) {
 		var self = this;
+		var database = this.smsSource === 'database';
+		var tdtech = controls.supportsTdTechAt(this.section);
 		var smsc = E('input', { 'class': 'cbi-input-text', 'placeholder': '--' });
 		var storage = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': 'SM' }, _('SIM card')), E('option', { 'value': 'ME' }, _('Module storage')) ]);
 		var ims = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '1' }, _('Enabled')), E('option', { 'value': '0' }, _('Disabled')) ]);
@@ -317,44 +320,46 @@ return view.extend({
 		function query(cmd) { return controls.sendAt(self.section, self.atPort, cmd).then(atText).catch(function() { return ''; }); }
 
 		ui.showModal(_('Message settings'), [ E('div', {}, [
-			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('SMS service')), ims ]),
-			E('div', { 'class': 'alert-message warning' }, _('Changing SMS service cycles airplane mode and also changes the IMS PDP context. Leave it enabled unless the carrier does not support IMS messaging.')),
+			E('p', { 'class': 'mt-control-note' }, database ? _('当前会话来自路由器短信数据库，读取后从 SIM 卡删除不会清除这些记录。') : _('当前会话来自模组存储，浏览器单独保存本页面发送的历史记录。')),
+			tdtech ? E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('SMS service')), ims ]) : null,
+			tdtech ? E('div', { 'class': 'alert-message warning' }, _('Changing SMS service cycles airplane mode and also changes the IMS PDP context. Leave it enabled unless the carrier does not support IMS messaging.')) : null,
 			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('Message center')), smsc ]),
 			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('Storage location')), storage ]),
 			E('div', { 'class': 'mt-control-note' }, '以上设置经 QModem 的 send_at 下发到模组，部分参数可能不被本模组支持。'),
 			E('div', { 'class': 'right' }, [
 				E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('Close')), ' ',
 				E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function() {
-					var value = smsc.value.trim();
-					if (!/^\+?[0-9]{5,20}$/.test(value)) return ui.addNotification(null, E('p', {}, _('Enter a valid message center number.')), 'warning');
-					var tasks = [ controls.sendAt(self.section, self.atPort, 'AT+CSCA="' + value + '"') ];
-					tasks.push(controls.sendAt(self.section, self.atPort, 'AT+CPMS="' + storage.value + '","' + storage.value + '","' + storage.value + '"'));
-					if (ims.value !== current.ims) tasks.push(controls.sendAt(self.section, self.atPort, 'AT^IMSSWITCH=' + ims.value));
-					Promise.all(tasks).then(function() {
+					var value = smsc.value.trim(), commands = [];
+					if (value !== current.smsc) {
+						if (!/^\+?[0-9]{5,20}$/.test(value)) return ui.addNotification(null, E('p', {}, _('Enter a valid message center number.')), 'warning');
+						commands.push('AT+CSCA="' + value + '"');
+					}
+					if (!storage.disabled && storage.value !== current.storage) commands.push('AT+CPMS="' + storage.value + '","' + storage.value + '","' + storage.value + '"');
+					if (tdtech && current.ims && ims.value !== current.ims) commands.push('AT^IMSSWITCH=' + ims.value);
+					commands.reduce(function(chain, cmd) { return chain.then(function() { return controls.sendAt(self.section, self.atPort, cmd); }); }, Promise.resolve()).then(function() {
 						ui.hideModal(); ui.addNotification(null, E('p', {}, _('Message settings saved.')));
 						window.setTimeout(function() { window.location.reload(); }, 1200);
 					}).catch(failed);
 				} }, _('Save settings'))
 			]),
 			E('div', { 'class': 'mt-sms-danger' }, [
-				E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin-bottom:8px' }, _('Sent messages are stored in this browser. Export a backup before clearing browser data or moving to another device.')),
+				E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin-bottom:8px' }, database ? _('数据库收发记录保存在路由器。下方备份和清空操作仅处理旧版浏览器发送历史。') : _('Sent messages are stored in this browser. Export a backup before clearing browser data or moving to another device.')),
 				importFile,
-				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.exportSent(); } }, _('Export sent history')), ' ',
-				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { importFile.click(); } }, _('Import sent history')),
+				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.exportSent(); } }, database ? _('导出浏览器发送历史') : _('Export sent history')), ' ',
+				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { importFile.click(); } }, database ? _('导入浏览器发送历史') : _('Import sent history')),
 				E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin:12px 0 8px' }, _('Clearing message history cannot be undone.')),
-				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.clearSent(); ui.hideModal(); window.location.reload(); } }, _('Clear sent history')), ' ',
+				E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.clearSent(); ui.hideModal(); window.location.reload(); } }, database ? _('清空浏览器发送历史') : _('Clear sent history')), ' ',
 				E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'click': function() {
 					ui.hideModal();
 					ui.showModal(_('Clear all messages?'), [
-						E('p', {}, _('Every received message stored on the module will be permanently deleted.')),
+						E('p', {}, database ? _('当前已加载的数据库接收记录将被永久删除。') : _('Every received message stored on the module will be permanently deleted.')),
 						E('div', { 'class': 'right' }, [
 							E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('Cancel')), ' ',
 							E('button', { 'type': 'button', 'class': 'btn cbi-button-negative', 'click': function() {
 								ui.hideModal();
-								var indexes = [];
-								(messages || []).forEach(function(msg) { if (msg.direction !== 'out') indexes = indexes.concat(msg.indexes || []); });
-								if (!indexes.length) return ui.addNotification(null, E('p', {}, '模组内没有可删除的短信。'), 'info');
-								self.removeMessages(indexes).then(function() { window.location.reload(); }).catch(failed);
+								var received = (messages || []).filter(function(msg) { return msg.direction !== 'out' && msg.indexes && msg.indexes.length; });
+								if (!received.length) return ui.addNotification(null, E('p', {}, _('没有可删除的接收短信。')), 'info');
+								self.removeMessages(received).then(function() { window.location.reload(); }).catch(failed);
 							} }, _('Clear all'))
 						])
 					]);
@@ -362,13 +367,16 @@ return view.extend({
 			])
 		]) ]);
 
-		Promise.all([ query('AT+CSCA?'), query('AT+CPMS?'), query('AT^IMSSWITCH?') ]).then(function(res) {
+		storage.disabled = true; ims.disabled = true;
+		Promise.all([ query('AT+CSCA?'), query('AT+CPMS?'), tdtech ? query('AT^IMSSWITCH?') : Promise.resolve('') ]).then(function(res) {
 			current.smsc = ((String(res[0]).match(/\+CSCA:\s*"([^"]+)"/) || [])[1] || '');
 			current.storage = ((String(res[1]).match(/\+CPMS:\s*"([A-Z]+)"/) || [])[1] || '');
 			current.ims = ((String(res[2]).match(/IMSSWITCH:\s*(\d+)/) || [])[1] || '');
 			smsc.value = current.smsc;
 			storage.value = current.storage === 'ME' ? 'ME' : 'SM';
+			storage.disabled = !/^(SM|ME)$/.test(current.storage);
 			ims.value = current.ims === '0' ? '0' : '1';
+			ims.disabled = !current.ims;
 		}).catch(function() {});
 	},
 
@@ -402,6 +410,8 @@ return view.extend({
 		this.section = res.section;
 		var atcfg = (res.atcfg && res.atcfg.at_cfg) ? res.atcfg.at_cfg : (res.atcfg || {});
 		this.atPort = atcfg.at_port || '';
+		this.smsSource = res.sms && res.sms._smsSource || 'modem';
+		var database = this.smsSource === 'database';
 
 		var modemMessages = parseMessages(res.sms);
 		var messages = modemMessages.concat(this.sentHistory());
@@ -418,8 +428,9 @@ return view.extend({
 
 		function failed(err) { ui.addNotification(null, E('p', {}, err && err.message ? err.message : _('Message operation failed.')), 'danger'); }
 
-		function showThread(group, button) {
+		function showThread(group, button, markRead) {
 			selected = group ? group.number : '';
+			self.smsSelected = selected;
 			recipient.value = selected;
 			recipientWrap.classList.toggle('show', !group);
 			chatTitle.textContent = group ? group.number : _('New message');
@@ -440,27 +451,29 @@ return view.extend({
 				return E('div', { 'class': 'mt-sms-bubblewrap ' + (msg.direction === 'out' ? 'out' : 'in') }, [
 					E('div', { 'class': 'mt-sms-bubble' }, [
 						msg.text || _('Empty message'),
+						msg.failed ? E('div', { 'class': 'mt-sms-bubbledate' }, _('发送失败')) : null,
 						E('div', { 'class': 'mt-sms-bubbledate' }, msg.date || '--')
 					]),
 					E('button', {
 						'type': 'button',
 						'class': 'mt-sms-delete',
 						'title': _('Delete'),
+						'disabled': msg.source !== 'browser' && !msg.indexes.length ? 'disabled' : null,
 						'click': function() {
 							ui.showModal(_('Delete message?'), [
-								E('p', {}, msg.direction === 'out' ? _('This removes the local sent-history entry.') : _('This removes the selected message from the module.')),
+								E('p', {}, msg.source === 'browser' ? _('This removes the local sent-history entry.') : msg.source === 'database' ? _('这将永久删除路由器数据库中的这条短信。') : _('This removes the selected message from the module.')),
 								E('div', { 'class': 'right' }, [
 									E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('Cancel')), ' ',
 									E('button', {
 										'type': 'button', 'class': 'btn cbi-button-negative',
 										'click': function() {
 											ui.hideModal();
-											if (msg.direction === 'out') {
+											if (msg.source === 'browser') {
 												window.localStorage.setItem('modem.sms.sent', JSON.stringify(self.sentHistory().filter(function(item) { return item.order !== msg.order; })));
 												window.location.reload();
 												return;
 											}
-											self.removeMessages(msg.indexes).then(function() { window.location.reload(); }).catch(failed);
+											self.removeMessages([msg]).then(function() { window.location.reload(); }).catch(failed);
 										}
 									}, _('Delete'))
 								])
@@ -470,6 +483,12 @@ return view.extend({
 				]);
 			}));
 			thread.scrollTop = thread.scrollHeight;
+			if (markRead && database && group.messages.some(function(msg) { return msg.unread; }))
+				controls.markSmsRead(self.section, group.messages).then(function() {
+					group.messages.forEach(function(msg) { msg.unread = false; });
+					var badge = button && button.querySelector('.mt-sms-unread');
+					if (badge) badge.remove();
+				}).catch(failed);
 		}
 
 		groups.forEach(function(group, index) {
@@ -480,12 +499,13 @@ return view.extend({
 				E('div', { 'class': 'mt-sms-contact-info' }, [
 					E('div', { 'class': 'mt-sms-contact-top' }, [
 						E('span', { 'class': 'mt-sms-contact-number' }, group.number),
+						group.messages.some(function(msg) { return msg.unread; }) ? E('span', { 'class': 'mt-sms-unread', 'aria-label': _('未读短信') }, String(group.messages.filter(function(msg) { return msg.unread; }).length)) : null,
 						E('span', { 'class': 'mt-sms-contact-date' }, String(last.date || '').substring(5))
 					]),
 					E('div', { 'class': 'mt-sms-contact-preview' }, last.text || _('Empty message'))
 				])
 			]);
-			button.addEventListener('click', function() { showThread(group, button); });
+			button.addEventListener('click', function() { showThread(group, button, true); });
 			contacts.appendChild(button);
 		});
 
@@ -496,6 +516,8 @@ return view.extend({
 		}
 
 		function send() {
+			if (self.smsSending) return;
+			if (!res.sms) return failed(new Error(_('短信读取失败，请恢复短信服务后再发送。')));
 			var number = (selected || recipient.value).trim(), body = text.value.trim();
 			if (!/^\+?[0-9]{5,20}$/.test(number) || !body)
 				return ui.addNotification(null, E('p', {}, _('Enter a valid phone number and message.')), 'warning');
@@ -507,20 +529,27 @@ return view.extend({
 					E('button', {
 						'type': 'button', 'class': 'btn cbi-button-apply',
 						'click': function() {
+							if (self.smsSending) return;
 							ui.hideModal();
-							controls.sendSms(self.section, number, body).then(function() {
-								self.saveSent(number, body); text.value = '';
+							self.smsSending = true; sendButton.disabled = true; text.disabled = true; recipient.disabled = true;
+							controls.sendSmsInbox(self.section, number, body, self.smsSource).then(function() {
+								if (!database) self.saveSent(number, body);
+								text.value = '';
 								ui.addNotification(null, E('p', {}, _('Message sent.')));
 								window.setTimeout(function() { window.location.reload(); }, 900);
-							}).catch(failed);
+							}).catch(failed).then(function() { self.smsSending = false; sendButton.disabled = false; text.disabled = false; recipient.disabled = false; });
 						}
 					}, _('Send'))
 				])
 			]);
 		}
 
-		if (groups.length) showThread(groups[0], contacts.firstChild);
+		var activeIndex = Math.max(0, groups.findIndex(function(group) { return group.number === self.smsSelected; }));
+		if (groups.length) showThread(groups[activeIndex], contacts.children[activeIndex]);
 		else showThread(null, null);
+		var sendButton = E('button', { 'type': 'button', 'class': 'mt-sms-btn mt-sms-btn-primary', 'click': send }, [
+			svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'), _('Send')
+		]);
 
 		var modems = controls.getModemSectionsSync();
 		var modemBar = controls.renderModemBar(modems, res.section, function(id) {
@@ -548,7 +577,7 @@ return view.extend({
 					E('p', {}, _('Conversations using the SIM installed in the module.')),
 					E('div', { 'class': 'mt-sms-storage' }, [
 						svgNode('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>'),
-						(simNumber ? '本机号码：' + simNumber + '　·　' : '') + '模组内短信：' + modemMessages.length + ' 条'
+						(simNumber ? '本机号码：' + simNumber + '　·　' : '') + (res.sms ? (database ? '数据库短信：' : '模组内短信：') + modemMessages.length + ' 条' : '短信读取失败')
 					])
 				]),
 				E('div', { 'class': 'mt-sms-hero-actions' }, [
@@ -556,7 +585,12 @@ return view.extend({
 						svgNode('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'),
 						_('New message')
 					]),
-					E('button', { 'type': 'button', 'class': 'mt-sms-btn mt-sms-btn-secondary', 'click': function() { window.location.reload(); } }, [
+					E('button', { 'type': 'button', 'class': 'mt-sms-btn mt-sms-btn-secondary', 'click': function(ev) {
+						if (!res.sms) { window.location.reload(); return; }
+						var button = ev.currentTarget;
+						button.disabled = true;
+						controls.refreshSmsInbox(self.section, self.smsSource).then(function() { window.location.reload(); }).catch(failed).then(function() { button.disabled = false; });
+					} }, [
 						svgNode('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'),
 						_('Refresh')
 					]),
@@ -566,6 +600,8 @@ return view.extend({
 					])
 				])
 			]),
+
+			database ? E('p', { 'class': 'mt-sms-source-note' }, _('短信保存在路由器数据库中，与 QModem 原界面共用收发记录。') + (res.sms._smsTruncated ? _('当前仅显示已加载的最近记录。') : '')) : null,
 
 			/* 毛玻璃对话主视窗 */
 			E('div', { 'class': 'mt-sms-shell' }, [
@@ -583,10 +619,7 @@ return view.extend({
 						recipientWrap,
 						E('div', { 'class': 'mt-sms-compose-row' }, [
 							text,
-							E('button', { 'type': 'button', 'class': 'mt-sms-btn mt-sms-btn-primary', 'click': send }, [
-								svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'),
-								_('Send')
-							])
+							sendButton
 						])
 					])
 				])

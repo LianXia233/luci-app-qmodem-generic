@@ -35,6 +35,7 @@ function makeRuntime() {
 	var taskSeq = 0;
 	var ubusDelayMs = 0;       /* 模拟 qmodem 对象（AT 驱动）的慢速 */
 	var cacheDelayMs = 0;
+	var smsApi = null;
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -115,7 +116,9 @@ function makeRuntime() {
 			calls.push({ object: object, method: method, params: p, t: Date.now() });
 
 			var body;
-			if (object === 'qmodem_cache' || object === 'qmodem_stats' || object === 'qmodem_support') {
+			if (object === 'qmodem.sms') {
+				body = smsApi ? smsApi(method, p) : { __rpcError: 'RPC call to qmodem.sms/config_get failed with ubus code 4: Not found' };
+			} else if (object === 'qmodem_cache' || object === 'qmodem_stats' || object === 'qmodem_support') {
 				body = handleCache(method, p);
 			} else if (object === 'qmodem' || object === 'qos' ||
 				   object === 'luci-rpc' || object === 'system' || object === 'network') {
@@ -127,9 +130,11 @@ function makeRuntime() {
 
 			return Promise.resolve().then(function() {
 				var d = (object === 'qmodem_cache' || object === 'qmodem_stats' ||
-					 object === 'qmodem_support') ? cacheDelayMs : ubusDelayMs;
+					 object === 'qmodem_support' || (object === 'qmodem.sms' &&
+					 (method === 'config_get' || (method === 'list' && body.mode !== 'direct')))) ? cacheDelayMs : ubusDelayMs;
 				return d ? delay(d) : null;
 			}).then(function() {
+				if (body && body.__rpcError) throw new Error(body.__rpcError);
 				if (expectKey && body && body[expectKey] === undefined) {
 					var wrapped = {};
 					wrapped[expectKey] = expectVal;
@@ -419,6 +424,7 @@ function makeRuntime() {
 		El: El,
 		setUbusDelay: function(ms) { ubusDelayMs = ms; },
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
+		setSmsApi: function(handler) { smsApi = handler; },
 		setSnapshot: function(s) { snapshot = s; },
 		setSnapshotEmpty: function() { cacheEmpty = true; },
 		setSnapshotFull: function() { cacheEmpty = false; },
@@ -567,6 +573,80 @@ function testActionPayloads() {
 			assertEq('已进入队列的失败命令不重复直发', rt.countCalls('qmodem', 'send_at'), 0);
 		});
 	});
+}
+
+async function testSmsSources() {
+	console.log('\n[4c] 短信数据库、旧版模组存储与错误隔离');
+	function runtime(handler) {
+		var rt = makeRuntime();
+		if (handler) rt.setSmsApi(handler);
+		return { rt:rt, controls:loadControls(rt) };
+	}
+	async function rejects(name, promise, pattern) {
+		try { await promise; ok(name, false); }
+		catch (err) { ok(name, pattern.test(err.message), err.message); }
+	}
+	var received = { id:71, type:'received', sender:'10010', content:'数据库接收短信', timestamp:1792239000, is_read:0 };
+	var sent = { id:72, type:'sent', recipient:'10010', content:'数据库发送短信', timestamp:1792239060, success:1 };
+	var db = runtime(function(method) {
+		if (method === 'config_get') return { mode:'database_poll', auto_delete:true, poll_interval:300 };
+		if (method === 'list') return { mode:'database_poll', messages:[received,sent] };
+		return { status:'success' };
+	});
+	var inbox = await db.controls.getSmsInbox('6_2');
+	assertEq('自动删除 SIM 后仍读取路由器数据库', inbox._smsSource, 'database');
+	assertEq('数据库保留接收和发送记录', inbox.messages.length, 2);
+	ok('数据库列表使用动态模组标识 modem_id', db.rt.calls.every(function(c) { return c.params.modem_id === '6_2'; }));
+	assertEq('读取数据库不调用旧版 get_sms', db.rt.countCalls('qmodem','get_sms'), 0);
+	assertEq('数据库页面加载不主动同步串口', db.rt.countCalls('qmodem.sms','sync'), 0);
+	await db.controls.sendSmsInbox('6_2','10010','测试发送','database');
+	var send = db.rt.calls.filter(function(c) { return c.object === 'qmodem.sms' && c.method === 'send'; })[0];
+	assertEq('发送使用短信服务并保存数据库历史', JSON.stringify(send.params), JSON.stringify({modem_id:'6_2',recipient:'10010',content:'测试发送'}));
+	assertEq('数据库发送不重复调用旧发送接口', db.rt.countCalls('qmodem_cache','action'), 0);
+	await db.controls.deleteSmsMessage('6_2',{source:'database',index:'72'});
+	var deletion = db.rt.calls.filter(function(c) { return c.method === 'delete'; })[0];
+	assertEq('数据库删除使用记录 id 而非 SIM 序号', JSON.stringify(deletion.params), JSON.stringify({modem_id:'6_2',id:72}));
+	await db.controls.markSmsRead('6_2',[{source:'database',index:'71',unread:true},{source:'database',index:'72',unread:false}]);
+	assertEq('仅标记未读数据库短信', db.rt.countCalls('qmodem.sms','mark_read'), 1);
+	await db.controls.refreshSmsInbox('6_2','database');
+	assertEq('用户刷新时才请求数据库同步', db.rt.countCalls('qmodem.sms','sync'), 1);
+	await rejects('无效数据库 id 不发出删除请求', db.controls.deleteSmsMessage('6_2',{source:'database',index:'-1'}), /无效/);
+
+	var legacy = runtime();
+	assertEq('旧版没有短信服务时回退模组存储', (await legacy.controls.getSmsInbox('6_1'))._smsSource, 'modem');
+	await legacy.controls.getSmsInbox('6_1');
+	assertEq('服务缺失在冷却期间不反复探测', legacy.rt.countCalls('qmodem.sms','config_get'), 1);
+	var direct = runtime(function() { return {mode:'direct'}; });
+	direct.rt.setUbusDelay(8000);
+	var started = Date.now();
+	assertEq('direct 模式继续使用后台缓存', (await direct.controls.getSmsInbox('6_1'))._smsSource, 'modem');
+	assertLt('direct 模式首屏不等待慢串口', Date.now() - started, 1500);
+	assertEq('direct 模式首屏不调用会读串口的 list', direct.rt.countCalls('qmodem.sms','list'), 0);
+	assertEq('direct 模式首屏不直接读取模组', direct.rt.countCalls('qmodem','get_sms'), 0);
+
+	var empty = runtime(function(method) { return method === 'config_get' ? {mode:'database_urc'} : {messages:[]}; });
+	assertEq('数据库为空仍保留正确数据源', (await empty.controls.getSmsInbox('6_1'))._smsSource, 'database');
+	var denied = runtime(function() { return {__rpcError:'RPC call failed with ubus code 6: Permission denied'}; });
+	await rejects('权限失败如实显示，不伪装为无短信', denied.controls.getSmsInbox('6_1'), /Permission denied/);
+	assertEq('权限失败不切换到旧接口', denied.rt.countCalls('qmodem_cache','snapshot'), 0);
+	var broken = runtime(function(method) { return method === 'config_get' ? {mode:'database_poll'} : {status:'error',error:'database unavailable'}; });
+	await rejects('数据库读取故障保留原错误', broken.controls.getSmsInbox('6_1'), /database unavailable/);
+	await rejects('发送故障保留原错误', broken.controls.sendSmsInbox('6_1','10010','测试','database'), /database unavailable/);
+	assertEq('失败的数据库发送不会切换接口重发', broken.rt.countCalls('qmodem_cache','action'), 0);
+	var invalid = runtime(function(method) { return method === 'config_get' ? {mode:'database_poll'} : {}; });
+	await rejects('无效列表不能当成空收件箱', invalid.controls.getSmsInbox('6_1'), /消息列表/);
+	await rejects('缺少成功状态不能当成发送成功', invalid.controls.sendSmsInbox('6_1','10010','测试','database'), /未确认操作成功/);
+
+	var paged = runtime(function(method,p) {
+		if (method === 'config_get') return {mode:'database_poll'};
+		return {messages:p.offset === 0 ? Array.from({length:500},function(_,i) { return {id:i+1,type:'received'}; }) : [{id:500},{id:501}]};
+	});
+	var all = await paged.controls.getSmsInbox('6_1');
+	assertEq('超过一页的短信继续读取并去重', all.messages.length, 501);
+	assertEq('短信分页传递 offset', paged.rt.calls.filter(function(c) { return c.method === 'list'; })[1].params.offset, 500);
+	var acl = JSON.parse(fs.readFileSync(path.join(ROOT,'root/usr/share/rpcd/acl.d/luci-app-qmodem-generic.json'),'utf8'))['luci-app-qmodem-generic'];
+	ok('短信数据库读权限齐全', ['config_get','list'].every(function(m) { return acl.read.ubus['qmodem.sms'].includes(m); }));
+	ok('短信数据库写权限齐全', ['send','delete','mark_read','sync'].every(function(m) { return acl.write.ubus['qmodem.sms'].includes(m); }));
 }
 
 function testNoSlowPathDeclared(rt, controls) {
@@ -810,6 +890,7 @@ var rt = makeRuntime();
 testBootstrap(rt)
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(testActionPayloads)
+	.then(testSmsSources)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
 	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })

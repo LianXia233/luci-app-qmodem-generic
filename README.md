@@ -4,13 +4,15 @@
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
-> **QModem 的通用美化版 LuCI Web UI。** 界面数据全部经由 QModem 的 `qmodem` ubus 对象读取，不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
+> **QModem 的通用美化版 LuCI Web UI。** 界面数据经由 QModem 官方 ubus 接口读取，不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
 >
-> 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已完全去除私有文本后端，改为纯 `qmodem` ubus 链路。
+> 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已去除私有文本后端，使用官方 `qmodem` 与可选 `qmodem.sms` 接口。
 
 未获取到的数据自动隐藏对应行。网络模式按 QModem 实际上报展示；MT5700 专有设置仅向对应型号显示，其它模组可使用通用 AT 控制台。
 
 AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗口独立显示状态、响应正文和错误信息。常用指令使用通用查询，专有指令按模组型号显示。
+
+短信自动适配 QModem 数据库模式和旧版模组存储。开启“读取后从 SIM 删除”后，已保存到路由器的短信仍可在这里查看；数据库模式与原 QModem 界面共用收发记录，不要求安装 Next 界面。读取错误会明确提示。
 
 ## 目录
 
@@ -39,7 +41,7 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 | 总览 Overview | 实际型号标题、信号/流量卡片、按 `class` 分组铺开 QModem 上报的**全部字段** |
 | 移动数据 Mobile Data | APN、拨号、IP 详情与会话计数 |
 | 射频与小区 Radio and Cells | 频段、邻区、锁频锁小区、诊断 |
-| 短信 Messages | 基于 SIM 的收发与会话视图 |
+| 短信 Messages | 数据库／模组存储自动识别，收发、未读状态与会话视图 |
 | 模组与 SIM | 模组身份、SIM 信息与维护操作 |
 | 高级 Advanced | 模组支持库同步、诊断控制台、IP 透传 / Post-Route / DMZ 等 |
 | AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入） |
@@ -47,7 +49,7 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 
 **亮点**
 
-- 纯 `qmodem` ubus 链路，无私有后端，全模组通用；动态字段自适应，内置字段使用中文标签映射。
+- 使用 QModem 官方 ubus 接口，全模组通用；动态字段自适应，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
 - MT5700 系列海思模组 SIM 卡槽上电自动初始化（开机服务 + 首次安装脚本）。
 - 内置模组定义自动注入 QModem 支持库（当前含 Quectel RG520N-CN），替代手工编辑 `modem_support.json`。

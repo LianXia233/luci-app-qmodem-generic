@@ -161,6 +161,13 @@ var callGetNeighborcell = rpc.declare({ object: 'qmodem', method: 'get_neighborc
 var callGetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'get_network_prefer', params: ['config_section'], expect: { }, nobatch: true });
 var callGetDns = rpc.declare({ object: 'qmodem', method: 'get_dns', params: ['config_section'], expect: { }, nobatch: true });
 var callGetSms = rpc.declare({ object: 'qmodem', method: 'get_sms', params: ['config_section'], expect: { }, nobatch: true });
+/* 新版官方短信服务独立保存收发记录；它与 qmodem.get_sms 的 SIM 列表不同。 */
+var callSmsConfig = rpc.declare({ object: 'qmodem.sms', method: 'config_get', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
+var callSmsList = rpc.declare({ object: 'qmodem.sms', method: 'list', params: ['modem_id', 'limit', 'offset'], expect: { }, nobatch: true, reject: true });
+var callSmsSend = rpc.declare({ object: 'qmodem.sms', method: 'send', params: ['modem_id', 'recipient', 'content'], expect: { }, nobatch: true, reject: true });
+var callSmsDelete = rpc.declare({ object: 'qmodem.sms', method: 'delete', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsMarkRead = rpc.declare({ object: 'qmodem.sms', method: 'mark_read', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsSync = rpc.declare({ object: 'qmodem.sms', method: 'sync', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
 var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disabled_features', params: ['config_section'], expect: { }, nobatch: true });
 var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { }, nobatch: true });
 var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { }, nobatch: true });
@@ -947,8 +954,10 @@ function getDns(section) {
 function getSms(section) {
 	return fetchSnapshot(section, ['sms']).then(function(snap) {
 		var env = envelopeOf(snap, 'sms');
-		if (snap && env && env.data && env.data.get_sms)
+		if (snap && env && env.data && env.data.get_sms) {
+			if (env.stale || env.status === 'missing') requestRefresh(section, ['sms']);
 			return env.data.get_sms;
+		}
 
 		if (!snap)
 			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
@@ -956,6 +965,100 @@ function getSms(section) {
 		requestRefresh(section, ['sms'], true);
 		return {};
 	});
+}
+
+var smsServiceMissingUntil = 0;
+
+function smsServiceResult(result) {
+	if (!result || typeof result !== 'object' || result.error || result.status === 'error' || result.success === false)
+		throw new Error((result && (result.error || result.modem_response)) || _('短信服务未返回有效结果。'));
+	return result;
+}
+
+function smsServiceAction(result) {
+	result = smsServiceResult(result);
+	if (result.status !== 'success') throw new Error(_('短信服务未确认操作成功，请检查结果后再重试。'));
+	return result;
+}
+
+/* 只对“对象/方法不存在”降级；数据库损坏、无权限或超时都应显示原错误。 */
+function getSmsServiceConfig(section) {
+	if (Date.now() < smsServiceMissingUntil) return Promise.resolve(null);
+	return withTimeoutReject(callSmsConfig(section), 10000, _('读取短信服务超时')).then(function(result) {
+		result = smsServiceResult(result);
+		if (!/^(?:direct|database_poll|database_urc)$/.test(result.mode || ''))
+			throw new Error(_('短信服务返回了未知接收模式。'));
+		return result;
+	}, function(err) {
+		if (/ubus code [34]:/.test(String(err && err.message)) || (err && (err.code === 3 || err.code === 4))) {
+			smsServiceMissingUntil = Date.now() + 60000;
+			return null;
+		}
+		throw err;
+	});
+}
+
+function getSmsInbox(section) {
+	return getSmsServiceConfig(section).then(function(config) {
+		/* direct 模式仍读后台缓存，首屏不通过新服务同步访问串口。 */
+		if (!config || config.mode === 'direct')
+			return getSms(section).then(function(raw) {
+				if (raw && raw.error) throw new Error(raw.error);
+				return Object.assign({}, Array.isArray(raw) ? { messages: raw } : (raw || {}), {
+					_smsSource: 'modem', _smsConfig: config
+				});
+			});
+
+		var messages = [], seen = Object.create(null);
+		function page(offset) {
+			return withTimeoutReject(callSmsList(section, 500, offset), 10000, _('读取短信数据库超时')).then(function(raw) {
+				raw = smsServiceResult(raw);
+				if (raw.mode && raw.mode !== config.mode)
+					throw new Error(_('短信接收模式已改变，请刷新后重试。'));
+				var list = raw.messages || raw.received || raw.msg;
+				if (!Array.isArray(list)) throw new Error(_('短信服务未返回消息列表。'));
+				var before = messages.length;
+				list.forEach(function(item) {
+					if (!item || typeof item !== 'object' || item.id == null || seen[String(item.id)]) return;
+					seen[String(item.id)] = true; messages.push(item);
+				});
+				var more = list.length === 500;
+				if (more && messages.length > before && offset < 4500) return page(offset + list.length);
+				return { messages: messages, _smsSource: 'database', _smsConfig: config, _smsTruncated: more };
+			});
+		}
+		return page(0);
+	});
+}
+
+function refreshSmsInbox(section, source) {
+	if (source !== 'database') return requestRefresh(section, ['sms'], true);
+	return withTimeoutReject(callSmsSync(section), 45000, _('短信同步超时')).then(smsServiceAction);
+}
+
+/* 数据库模式的发送不做旧接口重试，超时/失败后交由用户核对发送结果。 */
+function sendSmsInbox(section, phoneNumber, content, source) {
+	if (source !== 'database') return sendSms(section, phoneNumber, content).then(smsServiceResult);
+	return withTimeoutReject(callSmsSend(section, phoneNumber, content), 60000, _('短信发送超时，请核对发送记录后再决定是否重试。')).then(smsServiceAction);
+}
+
+function deleteSmsMessage(section, message) {
+	if (message.source === 'database') {
+		var id = Number(message.index);
+		if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error(_('无效的短信记录编号。')));
+		return withTimeoutReject(callSmsDelete(section, id), 10000, _('删除短信超时')).then(smsServiceAction);
+	}
+	return (message.indexes || []).reduce(function(chain, index) {
+		return chain.then(function() { return deleteSms(section, Number(index)).then(smsServiceResult); });
+	}, Promise.resolve());
+}
+
+function markSmsRead(section, messages) {
+	return (messages || []).filter(function(item) { return item.source === 'database' && item.unread; }).reduce(function(chain, item) {
+		return chain.then(function() {
+			return withTimeoutReject(callSmsMarkRead(section, Number(item.index)), 10000, _('标记短信已读超时')).then(smsServiceAction);
+		});
+	}, Promise.resolve());
 }
 
 function getDisabledFeatures(section) {
@@ -1841,6 +1944,11 @@ return baseclass.extend({
 	getNetworkPrefer: getNetworkPrefer,
 	getDns: getDns,
 	getSms: getSms,
+	getSmsInbox: getSmsInbox,
+	refreshSmsInbox: refreshSmsInbox,
+	sendSmsInbox: sendSmsInbox,
+	deleteSmsMessage: deleteSmsMessage,
+	markSmsRead: markSmsRead,
 	getDisabledFeatures: getDisabledFeatures,
 	getRebootCaps: getRebootCaps,
 	getCopyright: getCopyright,

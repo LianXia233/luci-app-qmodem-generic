@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
-# 本项目是 QModem 的通用美化版 Web UI：所有界面数据均通过 QModem 的 `qmodem`
-# ubus 对象读取，对任意 QModem 支持的模组生效（不绑定特定型号，如 MT5700M）。
+# 本项目是 QModem 的通用美化版 Web UI：使用 QModem 官方的 `qmodem` / `qmodem.sms`
+# ubus 接口，对任意 QModem 支持的模组生效（不绑定特定型号，如 MT5700M）。
 # 因此运行时依赖 qmodem，不再依赖 ubus-at-daemon / sms-tool_q / mt5700m-at。
 #
 # 保留关闭 JS 压缩：本包视图使用较新的 JS 语法（箭头函数、模板字符串等），
@@ -10,13 +10,13 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.5.0
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
 LUCI_TITLE:=Modem management (QModem beautified UI)
 LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem. \
-	All data is read through the `qmodem` ubus object, so it is not bound to a \
+	Data is read through official QModem ubus interfaces, so it is not bound to a \
 	specific module model.
 # 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）。
 # 注意：OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法（package-metadata.pl

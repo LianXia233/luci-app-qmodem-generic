@@ -110,11 +110,26 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
     data.status.dns.dns.ipv6_dns1 = null;
   }
   if (scenario === 'empty' || scenario === 'absent') data = {};
+  if (scenario === 'sms_legacy') data.sms.get_sms = { sms: { msg: [{ index:0, sender:'10010', content:'SIM 保留短信', timestamp:'26/10/17,20:10:00+32' }] } };
   window.calls = [];
+  window.notifications = [];
   let task = 0;
   const tasks = {};
   const rpc = { declare: def => (...args) => {
     window.calls.push({ object: def.object, method: def.method, args });
+    if (def.object === 'qmodem.sms') {
+      if (!['sms_database','sms_database_error'].includes(scenario))
+        return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with ubus code 4: Not found'));
+      if (def.method === 'config_get') return Promise.resolve({mode:'database_poll',auto_delete:true,poll_interval:300});
+      if (def.method === 'list') return Promise.resolve(scenario === 'sms_database_error' ? {status:'error',error:'SMS database is unavailable'} : {
+        mode:'database_poll', messages:[
+          {id:71,type:'received',sender:'10010',content:'<b>数据库接收短信</b>',timestamp:1792239000,is_read:0},
+          {id:72,type:'sent',recipient:'10010',content:'数据库发送记录',timestamp:1792239060,success:1}
+        ]
+      });
+      if (def.method === 'send' && window.smsSendError) return Promise.resolve({status:'error',error:window.smsSendError});
+      return Promise.resolve({status:'success'});
+    }
     if (def.method === 'snapshot') {
       const domains = {};
       for (const key of Object.keys(data)) domains[key] = { status: 'ready', stale: false, updated: Date.now() / 1000, ttl: 600, data: data[key] };
@@ -137,7 +152,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   } };
   const ui = {
     showModal: (title, children) => { document.querySelector('#modal')?.remove(); const node = dom.create('div', { id: 'modal' }, children); document.body.append(node); return node; },
-    hideModal: () => document.querySelector('#modal')?.remove(), addNotification: () => {},
+    hideModal: () => document.querySelector('#modal')?.remove(), addNotification: (...args) => window.notifications.push(args),
     createHandlerFn: (ctx, fn) => function(...args) { return fn.apply(ctx, args); }
   };
   const form = {};
@@ -265,7 +280,8 @@ async function run() {
 async function runDom() {
   const { Window } = await import(require.resolve('happy-dom'));
   let cases = 0;
-  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech']) for (const viewName of views) {
+  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech', 'sms_database', 'sms_database_error', 'sms_legacy']) for (const viewName of views) {
+    if (scenario.startsWith('sms_') && viewName !== 'sms') continue;
     const window = new Window({ url: 'http://qmodem.test', width, height: 1000 });
     try {
       window.document.body.innerHTML = '<main id="app"></main>';
@@ -423,6 +439,65 @@ async function runDom() {
         const newButton = [...app.querySelectorAll('button')].find(el => el.textContent.trim() === '新短信');
         assert(newButton); newButton.click();
         assert.equal(window.document.activeElement, app.querySelector('input'), 'New SMS click must focus recipient');
+      }
+      if (viewName === 'sms' && scenario === 'sms_database') {
+        assert(text.includes('数据库短信：2 条'), 'Auto-deleted SIM messages must remain visible from the database');
+        assert.equal(app.querySelectorAll('.mt-sms-contact').length, 1);
+        assert.equal(app.querySelectorAll('.mt-sms-bubblewrap.in').length, 1);
+        assert.equal(app.querySelectorAll('.mt-sms-bubblewrap.out').length, 1);
+        assert(app.querySelector('.mt-sms-thread').textContent.includes('<b>数据库接收短信</b>'));
+        assert(!app.querySelector('.mt-sms-thread b'), 'SMS content must remain plain text');
+        assert(/2026-\d{2}-\d{2} \d{2}:\d{2}/.test(app.querySelector('.mt-sms-bubbledate').textContent), 'Unix timestamps must display as dates');
+        assert(app.querySelector('.mt-sms-unread'));
+        assert(!window.initialCalls.some(c => c.object === 'qmodem.sms' && ['sync','mark_read','send','delete'].includes(c.method)), 'Rendering the inbox must only read the database');
+        app.querySelector('.mt-sms-contact').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.deepEqual(Array.from(window.calls.find(c => c.method === 'mark_read').args), ['6_1',71]);
+        assert(!app.querySelector('.mt-sms-unread'));
+
+        const draft = app.querySelector('textarea');
+        const sendButton = app.querySelector('.mt-sms-compose button');
+        draft.value = '来自新界面的回复'; sendButton.click();
+        const confirm = window.document.querySelector('#modal .cbi-button-apply');
+        confirm.click(); confirm.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal(window.calls.filter(c => c.object === 'qmodem.sms' && c.method === 'send').length, 1, 'Double confirmation must send only once');
+        assert.deepEqual(Array.from(window.calls.find(c => c.object === 'qmodem.sms' && c.method === 'send').args), ['6_1','10010','来自新界面的回复']);
+        assert.equal(window.localStorage.getItem('modem.sms.sent'), null, 'Database sends must not duplicate browser sent history');
+        assert.equal(draft.value, '');
+        window.smsSendError = 'SMS transport failed';
+        draft.value = '发送失败后保留的草稿'; sendButton.click();
+        window.document.querySelector('#modal .cbi-button-apply').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal(draft.value, '发送失败后保留的草稿');
+        assert.equal(sendButton.disabled, false);
+        assert(window.notifications.some(args => args[1]?.textContent.includes('SMS transport failed')));
+        assert(!window.calls.some(c => c.method === 'action' && c.args[2] === 'send_sms'), 'A failed database send must not fall back and resend');
+
+        app.querySelector('.mt-sms-bubblewrap.out .mt-sms-delete').click();
+        window.document.querySelector('#modal .cbi-button-negative').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.deepEqual(Array.from(window.calls.find(c => c.object === 'qmodem.sms' && c.method === 'delete').args), ['6_1',72], 'Sent records must delete from the database using their id');
+        const refresh = [...app.querySelectorAll('.mt-sms-hero button')].find(b => b.textContent.trim() === '刷新');
+        refresh.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert(window.calls.some(c => c.object === 'qmodem.sms' && c.method === 'sync'));
+      }
+      if (viewName === 'sms' && scenario === 'sms_database_error') {
+        assert(text.includes('SMS database is unavailable'));
+        assert(text.includes('短信读取失败'));
+        assert(!text.includes('模组内短信：0'), 'Database errors must not be shown as an empty SIM inbox');
+      }
+      if (viewName === 'sms' && scenario === 'sms_legacy') {
+        assert(text.includes('模组内短信：1 条') && text.includes('SIM 保留短信'), 'Legacy nested sms.msg responses must remain supported');
+        app.querySelector('.mt-sms-delete').click();
+        window.document.querySelector('#modal .cbi-button-negative').click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const action = window.calls.find(c => c.method === 'action' && c.args[2] === 'delete_sms');
+        assert.equal(action.args[3].index, 0, 'SIM index zero must remain valid');
+        const settings = [...app.querySelectorAll('.mt-sms-hero button')].find(b => b.textContent.trim() === '设置');
+        settings.click();
+        assert(!window.calls.some(c => c.method === 'action' && c.args[3]?.params?.at === 'AT^IMSSWITCH?'), 'Fibocom settings must not issue TD-Tech private queries');
       }
       console.log('PASS ' + viewName + '/' + scenario + '/' + width + (dark ? '/dark' : '/light'));
       cases++;
