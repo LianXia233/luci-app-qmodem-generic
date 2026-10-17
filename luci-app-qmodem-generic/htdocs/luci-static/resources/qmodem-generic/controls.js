@@ -193,7 +193,7 @@ var callSupportPorts = rpc.declare({ object: 'qmodem_support', method: 'ports', 
 var callCustomList = rpc.declare({ object: 'qmodem_support', method: 'custom_list', expect: { }, nobatch: true });
 var callCustomSave = rpc.declare({ object: 'qmodem_support', method: 'custom_save',
 	params: ['model', 'bus', 'manufacturer', 'manufacturer_id', 'platform', 'modes', 'pdp_index',
-		'wcdma_band', 'lte_band', 'nsa_band', 'sa_band'], expect: { }, nobatch: true });
+		'wcdma_band', 'lte_band', 'nsa_band', 'sa_band', 'edit'], expect: { }, nobatch: true });
 var callCustomDelete = rpc.declare({ object: 'qmodem_support', method: 'custom_delete', params: ['model', 'bus'], expect: { }, nobatch: true });
 var callProbePort = rpc.declare({ object: 'qmodem_support', method: 'probe_port', params: ['port'], expect: { }, nobatch: true });
 
@@ -1228,7 +1228,7 @@ function getCustomModels() { return withTimeout(callCustomList(), DIRECT_RPC_TIM
 function saveCustomModel(data) {
 	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
 		data.platform, data.modes, data.pdp_index, data.wcdma_band, data.lte_band,
-		data.nsa_band, data.sa_band);
+		data.nsa_band, data.sa_band, data.edit || '0');
 }
 function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
 function probeSupportPort(port) { return callProbePort(port); }
