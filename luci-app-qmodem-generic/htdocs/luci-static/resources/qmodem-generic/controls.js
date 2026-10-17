@@ -945,6 +945,12 @@ function getLockBand(section) {
 function getNeighborCell(section) {
 	return cachedValue(section, 'network', 'neighborcell', {}, function() { return callGetNeighborcell(section); });
 }
+
+/* 用户主动扫描时绕过定时缓存，由任务队列取得实时邻区信息；未安装缓存层时兼容直连旧 QModem。 */
+function getNeighborCellFresh(section) {
+	return qmodemAction(section, 'get_neighborcell', {},
+		function() { return withTimeoutReject(callGetNeighborcell(section), DIRECT_RPC_TIMEOUT, _('扫描邻区超时')); }, 120000);
+}
 function getNetworkPrefer(section) {
 	return cachedValue(section, 'network', 'network_prefer', {}, function() { return callGetNetworkPrefer(section); });
 }
@@ -2027,6 +2033,7 @@ return baseclass.extend({
 	getMode: getMode,
 	getLockBand: getLockBand,
 	getNeighborCell: getNeighborCell,
+	getNeighborCellFresh: getNeighborCellFresh,
 	getNetworkPrefer: getNetworkPrefer,
 	getDns: getDns,
 	getSms: getSms,
