@@ -432,7 +432,7 @@ return view.extend({
 
 	usePortForCustom: function(port) {
 		var model = String(port.model || '').trim();
-		this.customDraft = Object.assign({}, this.customDraft || {}, {
+		this.customDraft = Object.assign(this.customDraft || {}, {
 			bus: port.bus,
 			manufacturer_id: port.bus === 'usb' ? String(port.id || '').split(':')[0] : '',
 			model: /^[a-z0-9-]+$/i.test(model) ? model.toLowerCase() : ''
