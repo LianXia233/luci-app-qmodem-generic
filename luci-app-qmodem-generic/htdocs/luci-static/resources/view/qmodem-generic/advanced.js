@@ -321,13 +321,13 @@ return view.extend({
 		return controls.sendAt(section, atPort, command).then(function(res) {
 			var text = atText(res);
 			if (/ERROR/i.test(text)) {
-				ui.addNotification(null, E('p', {}, _('模组拒绝了 AT 透传命令 %s：%s').format(command, text.trim())), 'warning');
+				controls.notify(null, E('p', {}, _('模组拒绝了 AT 透传命令 %s：%s').format(command, text.trim())), 'warning');
 				return Promise.reject(new Error(text.trim()));
 			}
-			ui.addNotification(null, E('p', {}, (okMessage || _('模组已接受该命令。')) + ' [' + command + ']'));
+			controls.notify(null, E('p', {}, (okMessage || _('模组已接受该命令。')) + ' [' + command + ']'));
 			return res;
 		}, function(err) {
-			ui.addNotification(null, E('p', {},
+			controls.notify(null, E('p', {},
 				_('本模组经 QModem 不支持 AT 透传命令 %s：%s').format(command, (err && err.message) || String(err))), 'warning');
 			return Promise.reject(err);
 		}).catch(function(err) { return Promise.reject(err); });
@@ -343,13 +343,13 @@ return view.extend({
 					var m = re ? text.match(re) : null;
 					if (m && m[1] != null) {
 						target.value = String(m[1]);
-						ui.addNotification(null, E('p', {}, _('已读取当前值：%s').format(m[1])));
+						controls.notify(null, E('p', {}, _('已读取当前值：%s').format(m[1])));
 					} else {
-						ui.addNotification(null, E('p', {},
+						controls.notify(null, E('p', {},
 							_('模组未返回可识别的当前值（%s）：%s').format(command, text.trim() || '--')), 'warning');
 					}
 				}).catch(function(err) {
-					ui.addNotification(null, E('p', {},
+					controls.notify(null, E('p', {},
 						_('读取失败（%s）：%s').format(command, (err && err.message) || String(err))), 'warning');
 				});
 			}
@@ -370,7 +370,7 @@ return view.extend({
 					'class': 'btn cbi-button-apply',
 					'click': function() {
 						if (!input.value)
-							return ui.addNotification(null, E('p', {}, _('请先选择一个值。')), 'warning');
+							return controls.notify(null, E('p', {}, _('请先选择一个值。')), 'warning');
 						var command = opts.command(input.value);
 						controls.confirmModal(opts.title,
 							_('经 QModem 向模组下发 AT 透传命令 %s？该能力没有通用的 QModem 方法，模组可能拒绝执行。').format(command),
@@ -457,30 +457,37 @@ return view.extend({
 					_('全部自定义定义已写入 QModem 支持库。')) : null,
 				E('div', { 'class': 'mt-control-actions' }, [
 					E('button', { 'type':'button', 'class':'btn cbi-button-apply',
-						'click': function() { self.supportSync(); } }, _('同步自定义库')),
-					E('button', { 'type':'button', 'class':'btn',
-						'click': function() { window.location.reload(); } }, _('刷新状态'))
+						'click': function(ev) { return self.supportSync(ev.currentTarget); } }, _('同步自定义库')),
+				E('button', { 'type':'button', 'class':'btn',
+						'click': function(ev) { return controls.refreshPage(this.section, this.DOMAINS, ev.currentTarget); }.bind(this) }, _('刷新状态'))
 				])
 			], true);
 	},
 
-	supportSync: function() {
+	supportSync: function(button) {
+		if (this.supportSyncBusy) return Promise.resolve();
+		this.supportSyncBusy = true;
+		if (button) { button.disabled = true; button.textContent = _('同步中…'); }
+		var self = this;
 		return controls.syncSupport().then(function(res) {
 			res = res || {};
 			var added = res.added || [];
 
 			if (added.length)
-				ui.addNotification(null, E('p', {},
+				controls.notify(null, E('p', {},
 					_('已写入支持库：%s。请重启 QModem 或重启设备生效。').format(added.join('、'))));
 			else if (res.error)
-				ui.addNotification(null, E('p', {}, _('同步未生效：%s').format(res.error)), 'warning');
+				controls.notify(null, E('p', {}, _('同步未生效：%s').format(res.error)), 'warning');
 			else
-				ui.addNotification(null, E('p', {}, _('支持库已是最新，本次未做修改。')));
+				controls.notify(null, E('p', {}, _('支持库已是最新，本次未做修改。')));
 
-			window.location.reload();
+			window.setTimeout(function() { window.location.reload(); }, 1100);
 		}).catch(function(err) {
-			ui.addNotification(null, E('p', {},
+			controls.notify(null, E('p', {},
 				_('同步支持库失败：%s').format((err && err.message) || String(err))), 'danger');
+		}).then(function() {
+			self.supportSyncBusy = false;
+			if (button) { button.disabled = false; button.textContent = _('同步自定义库'); }
 		});
 	},
 
@@ -493,7 +500,7 @@ return view.extend({
 			model: /^[a-z0-9-]+$/i.test(model) ? model.toLowerCase() : ''
 		});
 		if (typeof this.fillCustomForm === 'function') this.fillCustomForm(this.customDraft);
-		ui.addNotification(null, E('p', {}, _('已把设备信息填入自定义配置，请核对型号与拨号协议。')));
+		controls.notify(null, E('p', {}, _('已把设备信息填入自定义配置，请核对型号与拨号协议。')));
 	},
 
 	portCard: function(data) {
@@ -517,7 +524,7 @@ return view.extend({
 							title.textContent = port.model = result.model;
 							self.usePortForCustom(port);
 						}).catch(function(err) {
-							ui.addNotification(null, E('p', {}, _('读取型号失败：%s').format(err.message || String(err))), 'warning');
+							controls.notify(null, E('p', {}, _('读取型号失败：%s').format(err.message || String(err))), 'warning');
 						}).then(function() { button.disabled = false; });
 					} }, _('读取型号')) : null,
 					E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.usePortForCustom(port); } }, _('用于新配置'))
@@ -669,7 +676,7 @@ return view.extend({
 				sa_band: String(cfg.sa_band === undefined ? '0' : cfg.sa_band)
 			});
 			fillForm();
-			ui.addNotification(null, E('p', {}, _('已复制 %s 的厂商、协议和频段。请确认新模组型号后保存。').format(key)), 'info');
+			controls.notify(null, E('p', {}, _('已复制 %s 的厂商、协议和频段。请确认新模组型号后保存。').format(key)), 'info');
 		});
 		var entries = Array.isArray(data && data.entries) ? data.entries : [];
 		return controls.card(_('自定义模组配置'),
@@ -685,7 +692,7 @@ return view.extend({
 			E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function(ev) {
 				var button = ev.currentTarget;
 				if (!draft.modes) {
-					ui.addNotification(null, E('p', {}, _('请至少勾选一种与连接方式匹配的拨号协议。')), 'warning');
+					controls.notify(null, E('p', {}, _('请至少勾选一种与连接方式匹配的拨号协议。')), 'warning');
 					return;
 				}
 				button.disabled = true;
@@ -693,10 +700,10 @@ return view.extend({
 					if (!result || !result.success || !result.synced) throw new Error((result && result.error) || _('自定义 JSON 与 QModem 支持库未能同时保存'));
 					return result;
 				}).then(function(result) {
-					ui.addNotification(null, E('p', {}, _('配置已保存并同步。请重启 QModem 或设备后识别新型号。')));
-					window.location.reload();
+					controls.notify(null, E('p', {}, _('配置已保存并同步。请重启 QModem 或设备后识别新型号。')));
+					window.setTimeout(function() { window.location.reload(); }, 1100);
 				}).catch(function(err) {
-					ui.addNotification(null, E('p', {}, _('配置操作未完成：%s').format(err.message || String(err))), 'warning');
+					controls.notify(null, E('p', {}, _('配置操作未完成：%s').format(err.message || String(err))), 'warning');
 				}).then(function() { button.disabled = false; });
 			} }, _('保存并同步支持库')) ]),
 			E('div', { 'class': 'mt-control-note' }, _('官方 QModem 原生型号不可修改。自定义型号发生冲突时也不允许直接覆盖。')),
@@ -717,7 +724,7 @@ return view.extend({
 								self.fillCustomForm();
 								if (fields.model.scrollIntoView)
 									fields.model.scrollIntoView({ behavior:'smooth', block:'center' });
-								ui.addNotification(null, E('p', {}, _('已载入 %s，修改后保存即可同步两处 JSON。').format(entry.model)), 'info');
+								controls.notify(null, E('p', {}, _('已载入 %s，修改后保存即可同步两处 JSON。').format(entry.model)), 'info');
 							}
 						}, _('编辑')),
 						entry.source === 'user' ? E('button', {
@@ -729,7 +736,6 @@ return view.extend({
 										return controls.deleteCustomModel(entry.model, entry.bus).then(function(result) {
 											if (!result || !result.success)
 												throw new Error((result && result.error) || _('删除失败'));
-											window.location.reload();
 										});
 									}, false);
 							}
@@ -793,7 +799,7 @@ return view.extend({
 				}
 				paintWhenIdle();
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {},
+				controls.notify(null, E('p', {},
 					_('后台加载支持库失败：%s').format((err && err.message) || String(err))), 'warning');
 			});
 		}
@@ -1004,7 +1010,7 @@ return view.extend({
 					E('a', { 'class': 'btn cbi-button-action', 'href': L.url('admin/modem/qmodem-generic/terminal') }, _('AT 控制台')),
 					E('button', {
 						'type': 'button', 'class': 'btn',
-						'click': function() { window.location.reload(); }
+						'click': function(ev) { return controls.refreshPage(res.section, [ 'network', 'device', 'status', 'support' ], ev.currentTarget); }
 					}, _('刷新状态'))
 				])
 			]),

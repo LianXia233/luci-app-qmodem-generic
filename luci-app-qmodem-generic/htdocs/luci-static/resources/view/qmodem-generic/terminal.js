@@ -154,7 +154,7 @@ return view.extend({
 		if (this.sending) return this.request || Promise.resolve();
 
 		if (!cmd) {
-			ui.addNotification(null, E('p', {}, _('Command is empty.')), 'warning');
+			controls.notify(null, E('p', {}, _('Command is empty.')), 'warning');
 			return;
 		}
 
@@ -206,7 +206,7 @@ return view.extend({
 	saveCommand: function(input, container, output) {
 		var command = (input.value || '').trim(), self = this;
 		if (!command)
-			return ui.addNotification(null, E('p', {}, _('Command is empty.')), 'warning');
+			return controls.notify(null, E('p', {}, _('Command is empty.')), 'warning');
 		var label = window.prompt(_('Name this command'), command);
 		if (!label)
 			return;

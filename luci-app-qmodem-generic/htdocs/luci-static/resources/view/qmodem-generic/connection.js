@@ -394,17 +394,17 @@ return view.extend({
 		]);
 		return Promise.resolve().then(fn).then(function() {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {},
+			controls.notify(null, E('p', {},
 				_('%s命令已被 QModem 接受，实际连接状态将在刷新后更新。').format(label)), 'info');
 			/* 不直接把“命令成功”当作“网络已经连通”。 */
 			window.setTimeout(function() { window.location.reload(); }, 1300);
 		}, function(err) {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {}, _('%s失败：%s').format(label,
+			controls.notify(null, E('p', {}, _('%s失败：%s').format(label,
 				(err && err.message) || String(err))), 'danger');
 		}).then(function() { self.connectionBusy = false; }, function(err) {
 			self.connectionBusy = false;
-			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 		});
 	},
 
@@ -743,7 +743,7 @@ return view.extend({
 		var self = this;
 		if (this._apnSaving) return Promise.resolve();
 		if (!this._apnMap) {
-			ui.addNotification(null, E('p', {}, _('APN 配置表单尚未正常加载，无法保存。')), 'danger');
+			controls.notify(null, E('p', {}, _('APN 配置表单尚未正常加载，无法保存。')), 'danger');
 			return Promise.resolve();
 		}
 		this._apnSaving = true;
@@ -754,10 +754,11 @@ return view.extend({
 		}).then(function() {
 			return uci.commit('qmodem');
 		}).then(function() {
-			ui.addNotification(null, E('p', {},
+			controls.notify(null, E('p', {},
 				_('APN 配置已写入 /etc/config/qmodem。重新拨号后生效。')), 'info');
+			window.setTimeout(function() { window.location.reload(); }, 1100);
 		}).catch(function(err) {
-			ui.addNotification(null, E('p', {},
+			controls.notify(null, E('p', {},
 				_('APN 保存失败：%s').format((err && err.message) || String(err))), 'danger');
 		}).then(function() {
 			self._apnSaving = false;

@@ -50,13 +50,14 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
     at_port: '/dev/ttyUSB1', network: 'eth2', apn: '3gnet', modes: ['rndis'], pdp_type: 'IPV4V6', auth: 'none'
   };
   const list = scenario === 'absent' ? [] : [config];
+  window.qmConfig = config;
   if (multi) list.push({ ...config, '.name': '6_2', name: '6_2', model: 'RM520N-GL' });
   const uci = {
     load: () => Promise.resolve(),
     sections: (file, type, cb) => { if (cb) list.forEach(cb); return list; },
     get: (file, section, key) => (list.find(c => c['.name'] === section) || {})[key],
     set: (file, section, key, val) => { (list.find(c => c['.name'] === section) || {})[key] = val; },
-    unset: () => {}, save: () => Promise.resolve(), commit: () => Promise.resolve()
+    unset: () => {}, save: () => Promise.resolve(), commit: file => { window.uciCommits.push(file); return Promise.resolve(); }
   };
   const entry = (key, value, cls) => ({ key, value, class: cls || 'Modem' });
   const base = [entry('name', config.model), entry('manufacturer', 'Fibocom Wireless Inc.'),
@@ -122,7 +123,10 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
       {port:'/dev/ttyUSB2', bus:'usb', id:'2c7c:0801', location:'2-1', model:'RG502Q-EA', section:'6_1', confirmed:1},
       {port:'/dev/wwan0at0', bus:'pcie', id:'17cb:0308', location:'0000:01:00.0', model:'RG650E-EU', section:'', confirmed:0}
     ] });
-    if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve({ entries: [] });
+    if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve(scenario === 'custom_entries' ? {
+      entries: ['rg650v-eu','rg520n-cn','rg502q-ea'].map(model => ({ bus:'usb', model, source:'user', state:'synced', modes:'qmi,mbim', manufacturer:'quectel', platform:'qualcomm', manufacturer_id:'2c7c', pdp_index:'1' })),
+      presets: { usb:{}, pcie:{} }
+    } : { entries: [] });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy_missing')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy')
@@ -146,7 +150,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
       return Promise.resolve({ config_section: args[0], now: Date.now() / 1000, domains });
     }
     if (def.method === 'get_task') return Promise.resolve(tasks[args[0]] || { state: 'missing' });
-    if (['action', 'send_at', 'stats_reset'].includes(def.method)) {
+    if (['action', 'send_at', 'stats_reset', 'refresh'].includes(def.method)) {
       if (def.method === 'action' && args[1] === 'qmodem') {
         const payload = args[3];
         if (!payload || payload.config_section !== args[0]) return Promise.resolve({ error: 'explicit valid modem section required' });
@@ -162,18 +166,30 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   } };
   const ui = {
     showModal: (title, children) => { document.querySelector('#modal')?.remove(); const node = dom.create('div', { id: 'modal' }, children); document.body.append(node); return node; },
-    hideModal: () => document.querySelector('#modal')?.remove(), addNotification: (...args) => window.notifications.push(args),
+    hideModal: () => document.querySelector('#modal')?.remove(), addNotification: (...args) => {
+      window.notifications.push(args);
+      const node = dom.create('div', { class: 'alert-message fade-in' }, args[1]);
+      document.body.append(node);
+      return node;
+    },
     createHandlerFn: (ctx, fn) => function(...args) { return fn.apply(ctx, args); }
   };
+  window.uciCommits = [];
+  window.uciSaves = 0;
   const form = {};
   for (const type of ['NamedSection', 'Value', 'ListValue', 'DynamicList', 'Flag']) form[type] = function() {};
   form.Map = function() {
     const options = [];
+    const inputs = {};
     this.section = () => ({ option: (type, key, label) => {
       const opt = { type, key, label, choices: [], value: function(k, label) { this.choices.push([k, label]); }, depends: () => {} };
       options.push(opt); return opt;
     } });
-    this.save = () => Promise.resolve();
+    this.save = () => {
+      window.uciSaves++;
+      for (const opt of options) if (inputs[opt.key]) config[opt.key] = opt.type === form.Flag ? (inputs[opt.key].checked ? '1' : '0') : inputs[opt.key].value;
+      return Promise.resolve();
+    };
     this.render = async () => {
       const map = document.createElement('div'); map.className = 'cbi-map';
       for (const opt of options) {
@@ -187,7 +203,9 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
           for (const [val, label] of opt.choices) { const node = document.createElement('option'); node.value = val; node.textContent = label; input.append(node); }
         } else { input = document.createElement('input'); input.type = opt.type === form.Flag ? 'checkbox' : 'text'; }
         input.className = opt.type === form.ListValue ? 'cbi-input-select' : 'cbi-input-text';
-        input.value = config[opt.key] || opt.default || ''; field.append(input); row.append(label, field); map.append(row);
+        input.value = (opt.cfgvalue ? opt.cfgvalue(config['.name']) : config[opt.key]) || opt.default || '';
+        inputs[opt.key] = input;
+        field.append(input); row.append(label, field); map.append(row);
       }
       return map;
     };
@@ -213,6 +231,10 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   const res = await view.load();
   const node = await (view.paintContent ? view.paintContent(res) : view.render(res));
   document.querySelector('#app').replaceChildren(node);
+  if (viewName === 'advanced' && view.initialAuxPromise) {
+    const meta = await view.initialAuxPromise;
+    document.querySelector('#app').replaceChildren(await view.paintContent({ ...res, ...meta }));
+  }
   window.initialCalls = window.calls.slice();
   return true;
 }
@@ -225,7 +247,8 @@ async function run() {
   const errors = [];
   let passed = 0;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true,
+      ...(fs.existsSync(chromium.executablePath()) ? { executablePath: chromium.executablePath() } : {}) });
     for (const width of [1440, 768, 375]) for (const dark of [false, true]) for (const viewName of views) {
       const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' });
       page.on('pageerror', e => errors.push(viewName + ': ' + e.message));
@@ -310,7 +333,7 @@ async function runDom() {
         assert(!/^(null|undefined|nullnull)$/.test(node.textContent.trim()), `${viewName}/${scenario}: null node`);
       assert(!window.initialCalls.some(c =>
         ['qmodem', 'qos', 'luci-rpc'].includes(c.object) &&
-        !(viewName === 'sms' && ['sms_legacy', 'sms_legacy_missing'].includes(scenario) &&
+        !(viewName === 'sms' && !['sms_database', 'sms_database_error'].includes(scenario) &&
           c.object === 'qmodem' && c.method === 'get_sms')),
         `${viewName}/${scenario}: unexpected modem request`);
       assert.equal(window.document.body.getAttribute('data-qm-palette'), 'ocean', 'Default palette must be blue/green');
@@ -511,8 +534,12 @@ async function runDom() {
         assert(!text.includes('模组内短信：0'), 'Database errors must not be shown as an empty SIM inbox');
       }
       if (viewName === 'sms' && scenario === 'sms_legacy_missing') {
-        assert(text.includes('模组内短信：1 条') && text.includes('旧版直读短信'), 'Missing SMS cache must fall back to legacy qmodem.get_sms');
+        assert(text.includes('正在读取模组短信'), 'Missing SMS cache must not block the first paint');
         assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_sms').length, 1, 'Legacy SMS should not be read repeatedly during page load');
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const fresh = await window.currentView.collect({ section: '6_1' });
+        app.replaceChildren(window.currentView.paintContent(fresh));
+        assert(app.textContent.includes('旧版直读短信'), 'Background legacy SMS read must update the inbox');
       }
       if (viewName === 'sms' && scenario === 'sms_legacy') {
         assert(text.includes('模组内短信：1 条') && text.includes('SIM 保留短信'), 'Legacy nested sms.msg responses must remain supported');
@@ -522,7 +549,7 @@ async function runDom() {
         window.document.querySelector('#modal .cbi-button-negative').click();
         await new Promise(resolve => setTimeout(resolve, 0));
         const action = window.calls.find(c => c.method === 'action' && c.args[2] === 'delete_sms');
-        assert.equal(action.args[3].index, 0, 'SIM index zero must remain valid');
+        assert.equal(action.args[3].index, '0', 'SIM index zero must remain valid as a string');
         const settings = [...app.querySelectorAll('.mt-sms-hero button')].find(b => b.textContent.trim() === '设置');
         settings.click();
         assert(!window.calls.some(c => c.method === 'action' && c.args[3]?.params?.at === 'AT^IMSSWITCH?'), 'Fibocom settings must not issue TD-Tech private queries');
@@ -531,6 +558,77 @@ async function runDom() {
       cases++;
     } finally { await window.happyDOM.close(); }
   }
+  // Exercise actual page handlers with mock RPC/UCI, not just static rendering.
+  async function checkButtons(viewName, scenario, check) {
+    const window = new Window({ url: 'http://qmodem.test', width: 1440, height: 1000 });
+    try {
+      window.document.body.innerHTML = '<main id="app"></main>';
+      await window.eval('(' + mount.toString() + ')(' + JSON.stringify({ sources, translations, viewName, scenario, dark:false, multi:false }) + ')');
+      await check(window, window.document.querySelector('#app'));
+    } finally { await window.happyDOM.close(); }
+  }
+  const clickNamed = (app, name) => {
+    const button = [...app.querySelectorAll('button')].find(b => b.textContent.trim() === name);
+    assert(button, `Missing button: ${name}`);
+    button.click();
+    return button;
+  };
+  const settle = () => new Promise(resolve => setTimeout(resolve, 240));
+  for (const viewName of ['status', 'network', 'advanced']) {
+    await checkButtons(viewName, 'full', async (window, app) => {
+      clickNamed(app, viewName === 'status' ? '刷新' : '刷新状态');
+      await settle();
+      assert(window.calls.some(c => c.object === 'qmodem_cache' && c.method === 'refresh'), `${viewName}: Refresh must request new modem data`);
+      assert(window.calls.some(c => c.object === 'qmodem_cache' && c.method === 'get_task'), `${viewName}: Refresh must await the worker`);
+    });
+  }
+  await checkButtons('connection', 'full', async (window, app) => {
+    window.atTaskReply = { result: { status: '1' } };
+    for (const [name, method] of [['开始拨号','modem_dial'], ['挂断连接','modem_hang'], ['重新拨号','modem_redial']]) {
+      clickNamed(app, name);
+      if (name !== '开始拨号') window.document.querySelector('#modal .cbi-button-negative').click();
+      await settle();
+      assert(window.calls.some(c => c.method === 'action' && c.args[2] === method), `${name}: wrong QModem action`);
+    }
+    app.querySelector('.mtconn-config-card input').value = '3gnet-new';
+    clickNamed(app, '保存 APN 设置');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(window.uciSaves, 1);
+    assert.deepEqual(Array.from(window.uciCommits), ['qmodem']);
+    assert.equal(window.qmConfig.apn, '3gnet-new');
+  });
+  await checkButtons('settings', 'full', async (window, app) => {
+    const protocol = app.querySelector('.mt-diag-form-card select');
+    assert.equal(protocol.value, 'ipv4v6', 'Old uppercase PDP value must remain selectable');
+    protocol.value = 'ipv6';
+    clickNamed(app, '保存设备参数');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(window.uciSaves, 1);
+    assert.deepEqual(Array.from(window.uciCommits), ['qmodem']);
+    assert.equal(window.qmConfig.pdp_type, 'ipv6', 'Settings must save QModem lowercase PDP values');
+  });
+  await checkButtons('system', 'full', async (window, app) => {
+    clickNamed(app, '进入飞行模式');
+    window.document.querySelector('#modal .cbi-button-negative').click();
+    await settle();
+    assert(window.calls.some(c => c.method === 'action' && c.args[2] === 'send_at' && c.args[3]?.params?.at === 'AT+CFUN=0'));
+  });
+  await checkButtons('advanced', 'custom_entries', async (window, app) => {
+    const timers = [], original = window.setTimeout.bind(window);
+    window.setTimeout = function(fn, delay) {
+      if (delay >= 5000 && delay <= 10000) { timers.push({ fn, delay }); return timers.length; }
+      return original(fn, delay);
+    };
+    for (const button of app.querySelectorAll('.qm-custom-entry .cbi-button-action')) button.click();
+    assert.equal(window.document.querySelectorAll('.alert-message.fade-in').length, 3, 'Edit notices should be independent');
+    assert(timers.length >= 3 && timers.every(t => t.delay === 5000), 'Info notices must close after five seconds');
+    timers.forEach(t => t.fn());
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(window.document.querySelectorAll('.alert-message.fade-in').length, 0);
+    clickNamed(app, '同步自定义库');
+    await settle();
+    assert(window.calls.some(c => c.method === 'action' && c.args[1] === 'qmodem_support' && c.args[2] === 'sync'));
+  });
   console.log(`PASS: ${cases} DOM page cases. Browser layout and real hardware remain unverified.`);
 }
 

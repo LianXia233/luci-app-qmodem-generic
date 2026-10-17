@@ -167,7 +167,7 @@ return view.extend({
 				? _('模组将断电复位，移动连接和 USB / PCIe 链路会短暂中断。')
 				: _('将重启模组并短暂中断移动连接。'), function() {
 				return controls.doReboot(self.section, method).catch(function(err) {
-					ui.addNotification(null, E('p', {}, _('模组重启失败：%s').format((err && err.message) || String(err))), 'danger');
+					controls.notify(null, E('p', {}, _('模组重启失败：%s').format((err && err.message) || String(err))), 'danger');
 					throw err;
 				});
 			}, true);
@@ -178,13 +178,13 @@ return view.extend({
 		return controls.sendAt(this.section, this.atPort, command).then(function(res) {
 			var text = (res && (res.result || res.response || res.at_response)) || '';
 			if (/ERROR/i.test(String(text))) {
-				ui.addNotification(null, E('p', {}, _('模组拒绝了 AT 透传指令 %s：%s').format(command, String(text).trim())), 'warning');
+				controls.notify(null, E('p', {}, _('模组拒绝了 AT 透传指令 %s：%s').format(command, String(text).trim())), 'warning');
 				return Promise.reject(new Error(String(text).trim()));
 			}
-			ui.addNotification(null, E('p', {}, (okMessage || _('模组已接受该指令。')) + ' [' + command + ']'));
+			controls.notify(null, E('p', {}, (okMessage || _('模组已接受该指令。')) + ' [' + command + ']'));
 			return res;
 		}, function(err) {
-			ui.addNotification(null, E('p', {}, _('模组不支持通过 QModem 执行 AT 透传指令 %s：%s').format(command, (err && err.message) || String(err))), 'warning');
+			controls.notify(null, E('p', {}, _('模组不支持通过 QModem 执行 AT 透传指令 %s：%s').format(command, (err && err.message) || String(err))), 'warning');
 			return Promise.reject(err);
 		});
 	},
@@ -216,7 +216,7 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var firstValue = first.value.trim(), secondValue = second.value.trim();
 				if ((operation.value === 'unblock' ? !/^\d{8}$/.test(firstValue) : !/^\d{4,8}$/.test(firstValue)) || ((operation.value === 'change' || operation.value === 'unblock') && !/^\d{4,8}$/.test(secondValue)))
-					return ui.addNotification(null, E('p', {}, _('PIN 需为 4–8 位数字；PUK 必须恰好 8 位数字。')), 'warning');
+					return controls.notify(null, E('p', {}, _('PIN 需为 4–8 位数字；PUK 必须恰好 8 位数字。')), 'warning');
 				var command;
 				switch (operation.value) {
 				case 'change':  command = 'AT+CPWD="SC","' + firstValue + '","' + secondValue + '"'; break;
@@ -253,9 +253,9 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var next = inputs.map(function(input) { return String(input.value || ''); });
 				if (next.some(function(value) { return !/^\d+$/.test(value) || Number(value) > 150; }))
-					return ui.addNotification(null, E('p', {}, _('每个阈值必须是 0–150°C 之间的温度。')), 'warning');
+					return controls.notify(null, E('p', {}, _('每个阈值必须是 0–150°C 之间的温度。')), 'warning');
 				if (!(Number(next[1]) > Number(next[0]) && Number(next[3]) > Number(next[1]) && Number(next[5]) > Number(next[3]) && Number(next[7]) > Number(next[5]) && Number(next[2]) < Number(next[1]) && Number(next[4]) < Number(next[3]) && Number(next[6]) < Number(next[5]) && Number(next[8]) < Number(next[7])))
-					return ui.addNotification(null, E('p', {}, _('触发温度须逐级升高，且每个恢复温度必须低于对应触发值。')), 'warning');
+					return controls.notify(null, E('p', {}, _('触发温度须逐级升高，且每个恢复温度必须低于对应触发值。')), 'warning');
 				ui.hideModal();
 				self.atRun('AT^THERMLDAUTOPARA=' + next.join(','), _('热保护设置已保存。')).then(function() {
 					return self.atRun('AT^THERMLDLOGSW=' + serialLog.value + ',' + fileLog.value, _('温度日志设置已更新。'));
@@ -276,11 +276,11 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var value = input.value.trim();
 				if (!/^\d{15}$/.test(value) || value === currentImei)
-					return ui.addNotification(null, E('p', {}, _('请输入一个不同的 15 位 IMEI。')), 'warning');
+					return controls.notify(null, E('p', {}, _('请输入一个不同的 15 位 IMEI。')), 'warning');
 				ui.hideModal();
 				controls.confirmModal(_('写入设备标识'), _('该操作可能导致无法入网，仅在恢复模组标签所印标识时继续。'), function() {
 					return controls.setImei(self.section, value).catch(function(err) {
-						ui.addNotification(null, E('p', {}, _('IMEI 写入失败：%s').format((err && err.message) || String(err))), 'danger');
+						controls.notify(null, E('p', {}, _('IMEI 写入失败：%s').format((err && err.message) || String(err))), 'danger');
 						throw err;
 					});
 				}, true);
@@ -454,7 +454,7 @@ return view.extend({
 					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click': function() {
 						controls.confirmModal(_('变更射频功能'), _('飞行模式将立即断开移动数据与语音服务。'), function() {
 							return controls.sendAt(self.section, self.atPort, 'AT+CFUN=0').catch(function(err) {
-								ui.addNotification(null, E('p', {}, _('Airplane mode failed: %s').format((err && err.message) || String(err))), 'danger');
+								controls.notify(null, E('p', {}, _('Airplane mode failed: %s').format((err && err.message) || String(err))), 'danger');
 								throw err;
 							});
 						}, false);
@@ -467,7 +467,7 @@ return view.extend({
 							return controls.sendAt(self.section, self.atPort, 'AT+CFUN=1,1').catch(function() {
 								return controls.doReboot(self.section, 'soft');
 							}).catch(function(err) {
-								ui.addNotification(null, E('p', {}, _('恢复射频失败：%s').format((err && err.message) || String(err))), 'danger');
+								controls.notify(null, E('p', {}, _('恢复射频失败：%s').format((err && err.message) || String(err))), 'danger');
 								throw err;
 							});
 						}, true);
@@ -494,10 +494,10 @@ return view.extend({
 				controls.row(_('当前 SIM 卡槽'), simSlot),
 				controls.action(_('切换 SIM 卡槽'), function() {
 					if (!slotSupported)
-						return ui.addNotification(null, E('p', {}, _('QModem 未报告此模组支持 SIM 卡槽切换。')), 'warning');
+						return controls.notify(null, E('p', {}, _('QModem 未报告此模组支持 SIM 卡槽切换。')), 'warning');
 					controls.confirmModal(_('切换 SIM 卡槽'), _('切换物理 SIM 通路时模组将短暂脱离网络。'), function() {
 						return controls.setSimSlot(self.section, simSlot.value).catch(function(err) {
-							ui.addNotification(null, E('p', {}, _('SIM 卡槽切换失败：%s').format((err && err.message) || String(err))), 'danger');
+							controls.notify(null, E('p', {}, _('SIM 卡槽切换失败：%s').format((err && err.message) || String(err))), 'danger');
 							throw err;
 						});
 					}, true);

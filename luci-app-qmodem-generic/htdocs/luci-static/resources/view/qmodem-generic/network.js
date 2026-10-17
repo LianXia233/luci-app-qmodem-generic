@@ -552,7 +552,7 @@ return view.extend({
 					'click': function() {
 						var checked = keys.filter(function(k) { return boxes[k] && boxes[k].checked; });
 						if (!checked.length)
-							return ui.addNotification(null, E('p', {}, _('请至少选择一种网络制式。')), 'warning');
+							return controls.notify(null, E('p', {}, _('请至少选择一种网络制式。')), 'warning');
 						controls.confirmModal(_('修改网络优选'),
 							_('将允许驻网的制式设置为 %s？移动数据会短暂中断。').format(checked.join(' / ')),
 							function() { return controls.setNetworkPrefer(section, JSON.stringify(checked)); }, true);
@@ -804,9 +804,9 @@ return view.extend({
 					self.cellScanSnapshot = { section: section, raw: raw, expires: Date.now() + 45000 };
 					dom.content(host, self.neighborCards(raw, disabled));
 					if (self.cellStatusHost) dom.content(self.cellStatusHost, self.cellStatusContent(raw));
-					ui.addNotification(null, E('p', {}, _('邻区扫描完成，找到 %d 个小区。').format(neighborList(raw).length)), 'info');
+					controls.notify(null, E('p', {}, _('邻区扫描完成，找到 %d 个小区。').format(neighborList(raw).length)), 'info');
 				}).catch(function(err) {
-					ui.addNotification(null, E('p', {}, _('扫描失败：%s').format((err && err.message) || String(err))), 'danger');
+					controls.notify(null, E('p', {}, _('扫描失败：%s').format((err && err.message) || String(err))), 'danger');
 				}).then(function() {
 					self.cellScanBusy = false;
 					button.disabled = false;
@@ -846,7 +846,7 @@ return view.extend({
 			if (inputs.update) inputs.update();
 			if (inputs.root && inputs.root.scrollIntoView) inputs.root.scrollIntoView({ behavior: 'smooth', block: 'center' });
 		}
-		ui.addNotification(null, E('p', {}, _('已填入小区参数，请核对后点击“应用锁小区”。')), 'info');
+		controls.notify(null, E('p', {}, _('已填入小区参数，请核对后点击“应用锁小区”。')), 'info');
 	},
 
 	cellStatusContent: function(raw) {
@@ -935,11 +935,11 @@ return view.extend({
 				if (!/^[0-9]{1,7}$/.test(cfg.arfcn) || Number(cfg.arfcn) <= 0 ||
 					Number(cfg.arfcn) > 3279165 || !/^[0-9]{1,4}$/.test(cfg.pci) ||
 					Number(cfg.pci) > maxPci) {
-					ui.addNotification(null, E('p', {}, _('请输入有效的频点和 PCI（LTE: 0–503，NR: 0–1007）。')), 'warning');
+					controls.notify(null, E('p', {}, _('请输入有效的频点和 PCI（LTE: 0–503，NR: 0–1007）。')), 'warning');
 					return;
 				}
 				if (cfg.rat === '1' && !/^[nN]?[0-9]{1,5}$/.test(cfg.band)) {
-					ui.addNotification(null, E('p', {}, _('锁定 5G 小区需要填写有效频段，例如 N41。')), 'warning');
+					controls.notify(null, E('p', {}, _('锁定 5G 小区需要填写有效频段，例如 N41。')), 'warning');
 					return;
 				}
 			}
@@ -1201,7 +1201,7 @@ return view.extend({
 			E('div', { 'style': 'display:flex;gap:10px;margin:16px 0' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn cbi-button-action',
-					'click': function() { window.location.reload(); }
+					'click': function(ev) { return controls.refreshPage(section, [ 'network', 'signal', 'sim', 'device' ], ev.currentTarget); }
 				}, _('刷新状态'))
 			]),
 

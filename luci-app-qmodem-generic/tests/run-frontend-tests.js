@@ -171,10 +171,7 @@ function makeRuntime() {
 		if (method === 'status')
 			return buildSnapshot('modem1', [ 'support' ]).domains.support.data;
 
-		if (method === 'refresh' || method === 'refresh_all')
-			return { queued: (p && p.domains) || [], running: 0 };
-
-		if (method === 'action' || method === 'send_at') {
+		if (method === 'action' || method === 'send_at' || method === 'refresh' || method === 'refresh_all') {
 			if (method === 'action' && p.object === 'qmodem') {
 				if (!p.args || !p.args.config_section || p.args.config_section !== p.config_section)
 					return { error: 'explicit valid modem section required' };
@@ -185,7 +182,7 @@ function makeRuntime() {
 			tasks[id] = {
 				task_id: id,
 				config_section: (p && p.config_section) || 'modem1',
-				operation: (method === 'send_at') ? 'send_at' : ((p && p.method) || ''),
+				operation: (method === 'send_at' || method === 'refresh' || method === 'refresh_all') ? method : ((p && p.method) || ''),
 				payload: p,
 				state: 'running',
 				progress: 0,
@@ -718,7 +715,10 @@ async function testSmsSources() {
 		return { msg: [{ index:0, sender:'10010', content:'西瓜皮真实接口短信' }] };
 	});
 	var legacyReply = await cacheMissing.controls.getSmsInbox('8_1');
-	assertEq('缓存 missing 时旧版短信直接读取成功', legacyReply.msg[0].content, '西瓜皮真实接口短信');
+	assertEq('缓存 missing 时先显示正在读取', legacyReply._smsPending, true);
+	await new Promise(function(resolve) { setTimeout(resolve, 10); });
+	legacyReply = await cacheMissing.controls.getSmsInbox('8_1');
+	assertEq('后台读取后旧版短信正常显示', legacyReply.msg[0].content, '西瓜皮真实接口短信');
 	var legacyCall = cacheMissing.rt.calls.filter(function(c) { return c.object === 'qmodem' && c.method === 'get_sms'; });
 	assertEq('旧版读取携带动态模组配置节', legacyCall[0].params.config_section, '8_1');
 	await cacheMissing.controls.getSmsInbox('8_1');
@@ -726,6 +726,8 @@ async function testSmsSources() {
 	assertEq('旧版直读时不并行触发 worker 抢占 AT', cacheMissing.rt.countCalls('qmodem_cache','refresh'), 0);
 	var oldError = runtime();
 	oldError.rt.setModemSmsApi(function() { return {__rpcError:'old sms port failed'}; });
+	assertEq('旧版短信失败前页面先显示读取状态', (await oldError.controls.getSmsInbox('8_1'))._smsPending, true);
+	await new Promise(function(resolve) { setTimeout(resolve, 10); });
 	await rejects('旧版接口读取失败会正确显示错误', oldError.controls.getSmsInbox('8_1'), /old sms port failed/);
 
 	/* 有缓存也要后台读一次：先秒开旧短信，再在轮询中显示最新消息。 */
@@ -880,7 +882,12 @@ function testViews(rt) {
 			return Promise.resolve(mod.load.call(mod)).then(function(res) {
 				var elapsed = Date.now() - t0;
 				assertLt(name + '.load() 首屏耗时', elapsed, 1500);
-				assertEq(name + '.load() 未调用 qmodem 对象', rt.countCalls('qmodem'), 0);
+				if (name === 'sms')
+					ok('sms.load() 最多后台请求一次旧版短信', rt.calls.filter(function(c) {
+						return c.object === 'qmodem';
+					}).every(function(c) { return c.method === 'get_sms'; }) && rt.countCalls('qmodem') <= 1);
+				else
+					assertEq(name + '.load() 未调用 qmodem 对象', rt.countCalls('qmodem'), 0);
 				assertEq(name + '.load() 未调用 qos 对象', rt.countCalls('qos'), 0);
 				assertEq(name + '.load() 未调用 luci-rpc', rt.countCalls('luci-rpc'), 0);
 				ok(name + '.load() 解析出 section', !!res && res.section === 'modem1',

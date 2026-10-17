@@ -194,20 +194,33 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
-		o.value('IPV4V6', 'IPv4 / IPv6');
-		o.value('IPV4', 'IPv4');
-		o.value('IPV6', 'IPv6');
-		o.default = 'IPV4V6';
+		o.value('ipv4v6', 'IPv4 / IPv6');
+		o.value('ip', 'IPv4');
+		o.value('ipv6', 'IPv6');
+		o.value('ethernet', 'Ethernet');
+		o.default = 'ipv4v6';
 		o.rmempty = false;
+		o.cfgvalue = function(sectionId) {
+			var raw = String(uci.get('qmodem', sectionId, 'pdp_type') || 'ipv4v6');
+			return { IPV4: 'ip', IPV6: 'ipv6', IPV4V6: 'ipv4v6' }[raw.toUpperCase()] || raw.toLowerCase();
+		};
 
-		var saveConfig = function() {
-			return m.save(null, true).then(function() {
+		var saving = false;
+		var saveConfig = function(button) {
+			if (saving) return Promise.resolve();
+			saving = true;
+			button.disabled = true;
+			return Promise.resolve().then(function() { return m.save(null, true); }).then(function() {
 				return uci.commit('qmodem');
 			}).then(function() {
-				ui.addNotification(null, E('p', {},
+				controls.notify(null, E('p', {},
 					_('设备参数已保存到 QModem 配置（/etc/config/qmodem），请重拨或重启模组使其生效。')));
+				window.setTimeout(function() { window.location.reload(); }, 1100);
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+				controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			}).then(function() {
+				saving = false;
+				button.disabled = false;
 			});
 		};
 
@@ -258,7 +271,7 @@ return view.extend({
 					E('div', { 'class': 'mt-diag-footer' }, E('button', {
 						'type': 'button',
 						'class': 'mt-diag-save-btn',
-						'click': ui.createHandlerFn(self, saveConfig)
+						'click': function(ev) { return saveConfig(ev.currentTarget); }
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'),
 						_('保存设备参数')

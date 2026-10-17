@@ -1070,7 +1070,9 @@ return view.extend({
 						E('span', { 'class': 'qm-pulse-circle' }),
 						connected ? _('已连接') : reachable ? _('在线') : _('不可用')
 					]),
-					E('button', { 'class': 'qm-refresh-btn', 'click': function() { window.location.reload(); } }, _('刷新'))
+				E('button', { 'type': 'button', 'class': 'qm-refresh-btn',
+					'click': function(ev) { return controls.refreshPage(res.section, [ 'status', 'signal', 'sim', 'stats', 'qos', 'radio' ], ev.currentTarget); }
+				}, _('刷新'))
 				])
 			]),
 

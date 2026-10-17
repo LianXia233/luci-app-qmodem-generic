@@ -420,6 +420,36 @@ function requestRefresh(section, domains, force) {
 		TASK_RPC_TIMEOUT, null);
 }
 
+/* 显式“刷新”必须等待后台采集结束；直接重载页面只会再次显示旧快照。 */
+function refreshPage(section, domains, button) {
+	if (button && button.disabled) return Promise.resolve(null);
+	if (!section) { window.location.reload(); return Promise.resolve(null); }
+	var label = button && button.textContent;
+	if (button) {
+		button.disabled = true;
+		button.textContent = _('正在刷新…');
+		button.setAttribute('aria-busy', 'true');
+	}
+	var refresh = cacheLayerUsable()
+		? runTask(function() { return callTaskRefresh(section, domains || null); }, 120000)
+		: Promise.resolve(null);
+	return refresh.then(function(result) {
+		touch(section);
+		window.location.reload();
+		return result;
+	}, function(err) {
+		notify(null, E('p', {}, _('刷新失败：%s').format((err && err.message) || String(err))), 'danger');
+		return null;
+	}).then(function(result) {
+		if (button) {
+			button.disabled = false;
+			button.textContent = label;
+			button.removeAttribute('aria-busy');
+		}
+		return result;
+	});
+}
+
 /*
  * 统一的「缓存优先」读取。
  *   命中缓存      → 直接返回（不产生任何 modem 访问）
@@ -506,6 +536,22 @@ function qmodemAction(section, method, args, directFn, timeoutMs) {
 		return callTaskAction(section, 'qmodem', method, payload);
 	}, timeoutMs || 150000).then(function(result) {
 		touch(section);
+		/* 命令执行完后让 worker 更新受影响的域，页面轮询才会看到新状态。 */
+		var domains = {
+			set_mode: [ 'network', 'status' ],
+			set_lockband: [ 'network', 'signal' ],
+			set_network_prefer: [ 'network', 'signal' ],
+			set_neighborcell: [ 'network', 'signal' ],
+			set_sim_slot: [ 'sim', 'status' ],
+			set_imei: [ 'sim' ],
+			set_traffic_reset_schedule: [ 'stats' ],
+			clear_stats: [ 'stats' ],
+			clear_dial_log: [ 'status' ],
+			modem_dial: [ 'status', 'network' ],
+			modem_hang: [ 'status', 'network' ],
+			modem_redial: [ 'status', 'network' ]
+		}[method];
+		if (domains) requestRefresh(section, domains, true).catch(function() {});
 		return result;
 	}, function(err) {
 		touch(section);
@@ -970,6 +1016,7 @@ var LEGACY_SMS_TIMEOUT = 18000;
 var legacySmsStore = {};
 var legacySmsInFlight = {};
 var legacySmsLastAttempt = {};  /* 后台读取失败时也限流，防止每次轮询重试 */
+var legacySmsError = {};
 
 function readLegacySms(section) {
 	var saved = legacySmsStore[section];
@@ -991,6 +1038,7 @@ function readLegacySms(section) {
 			result.error || result.status === 'error')
 			throw new Error((result && result.error) || _('旧版 QModem 未返回有效短信数据。'));
 		legacySmsStore[section] = { ts: Date.now(), value: result };
+		delete legacySmsError[section];
 		return result;
 	});
 	legacySmsInFlight[section] = task.then(function(result) {
@@ -998,6 +1046,7 @@ function readLegacySms(section) {
 		return result;
 	}, function(err) {
 		delete legacySmsInFlight[section];
+		legacySmsError[section] = (err && err.message) || String(err);
 		throw err;
 	});
 	return legacySmsInFlight[section];
@@ -1019,8 +1068,11 @@ function getSms(section, legacyMode) {
 				var cacheTime = Number(env.updated) * 1000 || 0;
 				return fresh && fresh.ts >= cacheTime ? fresh.value : cached;
 			}
-			/* 缓存不存在时保留 r10 的同步兜底与可见错误。 */
-			return readLegacySms(section);
+			/* 缓存缺失时也不能把旧版 QModem 的 AT 读取放到首屏 await。 */
+			readLegacySms(section).catch(function() {});
+			var latest = legacySmsStore[section];
+			return latest ? latest.value : legacySmsError[section]
+				? { error: legacySmsError[section] } : { _smsPending: true };
 		}
 
 		/* 新版 qmodem.sms/direct 维持原来的缓存优先逻辑。 */
@@ -1114,7 +1166,15 @@ function getSmsInbox(section) {
 }
 
 function refreshSmsInbox(section, source) {
-	if (source !== 'database') return requestRefresh(section, ['sms'], true);
+	if (source !== 'database') return getSmsServiceConfig(section).then(function(config) {
+		if (!config) {
+			delete legacySmsStore[section];
+			delete legacySmsLastAttempt[section];
+			return readLegacySms(section);
+		}
+		return runTask(function() { return callTaskRefresh(section, [ 'sms' ]); }, 90000)
+			.then(function(result) { touch(section); return result; });
+	});
 	return withTimeoutReject(callSmsSync(section), 45000, _('短信同步超时')).then(smsServiceAction);
 }
 
@@ -1881,6 +1941,27 @@ function renderInfoGrouped(entries) {
 /* UI 辅助（保留原 styles/排版/中文文案）                              */
 /* ------------------------------------------------------------------ */
 
+/* LuCI 的 addNotification 默认一直保留。只清理由本插件创建的提示，
+ * 不影响其它插件或 LuCI 自己的通知。 */
+function notify(title, children) {
+	var classes = Array.prototype.slice.call(arguments, 2);
+	var node = ui.addNotification.apply(ui, [ title, children ].concat(classes));
+	if (node && node.parentNode) {
+		var delay = classes.indexOf('danger') !== -1 ? 10000 :
+			classes.indexOf('warning') !== -1 ? 8000 : 5000;
+		window.setTimeout(function() {
+			if (!node.parentNode) return;
+			node.classList.add('fade-out');
+			node.classList.remove('fade-in');
+			/* 兼容没有过渡动画的主题与旧版 LuCI。 */
+			window.setTimeout(function() {
+				if (node.parentNode) node.parentNode.removeChild(node);
+			}, 350);
+		}, delay);
+	}
+	return node;
+}
+
 function formatBytes(value) {
 	var units = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ], index = 0;
 	value = Math.max(0, Number(value) || 0);
@@ -1975,11 +2056,11 @@ function confirmModal(title, message, onConfirm, restartRequired) {
 				'class': 'btn cbi-button-negative',
 				'click': function() {
 					ui.hideModal();
-					Promise.resolve(onConfirm()).then(function() {
-						ui.addNotification(null, E('p', {}, _('Settings applied.')));
+					Promise.resolve().then(onConfirm).then(function() {
+						notify(null, E('p', {}, _('Settings applied.')));
 						window.setTimeout(function() { window.location.reload(); }, 900);
 					}, function(err) {
-						ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+						notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 					});
 				}
 			}, _('Apply'))
@@ -2076,6 +2157,8 @@ return baseclass.extend({
 	domainData: domainData,
 	domainMeta: domainMeta,
 	requestRefresh: requestRefresh,
+	refreshPage: refreshPage,
+	notify: notify,
 	touch: touch,
 	cacheLayerUsable: cacheLayerUsable,
 	runTask: runTask,
