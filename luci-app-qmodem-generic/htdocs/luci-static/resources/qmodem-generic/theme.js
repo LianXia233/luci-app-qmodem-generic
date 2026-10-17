@@ -312,7 +312,7 @@ var CARD_CLASSES = [
 	'mt-system-temp-box', 'mt-terminal-card', 'mt-ui-card', 'mtconn-card', 'mtconn-config-card',
 	'mtconn-fact-card', 'mtconn-topo-card', 'qm-glass-card', 'qm-stat-card', 'qm-cc-card',
 	'qm-address-card', 'qm-ip-box', 'qm-carrier-topo-box', 'qm-signal-dial-box', 'qm-traffic-chart-box',
-	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option', 'mt-diag-card-head'
+	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option'
 ];
 /* Hero 容器类（带背景渐变的整块区域）与其内部元素类分开：
  * 背景/圆角只给容器，文字反色给容器的后代。 */
