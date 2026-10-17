@@ -434,6 +434,7 @@ return view.extend({
 		var self = this;
 		support = support || {};
 		var entries = Array.isArray(custom && custom.entries) ? custom.entries : [];
+		var loading = !!(custom && custom.loading);
 		var saved = entries.filter(function(x) { return x.state === 'synced'; });
 		var missing = entries.filter(function(x) { return x.state === 'missing'; });
 		var conflicts = entries.filter(function(x) { return x.state === 'conflict'; });
@@ -446,13 +447,13 @@ return view.extend({
 			_('插件内置预设 JSON + 用户持久化 JSON；修改自定义型号时自动备份，并同步更新 QModem 支持库。'), [
 				controls.state(_('内置预设路径'), '/usr/share/qmodem-generic/extra_modem_support.json'),
 				controls.state(_('用户配置路径'), '/etc/qmodem-generic/modems/{usb,pcie}/*.json'),
-				controls.state(_('自定义库型号'), names(entries)),
-				controls.state(_('已同步的自定义型号'), names(saved)),
+				controls.state(_('自定义库型号'), loading ? _('正在后台读取…') : names(entries)),
+				controls.state(_('已同步的自定义型号'), loading ? _('正在后台读取…') : names(saved)),
 				missing.length ? E('div', { 'class': 'mt-control-note' },
 					_('未同步：%s。点击同步可以补录到 QModem。').format(names(missing))) : null,
 				conflicts.length ? E('div', { 'class': 'mt-control-note' },
 					_('冲突（不允许覆盖）：%s。QModem 已有同名但定义不同的型号。').format(names(conflicts))) : null,
-				!missing.length && !conflicts.length ? E('div', { 'class': 'mt-control-note' },
+				!loading && !missing.length && !conflicts.length ? E('div', { 'class': 'mt-control-note' },
 					_('全部自定义定义已写入 QModem 支持库。')) : null,
 				E('div', { 'class': 'mt-control-actions' }, [
 					E('button', { 'type':'button', 'class':'btn cbi-button-apply',
@@ -772,11 +773,25 @@ return view.extend({
 		if (this.initialAuxPromise) {
 			this.initialAuxPromise.then(function(meta) {
 				if (self.auxHolder !== holder) return;
-				var active = document.activeElement;
-				if (active && holder.contains && holder.contains(active) &&
-					/^(input|textarea|select)$/i.test(active.tagName || ''))
-					return;
-				dom.content(holder, self.paintContent(Object.assign({}, res, meta)));
+				function paintWhenIdle() {
+					if (self.auxHolder !== holder) return;
+					var active = document.activeElement;
+					if (active && holder.contains && holder.contains(active) &&
+						/^(input|textarea|select)$/i.test(active.tagName || '')) {
+						/* 正在输入时不打断，离开输入框后补上刚获取的支持库数据。 */
+						if (!self.auxFocusWait) {
+							self.auxFocusWait = holder;
+							holder.addEventListener('focusout', function() {
+								if (self.auxFocusWait === holder) self.auxFocusWait = null;
+								Promise.resolve().then(paintWhenIdle);
+							}, { once: true });
+						}
+						return;
+					}
+					self.auxFocusWait = null;
+					dom.content(holder, self.paintContent(Object.assign({}, res, meta)));
+				}
+				paintWhenIdle();
 			}).catch(function(err) {
 				ui.addNotification(null, E('p', {},
 					_('后台加载支持库失败：%s').format((err && err.message) || String(err))), 'warning');
@@ -880,7 +895,7 @@ return view.extend({
 			E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模组支持库')),
-					E('p', {}, _('QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。'))
+					E('p', {}, _('QModem 官方型号只读查看；插件自定义型号可以新增、编辑及同步。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
 					this.supportCard(res.support, res.custom),
