@@ -429,6 +429,12 @@ function makeRuntime() {
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
+		setSmsCache: function(data) {
+			cacheDomains.sms = {
+				status:'ready', updated:NOW - 120, stale:false, ttl:600,
+				error:'', data:{ get_sms:data }
+			};
+		},
 		setSnapshot: function(s) { snapshot = s; },
 		setSnapshotEmpty: function() { cacheEmpty = true; },
 		setSnapshotFull: function() { cacheEmpty = false; },
@@ -645,6 +651,37 @@ async function testSmsSources() {
 	var oldError = runtime();
 	oldError.rt.setModemSmsApi(function() { return {__rpcError:'old sms port failed'}; });
 	await rejects('旧版接口读取失败会正确显示错误', oldError.controls.getSmsInbox('8_1'), /old sms port failed/);
+
+	/* 有缓存也要后台读一次：先秒开旧短信，再在轮询中显示最新消息。 */
+	var cachedSms = runtime();
+	cachedSms.rt.setSmsCache({ sms:{ msg:[{ index:0, sender:'10010', content:'缓存旧短信' }] } });
+	cachedSms.rt.setModemSmsApi(function() {
+		return { sms:{ msg:[{ index:0, sender:'10010', content:'AT 最新短信' },
+			{ index:1, sender:'10086', content:'新到短信' }] } };
+	});
+	cachedSms.rt.setUbusDelay(120);
+	var cacheStarted = Date.now();
+	var initialSms = await cachedSms.controls.getSmsInbox('8_1');
+	assertEq('命中短信缓存时先显示旧数据', initialSms.sms.msg[0].content, '缓存旧短信');
+	assertLt('缓存首屏不等待实时 AT 请求', Date.now() - cacheStarted, 110);
+	assertEq('读取缓存后后台请求一次旧版 get_sms', cachedSms.rt.countCalls('qmodem','get_sms'), 1);
+	await new Promise(function(resolve) { setTimeout(resolve, 160); });
+	var updatedSms = await cachedSms.controls.getSmsInbox('8_1');
+	assertEq('后台请求完成后显示最新短信', updatedSms.sms.msg.length, 2);
+	assertEq('后续轮询不会被旧缓存覆盖', updatedSms.sms.msg[1].content, '新到短信');
+	await cachedSms.controls.getSmsInbox('8_1');
+	assertEq('30 秒内多轮轮询仅一次真实 AT 请求', cachedSms.rt.countCalls('qmodem','get_sms'), 1);
+	assertEq('使用直读后不重复派发 worker 短信任务', cachedSms.rt.countCalls('qmodem_cache','refresh'), 0);
+
+	var staleFail = runtime();
+	staleFail.rt.setSmsCache({sms:{msg:[{index:0,sender:'10010',content:'原缓存保留'}]}});
+	staleFail.rt.setModemSmsApi(function() { return {__rpcError:'AT busy'}; });
+	assertEq('后台请求失败时继续显示缓存',
+		(await staleFail.controls.getSmsInbox('8_1')).sms.msg[0].content, '原缓存保留');
+	await new Promise(function(resolve) { setTimeout(resolve, 10); });
+	assertEq('后台失败后仍可读取缓存',
+		(await staleFail.controls.getSmsInbox('8_1')).sms.msg[0].content, '原缓存保留');
+	assertEq('后台失败不每轮重试串口', staleFail.rt.countCalls('qmodem','get_sms'), 1);
 
 	var direct = runtime(function() { return {mode:'direct'}; });
 	direct.rt.setUbusDelay(8000);

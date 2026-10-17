@@ -125,6 +125,8 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
     if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve({ entries: [] });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy_missing')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
+    if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy')
+      return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '实时收到短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
         return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'));
@@ -306,7 +308,11 @@ async function runDom() {
       let node;
       while ((node = walker.nextNode())) if (!['STYLE', 'SCRIPT', 'PRE'].includes(node.parentElement.tagName))
         assert(!/^(null|undefined|nullnull)$/.test(node.textContent.trim()), `${viewName}/${scenario}: null node`);
-      assert(!window.initialCalls.some(c => ['qmodem', 'qos', 'luci-rpc'].includes(c.object)), `${viewName}/${scenario}: read touched modem`);
+      assert(!window.initialCalls.some(c =>
+        ['qmodem', 'qos', 'luci-rpc'].includes(c.object) &&
+        !(viewName === 'sms' && ['sms_legacy', 'sms_legacy_missing'].includes(scenario) &&
+          c.object === 'qmodem' && c.method === 'get_sms')),
+        `${viewName}/${scenario}: unexpected modem request`);
       assert.equal(window.document.body.getAttribute('data-qm-palette'), 'ocean', 'Default palette must be blue/green');
       let fired = false;
       const button = window.controls.element('button', { click: () => { fired = true; } }, 'check');
@@ -510,6 +516,8 @@ async function runDom() {
       }
       if (viewName === 'sms' && scenario === 'sms_legacy') {
         assert(text.includes('模组内短信：1 条') && text.includes('SIM 保留短信'), 'Legacy nested sms.msg responses must remain supported');
+        assert(window.initialCalls.some(c => c.object === 'qmodem' && c.method === 'get_sms'),
+          'Legacy cached SMS should kick off one background get_sms');
         app.querySelector('.mt-sms-delete').click();
         window.document.querySelector('#modal .cbi-button-negative').click();
         await new Promise(resolve => setTimeout(resolve, 0));

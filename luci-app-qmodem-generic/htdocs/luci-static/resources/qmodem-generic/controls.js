@@ -962,13 +962,20 @@ var LEGACY_SMS_TTL = 30000;
 var LEGACY_SMS_TIMEOUT = 18000;
 var legacySmsStore = {};
 var legacySmsInFlight = {};
+var legacySmsLastAttempt = {};  /* 后台读取失败时也限流，防止每次轮询重试 */
 
 function readLegacySms(section) {
 	var saved = legacySmsStore[section];
-	if (saved && Date.now() - saved.ts < LEGACY_SMS_TTL)
-		return Promise.resolve(saved.value);
 	if (legacySmsInFlight[section])
 		return legacySmsInFlight[section];
+	if (saved && Date.now() - saved.ts < LEGACY_SMS_TTL)
+		return Promise.resolve(saved.value);
+	/* 缓存存在时的后台读取若失败，30 秒内不再占用 AT 端口重试。
+	 * 缓存缺失的首次读取仍然给出实际错误，防止静默显示 0 条短信。 */
+	if (legacySmsLastAttempt[section] && Date.now() - legacySmsLastAttempt[section] < LEGACY_SMS_TTL)
+		return saved ? Promise.resolve(saved.value) :
+			Promise.reject(new Error(_('旧版短信读取失败，稍后自动重试。')));
+	legacySmsLastAttempt[section] = Date.now();
 
 	var task = withTimeoutReject(callGetSms(section), LEGACY_SMS_TIMEOUT,
 		_('读取旧版 QModem 短信超时，请检查模组 AT 端口。')).then(function(result) {
@@ -993,14 +1000,27 @@ function getSms(section, legacyMode) {
 	return fetchSnapshot(section, ['sms']).then(function(snap) {
 		var env = envelopeOf(snap, 'sms');
 		var cached = env && env.data && env.data.get_sms;
-		if (cached && typeof cached === 'object' && Object.keys(cached).length) {
+		var hasCache = cached && typeof cached === 'object' && Object.keys(cached).length;
+
+		if (legacyMode) {
+			if (hasCache) {
+				/* stale-while-revalidate：缓存先返回，后台再向旧版 QModem 只读请求。
+				 * 请求完成后短存于内存，下轮 4 秒轮询显示新短信，不阻塞首屏。
+				 * 不通过 worker 同时采集，避免并发争抢模组 AT 端口。 */
+				readLegacySms(section).catch(function() { /* 后台失败时保留旧缓存 */ });
+				var fresh = legacySmsStore[section];
+				var cacheTime = Number(env.updated) * 1000 || 0;
+				return fresh && fresh.ts >= cacheTime ? fresh.value : cached;
+			}
+			/* 缓存不存在时保留 r10 的同步兜底与可见错误。 */
+			return readLegacySms(section);
+		}
+
+		/* 新版 qmodem.sms/direct 维持原来的缓存优先逻辑。 */
+		if (hasCache) {
 			if (env.stale || env.status === 'missing') requestRefresh(section, ['sms']);
 			return cached;
 		}
-
-		/* 已确认旧版短信服务：缓存缺失时从官方旧接口直接读取。 */
-		if (legacyMode)
-			return readLegacySms(section);
 
 		if (!snap)
 			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
