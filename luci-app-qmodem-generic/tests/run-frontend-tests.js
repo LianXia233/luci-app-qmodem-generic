@@ -582,6 +582,24 @@ function testActionPayloads() {
 			assertEq('AT 任务失败保留原错误', err.message, 'AT port busy');
 			assertEq('已进入队列的失败命令不重复直发', rt.countCalls('qmodem', 'send_at'), 0);
 		});
+	}).then(function() {
+		/* 自定义模组的四组频段必须沿 LuCI RPC 完整传递，不能被退回固定 0。 */
+		rt.resetCalls();
+		var cfg = {
+			bus:'usb', model:'test-modem', manufacturer:'quectel', manufacturer_id:'2c7c',
+			platform:'qualcomm', modes:'qmi,mbim,ecm', pdp_index:'1',
+			wcdma_band:'1/5/8', lte_band:'1/3/5/8/41', nsa_band:'41/78', sa_band:'41/78/79'
+		};
+		return controls.saveCustomModel(cfg).then(function() {
+			var call = rt.calls.filter(function(x) {
+				return x.object === 'qmodem_support' && x.method === 'custom_save';
+			})[0];
+			ok('自定义模组调用官方支持库保存 RPC', !!call);
+			if (!call) return;
+			[ 'modes', 'wcdma_band', 'lte_band', 'nsa_band', 'sa_band' ].forEach(function(key) {
+				assertEq('自定义模组 RPC 保留 ' + key, call.params[key], cfg[key]);
+			});
+		});
 	});
 }
 
