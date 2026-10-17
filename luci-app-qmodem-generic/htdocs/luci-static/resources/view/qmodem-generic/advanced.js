@@ -357,7 +357,48 @@ return view.extend({
 		], opts.wide);
 	},
 
-	supportCard: function(support) {
+	supportCard: function(support, custom) {
+		/* 官方 QModem 当前支持库：只读查询 */
+		support = support || {};
+		var raw = (custom || {}).presets || {}, lib = raw.modem_support || raw, entries = [];
+		[ 'usb', 'pcie' ].forEach(function(bus) {
+			Object.keys(lib[bus] || {}).sort().forEach(function(model) {
+				entries.push({ bus: bus, model: model, data: lib[bus][model] });
+			});
+		});
+		var selector = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%;margin-top:8px' }, [
+			E('option', { 'value': '' }, entries.length ? _('选择型号查看配置（只读）') : _('未获取到 QModem 支持库内容'))
+		].concat(entries.map(function(item, i) {
+			return E('option', { 'value': String(i) },
+				(item.bus === 'pcie' ? 'PCIe · ' : 'USB · ') + item.model.toUpperCase());
+		})));
+		selector.disabled = !entries.length;
+		var details = E('div', { 'class': 'mt-control-note', 'style': 'margin-top:10px' },
+			_('此处只能查看，不能修改 QModem 原生型号。'));
+		selector.addEventListener('change', function() {
+			var index = parseInt(selector.value, 10), item = entries[index];
+			if (!item) { dom.content(details, _('选择型号查看 QModem 当前配置。')); return; }
+			var d = item.data || {};
+			dom.content(details, [
+				controls.state(_('厂商'), d.manufacturer || '--'),
+				controls.state(_('芯片平台'), d.platform || '--'),
+				controls.state(_('拨号协议'), Array.isArray(d.modes) ? d.modes.join(', ') : '--'),
+				controls.state(_('PDP 序号'), d.pdp_index || '--'),
+				controls.state(_('3G WCDMA 频段'), d.wcdma_band || '--'),
+				controls.state(_('4G LTE 频段'), d.lte_band || '--'),
+				controls.state(_('5G NSA 频段'), d.nsa_band || '--'),
+				controls.state(_('5G SA 频段'), d.sa_band || '--')
+			]);
+		});
+		return controls.card(_('QModem 官方支持库（只读）'),
+			_('查看当前 QModem 支持库的 USB / PCIe 型号；已同步的自定义型号也会显示在此，不能直接改动官方原生条目。'), [
+				controls.state(_('支持库路径'), support.path || '/usr/share/qmodem/modem_support.json'),
+				controls.state(_('收录型号数量'), String(entries.length)),
+				selector, details
+			], true);
+	},
+
+	customLibraryCard: function(support, custom) {
 		var self = this;
 		support = support || {};
 
@@ -383,13 +424,13 @@ return view.extend({
 				_('读取支持库失败：%s').format(support.error)));
 		} else {
 			body.push(controls.state(_('支持库路径'), path));
-			body.push(controls.state(_('内置型号'), builtin.length ? builtin.join('、') : '--'));
-			body.push(controls.state(_('已入库'), skipped.length ? skipped.join('、') : _('无')));
+			body.push(controls.state(_('自定义库型号'), builtin.length ? builtin.join('、') : '--'));
+			body.push(controls.state(_('已同步的自定义型号'), skipped.length ? skipped.join('、') : _('无')));
 			body.push(missing.length
 				? E('div', { 'class': 'mt-control-note' },
-					_('以下内置型号尚未写入支持库：%s。同步后需重启 QModem 或重启设备。').format(missing.join('、')))
+					_('以下自定义型号尚未写入支持库：%s。同步后需重启 QModem 或设备。').format(missing.join('、')))
 				: E('div', { 'class': 'mt-control-note' },
-					_('内置型号均已存在于支持库中，无需同步。')));
+					_('自定义型号均已存在于 QModem 支持库。')));
 		}
 
 		body.push(E('div', { 'class': 'mt-control-actions' }, [
@@ -405,8 +446,8 @@ return view.extend({
 			}, _('刷新状态'))
 		]));
 
-		return controls.card(_('模组支持库'),
-			_('把本插件内置的模组定义写入 QModem 支持库，用于识别新收录的型号。写入前自动备份。'),
+		return controls.card(_('自定义模组库'),
+			_('由插件内置 JSON 和 /etc/qmodem-generic/modems 下的用户 JSON 组成；修改自定义型号会同步更新 QModem 支持库。'),
 			body, true);
 	},
 
@@ -706,10 +747,11 @@ return view.extend({
 				E('section', { 'class': 'mt-control-section' }, [
 					E('div', { 'class': 'mt-control-section-head' }, [
 						E('h3', {}, _('模组支持库')),
-						E('p', {}, _('QModem 依赖模组支持库识别模组型号。若本模组尚未被 QModem 收录，可在此写入内置定义。'))
+						E('p', {}, _('官方 QModem 库只读展示；在自定义库中新增和编辑模组后同步到 QModem。'))
 					]),
 					E('div', { 'class': 'mt-control-grid' }, [
-						this.supportCard(res.support),
+						this.supportCard(res.support, res.custom),
+						this.customLibraryCard(res.support, res.custom),
 						this.portCard(res.ports),
 						this.customCard(res.custom)
 					])
@@ -774,7 +816,8 @@ return view.extend({
 					E('p', {}, _('QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
-					this.supportCard(res.support),
+					this.supportCard(res.support, res.custom),
+						this.customLibraryCard(res.support, res.custom),
 					this.portCard(res.ports),
 					this.customCard(res.custom)
 				])
