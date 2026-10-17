@@ -178,32 +178,64 @@ delete_model() {
 	printf '{"success":true}\n'
 }
 
+# 从每个自定义来源 JSON 提取可编辑字段；conflict 不允许覆盖官方条目。
+list_item() {
+	_file="$1"; _item_bus="$2"; _item_model="$3"; _item_source="$4"
+	jq -e --arg bus "$_item_bus" --arg model "$_item_model" \
+		'.modem_support[$bus][$model].modes | type == "array"' "$_file" >/dev/null 2>&1 || return
+	_item_state=missing
+	if [ -f "$SUPPORT" ] && has_entry "$SUPPORT" "$_item_bus" "$_item_model"; then
+		_item_state=conflict
+		matches_source "$SUPPORT" "$_file" "$_item_bus" "$_item_model" && _item_state=synced
+	fi
+	jq -c --arg bus "$_item_bus" --arg model "$_item_model" --arg origin "$_item_source" --arg state "$_item_state" \
+		'.modem_support[$bus][$model] | {
+			bus:$bus, model:$model, source:$origin, state:$state,
+			manufacturer:(.manufacturer // ""), manufacturer_id:(.manufacturer_id // ""),
+			platform:(.platform // ""), pdp_index:(.pdp_index // "1"),
+			wcdma_band:(.wcdma_band // "0"), lte_band:(.lte_band // "0"),
+			nsa_band:(.nsa_band // "0"), sa_band:(.sa_band // "0"),
+			modes:((.modes // []) | join(","))
+		}' "$_file" 2>/dev/null
+}
 list_models() {
 	_first=1
 	printf '{"entries":['
-	for _f in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
-		[ -f "$_f" ] || continue
-		_bus=$(basename "$(dirname "$_f")")
-		_model=$(basename "$_f" .json)
-		valid_model "$_model" || continue
-		_vid=$(sed -n 's/.*"manufacturer_id": "\([0-9a-f]*\)".*/\1/p' "$_f" | head -n 1)
-		_modes=$(sed -n 's/.*"modes": \[\(.*\)\].*/\1/p' "$_f" | tr -d '" ')
-		[ "$_first" = 1 ] || printf ','
-		_first=0
-		printf '{"bus":"%s","model":"%s","manufacturer_id":"%s","modes":"%s"}' "$_bus" "$_model" "$_vid" "$_modes"
-	done
-	printf '],"presets":'
-	# 读取已安装的 QModem 支持库作为动态模板，不覆盖原有配置。
-	_lib="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
-	if [ -r "$_lib" ] && [ "$(wc -c < "$_lib" 2>/dev/null)" -le 524288 ] &&
-		jsonfilter -i "$_lib" -e '@.modem_support' >/dev/null 2>&1; then
-		_template=''
-		if command -v jq >/dev/null 2>&1; then
-			_template=$(jq -c '{usb:(.modem_support.usb // {}),pcie:(.modem_support.pcie // {})}' "$_lib" 2>/dev/null)
+	if command -v jq >/dev/null 2>&1; then
+		# 用户持久化 JSON 优先，包含既有版本保存过的配置。
+		for _file in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
+			[ -f "$_file" ] || continue
+			_bus=$(basename "$(dirname "$_file")")
+			_model=$(basename "$_file" .json)
+			valid_model "$_model" || continue
+			_row=$(list_item "$_file" "$_bus" "$_model" user)
+			[ -n "$_row" ] || continue
+			[ "$_first" = 1 ] || printf ','
+			printf '%s' "$_row"; _first=0
+		done
+		# 软件包预设也属于插件自定义库。修改时创建持久化覆盖文件，不篡改原始软件包。
+		if [ -r "$EXTRA" ]; then
+			for _bus in usb pcie; do
+				for _model in $(jq -r --arg bus "$_bus" '.modem_support[$bus] // {} | keys[]' "$EXTRA" 2>/dev/null); do
+					valid_model "$_model" || continue
+					[ -f "$CUSTOM_DIR/$_bus/$_model.json" ] && continue
+					_row=$(list_item "$EXTRA" "$_bus" "$_model" builtin)
+					[ -n "$_row" ] || continue
+					[ "$_first" = 1 ] || printf ','
+					printf '%s' "$_row"; _first=0
+				done
+			done
 		fi
-		case "$_template" in
-			\{*) printf '%s' "$_template" ;;
-			*) cat "$_lib" ;;
+	fi
+	printf '],"presets":'
+	# QModem 已安装支持库原样用于“官方库只读查询”和新增时复制模板
+	_lib="$SUPPORT"
+	if [ -r "$_lib" ] && [ "$(wc -c < "$_lib" 2>/dev/null)" -le 524288 ] &&
+		command -v jq >/dev/null 2>&1; then
+		_preset=$(jq -c '{usb:(.modem_support.usb // {}),pcie:(.modem_support.pcie // {})}' "$_lib" 2>/dev/null)
+		case "$_preset" in
+			\{*) printf '%s' "$_preset" ;;
+			*) printf '{}' ;;
 		esac
 	else
 		printf '{}'
