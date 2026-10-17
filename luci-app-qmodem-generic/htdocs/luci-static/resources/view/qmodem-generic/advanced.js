@@ -523,6 +523,7 @@ return view.extend({
 			manufacturer_id: '2c7c', platform: 'qualcomm', modes: 'qmi,mbim', pdp_index: '1',
 			wcdma_band: '0', lte_band: '0', nsa_band: '0', sa_band: '0' };
 		this.customDraft = draft;
+		if (!draft.edit) draft.edit = '0';
 		[ 'wcdma_band', 'lte_band', 'nsa_band', 'sa_band' ].forEach(function(key) {
 			if (draft[key] === undefined || draft[key] === null) draft[key] = '0';
 		});
@@ -613,15 +614,22 @@ return view.extend({
 			draft.modes = checkboxes.filter(function(ref) { return ref.box.checked && !ref.box.disabled; })
 				.map(function(ref) { return ref.id; }).join(',');
 		}
+		var editHint = E('div', { 'class': 'mt-control-note', 'style': 'margin-top:10px' });
 		function fillForm() {
 			Object.keys(fields).forEach(function(key) {
 				if (draft[key] !== undefined && draft[key] !== null) fields[key].value = String(draft[key]);
 			});
 			fields.manufacturer_id.disabled = bus.value === 'pcie';
+			fields.bus.disabled = draft.edit === '1';
+			fields.model.disabled = draft.edit === '1';
+			template.disabled = draft.edit === '1' || !Object.keys(presets[bus.value] || {}).length;
 			updateProtocols();
+			dom.content(editHint, draft.edit === '1' ?
+				_('正在编辑：%s（%s），型号和连接方式不可修改。').format(draft.model, draft.bus) :
+				_('当前为新增模式。官方原生型号只读，不允许覆盖。'));
 		}
 		/* 从串口卡片切换到另一个总线时，同步切换可用的 QModem 模板列表。 */
-		this.fillCustomForm = function() { fillForm(); templateOptions(); };
+		this.fillCustomForm = function() { templateOptions(); fillForm(); };
 		templateOptions();
 		fillForm();
 		bus.addEventListener('change', function() {
@@ -651,10 +659,16 @@ return view.extend({
 		});
 		var entries = Array.isArray(data && data.entries) ? data.entries : [];
 		return controls.card(_('自定义模组配置'),
-			_('支持从已安装 QModem 型号复制参数。型号需与 AT+CGMM 一致；不会覆盖 QModem 原有配置，设备驱动仍由固件提供。'), [
+			_('可以新增或编辑自定义型号。保存时会同时更新用户 JSON 与 QModem 支持库，并自动备份。'), [
 			data && data.error ? E('div', { 'class': 'mt-control-note' }, data.error) : null,
 			form,
-			E('div', { 'class': 'mt-control-actions' }, E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function(ev) {
+			editHint,
+			E('div', { 'class': 'mt-control-actions' }, [
+			E('button', { 'type':'button', 'class':'btn', 'click': function() {
+				Object.assign(draft, {edit:'0', model:'', bus:'usb'});
+				self.fillCustomForm();
+			} }, _('取消编辑 / 新增')),
+			E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function(ev) {
 				var button = ev.currentTarget;
 				if (!draft.modes) {
 					ui.addNotification(null, E('p', {}, _('请至少勾选一种与连接方式匹配的拨号协议。')), 'warning');
@@ -662,17 +676,16 @@ return view.extend({
 				}
 				button.disabled = true;
 				controls.saveCustomModel(Object.assign({}, draft)).then(function(result) {
-					if (!result || !result.success) throw new Error((result && result.error) || _('保存失败'));
-					return controls.syncSupport();
+					if (!result || !result.success || !result.synced) throw new Error((result && result.error) || _('自定义 JSON 与 QModem 支持库未能同时保存'));
+					return result;
 				}).then(function(result) {
-					if (result && result.error) throw new Error(result.error);
 					ui.addNotification(null, E('p', {}, _('配置已保存并同步。请重启 QModem 或设备后识别新型号。')));
 					window.location.reload();
 				}).catch(function(err) {
 					ui.addNotification(null, E('p', {}, _('配置操作未完成：%s').format(err.message || String(err))), 'warning');
 				}).then(function() { button.disabled = false; });
-			} }, _('保存并同步支持库'))),
-			E('div', { 'class': 'mt-control-note' }, _('USB 厂商 ID 只填写 VID（例如 2c7c）。已存在于官方 QModem 支持库中的同名型号不允许重复新增或覆盖。')),
+			} }, _('保存并同步支持库')) ]),
+			E('div', { 'class': 'mt-control-note' }, _('官方 QModem 原生型号不可修改。自定义型号发生冲突时也不允许直接覆盖。')),
 			entries.map(function(entry) {
 				return E('div', { 'class': 'qm-custom-entry' }, [
 					E('span', {}, entry.model + ' · ' + (entry.bus === 'pcie' ? 'PCIe' : 'USB') + ' · ' + (entry.modes || '--')),
