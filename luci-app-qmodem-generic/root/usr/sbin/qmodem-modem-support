@@ -269,14 +269,16 @@ while read -r GROUP MODEL SOURCE; do
 	detail "$GROUP" "$MODEL" added
 	log "已向支持库（$GROUP）注入 $MODEL，原文件备份为 $BACKUP"
 done <<EOF
-$(list_models "$EXTRA" | while read -r _g _m; do printf '%s %s %s\n' "$_g" "$_m" "$EXTRA"; done
 for _source in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
 	[ -f "$_source" ] || continue
 	list_models "$_source" | while read -r _g _m; do
 		[ "$_source" = "$CUSTOM_DIR/$_g/$_m.json" ] || continue
 		printf '%s %s %s\n' "$_g" "$_m" "$_source"
 	done
-done)
+done
+# 用户覆盖定义优先，避免重装 QModem 后先写入插件预设再跳过用户设置
+$(list_models "$EXTRA" | while read -r _g _m; do printf '%s %s %s\n' "$_g" "$_m" "$EXTRA"; done
+)
 EOF
 
 # ---------------------------------------------------------------- 结果输出
