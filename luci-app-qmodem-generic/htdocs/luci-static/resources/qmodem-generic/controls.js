@@ -987,6 +987,18 @@ function smsServiceAction(result) {
 	return result;
 }
 
+/*
+ * 不同版本的 rpc.js 对“对象不存在”有两种错误格式：
+ * 旧版 ubus code 4 / 3；LuCI 25.12 为 -32000: Object not found。
+ * 只在明确缺少服务/方法时回退旧版 qmodem.get_sms，避免隐藏权限与数据库错误。
+ */
+function isMissingSmsService(err) {
+	var message = String((err && err.message) || err || '');
+	return !!(err && (err.code === 3 || err.code === 4)) ||
+		/ubus code [34](?::|\b)/i.test(message) ||
+		/(?:error\s+)?(?:-32000|-32601)\s*:\s*(?:Object|Method) not found\b/i.test(message);
+}
+
 /* 只对“对象/方法不存在”降级；数据库损坏、无权限或超时都应显示原错误。 */
 function getSmsServiceConfig(section) {
 	if (Date.now() < smsServiceMissingUntil) return Promise.resolve(null);
@@ -996,7 +1008,7 @@ function getSmsServiceConfig(section) {
 			throw new Error(_('短信服务返回了未知接收模式。'));
 		return result;
 	}, function(err) {
-		if (/ubus code [34]:/.test(String(err && err.message)) || (err && (err.code === 3 || err.code === 4))) {
+		if (isMissingSmsService(err)) {
 			smsServiceMissingUntil = Date.now() + 60000;
 			return null;
 		}

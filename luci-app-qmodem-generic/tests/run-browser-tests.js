@@ -124,7 +124,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
     if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve({ entries: [] });
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
-        return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with ubus code 4: Not found'));
+        return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'));
       if (def.method === 'config_get') return Promise.resolve({mode:'database_poll',auto_delete:true,poll_interval:300});
       if (def.method === 'list') return Promise.resolve(scenario === 'sms_database_error' ? {status:'error',error:'SMS database is unavailable'} : {
         mode:'database_poll', messages:[

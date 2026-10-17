@@ -616,6 +616,16 @@ async function testSmsSources() {
 	assertEq('旧版没有短信服务时回退模组存储', (await legacy.controls.getSmsInbox('6_1'))._smsSource, 'modem');
 	await legacy.controls.getSmsInbox('6_1');
 	assertEq('服务缺失在冷却期间不反复探测', legacy.rt.countCalls('qmodem.sms','config_get'), 1);
+	/* 西瓜皮等旧版 QModem 的 LuCI 25.12 返回 -32000，不是旧的 ubus code 4。 */
+	var noObject = runtime(function() { return {__rpcError:'RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'}; });
+	assertEq('LuCI -32000 对象缺失自动回退旧版短信', (await noObject.controls.getSmsInbox('6_1'))._smsSource, 'modem');
+	await noObject.controls.getSmsInbox('6_1');
+	assertEq('LuCI -32000 缺失期间不会反复探测', noObject.rt.countCalls('qmodem.sms','config_get'), 1);
+	var noMethod = runtime(function() { return {__rpcError:'RPC call to qmodem.sms/config_get failed with error -32601: Method not found'}; });
+	assertEq('缺少新版短信方法时也回退旧版', (await noMethod.controls.getSmsInbox('6_1'))._smsSource, 'modem');
+	var rpcDenied = runtime(function() { return {__rpcError:'RPC call to qmodem.sms/config_get failed with error -32000: Access denied'}; });
+	await rejects('LuCI -32000 非缺失类错误不得误回退', rpcDenied.controls.getSmsInbox('6_1'), /Access denied/);
+	assertEq('权限故障不会触发旧版短信读取', rpcDenied.rt.countCalls('qmodem_cache','snapshot'), 0);
 	var direct = runtime(function() { return {mode:'direct'}; });
 	direct.rt.setUbusDelay(8000);
 	var started = Date.now();
