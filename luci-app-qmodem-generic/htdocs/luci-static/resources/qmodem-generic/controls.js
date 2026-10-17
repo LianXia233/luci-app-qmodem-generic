@@ -189,6 +189,12 @@ var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset'
 // status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并
 var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { }, nobatch: true });
 var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { }, nobatch: true });
+var callSupportPorts = rpc.declare({ object: 'qmodem_support', method: 'ports', expect: { }, nobatch: true });
+var callCustomList = rpc.declare({ object: 'qmodem_support', method: 'custom_list', expect: { }, nobatch: true });
+var callCustomSave = rpc.declare({ object: 'qmodem_support', method: 'custom_save',
+	params: ['model', 'bus', 'manufacturer', 'manufacturer_id', 'platform', 'modes', 'pdp_index'], expect: { }, nobatch: true });
+var callCustomDelete = rpc.declare({ object: 'qmodem_support', method: 'custom_delete', params: ['model', 'bus'], expect: { }, nobatch: true });
+var callProbePort = rpc.declare({ object: 'qmodem_support', method: 'probe_port', params: ['port'], expect: { }, nobatch: true });
 
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { }, nobatch: true });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { }, nobatch: true });
@@ -1139,6 +1145,17 @@ function getSupportStatus() {
 	return supportFromAnySection();
 }
 
+function getSupportPorts() { return withTimeout(callSupportPorts(), DIRECT_RPC_TIMEOUT,
+	{ ports: [], error: '串口映射服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function getCustomModels() { return withTimeout(callCustomList(), DIRECT_RPC_TIMEOUT,
+	{ entries: [], error: '自定义模组服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function saveCustomModel(data) {
+	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
+		data.platform, data.modes, data.pdp_index);
+}
+function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
+function probeSupportPort(port) { return callProbePort(port); }
+
 /* support 域与模组无关：从当前 section 的快照里取；拿不到再直连一次 */
 function supportFromAnySection() {
 	return resolveSection().then(function(section) {
@@ -1965,6 +1982,11 @@ return baseclass.extend({
 	getTrafficResetSchedule: getTrafficResetSchedule,
 	getSupportStatus: getSupportStatus,
 	syncSupport: syncSupport,
+	getSupportPorts: getSupportPorts,
+	getCustomModels: getCustomModels,
+	saveCustomModel: saveCustomModel,
+	deleteCustomModel: deleteCustomModel,
+	probeSupportPort: probeSupportPort,
 
 	sendAt: sendAt,
 	atResponseText: atResponseText,

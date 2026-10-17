@@ -117,6 +117,11 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   const tasks = {};
   const rpc = { declare: def => (...args) => {
     window.calls.push({ object: def.object, method: def.method, args });
+    if (def.object === 'qmodem_support' && def.method === 'ports') return Promise.resolve({ ports: [
+      {port:'/dev/ttyUSB2', bus:'usb', id:'2c7c:0801', location:'2-1', model:'RG502Q-EA', section:'6_1', confirmed:1},
+      {port:'/dev/wwan0at0', bus:'pcie', id:'17cb:0308', location:'0000:01:00.0', model:'RG650E-EU', section:'', confirmed:0}
+    ] });
+    if (def.object === 'qmodem_support' && def.method === 'custom_list') return Promise.resolve({ entries: [] });
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
         return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with ubus code 4: Not found'));
@@ -314,7 +319,15 @@ async function runDom() {
       if (scenario === 'sparse' && viewName === 'network') assert([...app.querySelectorAll('.mt-net-row')].some(row => row.innerText.includes('PCI') && row.lastElementChild.innerText === '0'), 'Valid PCI 0 must display');
       if (viewName === 'advanced' && scenario !== 'absent') assert.equal(text.includes('USB 数据模式'), scenario === 'tdtech', 'Private commands must match model');
       if (viewName === 'advanced') {
-        assert.equal(app.querySelectorAll('.qm-palette-option').length, 4, 'Theme choices remain available with no modem');
+        assert.equal(app.querySelectorAll('.qm-palette-option').length, 8, 'Theme choices remain available with no modem');
+        assert.equal(app.querySelectorAll('.qm-port-row').length, 2, 'USB/PCIe port mappings are displayed');
+        assert(text.includes('2c7c:0801') && text.includes('17cb:0308'), 'Hardware IDs are displayed');
+        app.querySelector('.qm-port-actions button:last-child').click();
+        assert.equal(app.querySelector('[data-custom-field="model"]').value, 'rg502q-ea', 'Detected model prefills custom entry');
+        const start = app.querySelector('input[aria-label="渐变起始颜色"]');
+        start.value = '#123456'; start.dispatchEvent(new window.Event('change'));
+        assert.equal(window.document.body.getAttribute('data-qm-palette'), 'custom');
+        assert.equal(JSON.parse(window.localStorage.getItem('qmodem-generic-appearance')).customStart, '#123456');
         assert(!app.querySelector('input[placeholder="AT^SETMODE?"]'), 'AT console lives on its dedicated page');
         assert(![...app.querySelectorAll('button')].some(b => /软重启模组|硬重启模组|应用网络优选|应用锁定|切换为/.test(b.textContent)), 'Advanced must not duplicate radio and reboot actions');
         const callCount = window.calls.length;

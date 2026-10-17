@@ -80,7 +80,7 @@ setup() {
 	mkdir -p "$BIN" "$SBIN" "$LIB" "$CACHE" "$STATS" "$WORK/etc/config"
 
 	# 被测脚本（软链，保证测的是仓库里的真实文件）
-	for f in qmodem-worker qmodem-modem-support qmodem-mt5700-fix; do
+	for f in qmodem-worker qmodem-modem-support qmodem-support-custom qmodem-mt5700-fix; do
 		ln -sf "$ROOT/usr/sbin/$f" "$SBIN/$f"
 	done
 	for f in qmodem-task qmodem-stats-collect qmodem-stats-loop; do
@@ -133,6 +133,7 @@ EOF
 	export QMODEM_STATS_DIR="$STATS"
 	export QMODEM_SUPPORT_FILE="$WORK/modem_support.json"
 	export QMODEM_EXTRA_SUPPORT_FILE="$ROOT/usr/share/qmodem-generic/extra_modem_support.json"
+	export QMODEM_CUSTOM_SUPPORT_DIR="$WORK/custom-modems"
 	export QMODEM_SUPPORT_LOCKDIR="$WORK/support.lock"
 	export MOCK_UBUS_STATE="$WORK/ubus-state.json"
 	export MOCK_UBUS_LOG="$WORK/ubus.log"
@@ -420,13 +421,65 @@ t_support() {
 	assert_fast "support sync bounded" 15000 "rpcd_call qmodem_support sync '{}'"
 	_out="$LAST_OUT"
 	assert_json "support sync added rg520n-cn" "$_out" '@.added[0]' rg520n-cn
+	assert_true "built-in RG502Q-EA usb and PCIe added" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg502q-ea\" in d[b] for b in (\"usb\",\"pcie\"))'"
+	assert_true "official RG650V-EU fallback added" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg650v-eu\" in d[b] for b in (\"usb\",\"pcie\"))'"
+}
+
+t_custom_support() {
+	hdr "未知型号自定义与串口映射"
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"../../evil","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi","pdp_index":"1"}')
+	assert_json "reject path traversal in custom model" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"pcie","model":"rg-future","manufacturer":"quectel","manufacturer_id":"","platform":"qualcomm","modes":"ecm","pdp_index":"1"}')
+	assert_json "reject USB mode on PCIe" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg502q-ea","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi","pdp_index":"1"}')
+	assert_json "do not shadow built-in model" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1"}')
+	assert_json "save USB custom model" "$_out" '@.success' true
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"pcie","model":"rg-future","manufacturer":"quectel","manufacturer_id":"","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1"}')
+	assert_json "save PCIe custom model" "$_out" '@.success' true
+	_out=$(rpcd_call qmodem_support custom_list '{}')
+	assert_json "list custom USB model" "$_out" '@.entries[0].model' rg-future
+	_out=$($TEST_SH "$SBIN/qmodem-modem-support" --json)
+	assert_true "custom model injected into both buses" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg-future\" in d[b] for b in (\"usb\",\"pcie\"))'"
+	_out=$(rpcd_call qmodem_support custom_delete '{"bus":"pcie","model":"rg-future"}')
+	assert_json "remove PCIe custom source" "$_out" '@.success' true
+	assert_true "removing source keeps official support entries" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert \"rg-future\" in d[\"pcie\"]'"
+
+	mkdir -p "$WORK/sys/class/tty/ttyUSB77" "$WORK/sys/devices/usb/2-1" "$WORK/dev"
+	printf '2c7c\n' > "$WORK/sys/devices/usb/2-1/idVendor"
+	printf '0801\n' > "$WORK/sys/devices/usb/2-1/idProduct"
+	printf 'RG502Q-EA\n' > "$WORK/sys/devices/usb/2-1/product"
+	ln -s "$WORK/sys/devices/usb/2-1" "$WORK/sys/class/tty/ttyUSB77/device"
+	ln -s /dev/null "$WORK/dev/ttyUSB77"
+	export QMODEM_SYS_TTY_DIR="$WORK/sys/class/tty"
+	export QMODEM_SYS_WWAN_DIR="$WORK/sys/class/wwan"
+	export QMODEM_DEV_DIR="$WORK/dev"
+	_out=$(rpcd_call qmodem_support ports '{}')
+	assert_json "candidate port maps model from USB device" "$_out" '@.ports[0].model' RG502Q-EA
+	assert_json "candidate port maps VID:PID" "$_out" '@.ports[0].id' '2c7c:0801'
+	assert_json "unprobed port is not confirmed AT" "$_out" '@.ports[0].confirmed' 0
+	_out=$(rpcd_call qmodem_support probe_port '{"port":"/dev/ttyUSB77;rm -rf /"}')
+	assert_json "reject unlisted probe port" "$_out" '@.success' false
+	cat > "$BIN/tom_modem" <<'EOF'
+#!/bin/sh
+printf 'AT+CGMM\r\n+CGMM: RG502Q-EA\r\nOK\r\n'
+EOF
+	chmod 755 "$BIN/tom_modem"
+	_out=$(rpcd_call qmodem_support probe_port "{\"port\":\"$WORK/dev/ttyUSB77\"}")
+	assert_json "user-initiated AT probe reads model" "$_out" '@.model' RG502Q-EA
+	python3 -c 'import json,os; p=os.environ["MOCK_UCI_CONFIG"]; d=json.load(open(p)); d["qmodem"]["modem0"]["at_port"]=os.environ["QMODEM_DEV_DIR"]+"/ttyUSB77"; json.dump(d,open(p,"w"))'
+	_out=$(rpcd_call qmodem_support ports '{}')
+	assert_json "QModem configured AT port confirmed" "$_out" '@.ports[0].confirmed' 1
+	_out=$(rpcd_call qmodem_support probe_port "{\"port\":\"$WORK/dev/ttyUSB77\"}")
+	assert_json "probe refuses QModem-owned serial" "$_out" '@.success' false
 }
 
 t_no_orphans() {
 	hdr "进程与锁清理"
 	_left=$(find "$CACHE/locks" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no lock dirs left behind" 0 "$_left"
-	_orphans=$(pgrep -f "qmodem-task _run" 2>/dev/null | wc -l | tr -d ' ')
+	# 避免测试命令自身的 shell 命令行被 pgrep -f 匹配。
+	_orphans=$(pgrep -f "[q]modem-task _run" 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no orphaned task runners" 0 "$_orphans"
 	_tmp=$(find "$CACHE" -name '*.tmp.*' 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no leftover temp files (atomic writes cleaned up)" 0 "$_tmp"
@@ -483,6 +536,7 @@ t_task_timeout
 t_at_serialisation
 t_stats_background
 t_support
+t_custom_support
 t_worker_daemon
 t_no_orphans
 

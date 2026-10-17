@@ -28,6 +28,7 @@
 TAG='qmodem-modem-support'
 TARGET="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
 EXTRA="${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_support.json}"
+CUSTOM_DIR="${QMODEM_CUSTOM_SUPPORT_DIR:-/etc/qmodem-generic/modems}"
 BACKUP="$TARGET.bak"
 TMP="$TARGET.tmp.$$"
 LOCKDIR="${QMODEM_SUPPORT_LOCKDIR:-/var/run/qmodem-modem-support.lock}"
@@ -44,6 +45,7 @@ done
 ADDED=''
 SKIPPED=''
 MISSING=''
+DETAILS=''
 ERR=''
 BACKED_UP=0
 LOCKED=0
@@ -65,10 +67,15 @@ json_array() {
 
 emit() {
 	local available="$1"
-	printf '{"available":%s,"path":"%s","added":[%s],"skipped":[%s],"missing":[%s],"error":%s}\n' \
+	printf '{"available":%s,"path":"%s","added":[%s],"skipped":[%s],"missing":[%s],"details":[%s],"error":%s}\n' \
 		"$available" "$TARGET" "$(json_array "$ADDED")" "$(json_array "$SKIPPED")" \
-		"$(json_array "$MISSING")" \
+		"$(json_array "$MISSING")" "$DETAILS" \
 		"$( [ -n "$ERR" ] && printf '"%s"' "$ERR" || printf 'null' )"
+}
+
+detail() {
+	[ -z "$DETAILS" ] || DETAILS="$DETAILS,"
+	DETAILS="$DETAILS{\"bus\":\"$1\",\"model\":\"$2\",\"state\":\"$3\"}"
 }
 
 # 枚举数据源中的待处理型号，每行输出 "<group> <model>"（只处理 usb / pcie 组）
@@ -88,7 +95,7 @@ list_models() {
 			sub(/".*$/, "", mdl)
 			print grp " " mdl
 		}
-	' "$EXTRA"
+	' "$1"
 }
 
 # 打印目标文件中指定分组的内容（不含 "usb": { 这一行本身）
@@ -113,9 +120,13 @@ has_model() {
 
 # 从数据源中抽取该型号的完整定义块（保留原缩进）
 model_block() {
-	awk -v mdl="$1" '
-		BEGIN { out = 0; indent = 0 }
-		out == 0 {
+	awk -v mdl="$1" -v grp="$2" '
+		BEGIN { out = 0; indent = 0; in_group = 0 }
+		/^        "(usb|pcie)": \{[ \t]*$/ {
+			in_group = ($0 ~ "^        \"" grp "\": \\{")
+			next
+		}
+		in_group && out == 0 {
 			p = index($0, "\"" mdl "\": {")
 			if (p > 1) {
 				out = 1
@@ -125,24 +136,34 @@ model_block() {
 			next
 		}
 		out == 1 {
-			print
 			pre = substr($0, 1, indent)
 			rest = substr($0, indent + 1)
-			if (pre ~ /^[ \t]*$/ && substr(rest, 1, 1) == "}") exit
+			if (pre ~ /^[ \t]*$/ && substr(rest, 1, 1) == "}") {
+				sub(/,[ \t]*$/, "")
+				print
+				exit
+			}
+			print
 		}
-	' "$EXTRA"
+	' "$3"
 }
 
 # 把块插到目标文件指定分组的开头；返回值非 0 表示未找到该分组
 insert_block() {
 	awk -v grp="$1" -v blk="$2" '
-		BEGIN { done = 0 }
+		BEGIN { done = 0; pending = 0 }
 		{
 			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*$") {
 				print $0
-				print blk ","
+				pending = 1
 				done = 1
 				next
+			}
+			if (pending) {
+				# 空分组首个条目不能有尾随逗号。
+				if ($0 ~ /^        \}[,]?[ \t]*$/) print blk
+				else print blk ","
+				pending = 0
 			}
 			print
 		}
@@ -184,21 +205,23 @@ fi
 
 # ---------------------------------------------------------------- 遍历型号
 BACKED_UP=0
-while read -r GROUP MODEL; do
+while read -r GROUP MODEL SOURCE; do
 	[ -n "$GROUP" ] && [ -n "$MODEL" ] || continue
 
 	if has_model "$GROUP" "$MODEL"; then
 		SKIPPED="$SKIPPED $MODEL"
+		detail "$GROUP" "$MODEL" skipped
 		log "支持库已包含 $MODEL（$GROUP），跳过"
 		continue
 	fi
 
 	if [ "$STATUS_ONLY" = "1" ]; then
 		MISSING="$MISSING $MODEL"
+		detail "$GROUP" "$MODEL" missing
 		continue
 	fi
 
-	BLOCK=$(model_block "$MODEL")
+	BLOCK=$(model_block "$MODEL" "$GROUP" "$SOURCE")
 	if [ -z "$BLOCK" ]; then
 		log "内置定义中未能提取 $MODEL，跳过"
 		continue
@@ -243,9 +266,17 @@ while read -r GROUP MODEL; do
 	fi
 
 	ADDED="$ADDED $MODEL"
+	detail "$GROUP" "$MODEL" added
 	log "已向支持库（$GROUP）注入 $MODEL，原文件备份为 $BACKUP"
 done <<EOF
-$(list_models)
+$(list_models "$EXTRA" | while read -r _g _m; do printf '%s %s %s\n' "$_g" "$_m" "$EXTRA"; done
+for _source in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
+	[ -f "$_source" ] || continue
+	list_models "$_source" | while read -r _g _m; do
+		[ "$_source" = "$CUSTOM_DIR/$_g/$_m.json" ] || continue
+		printf '%s %s %s\n' "$_g" "$_m" "$_source"
+	done
+done)
 EOF
 
 # ---------------------------------------------------------------- 结果输出

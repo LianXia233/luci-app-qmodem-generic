@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.5.0
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -50,6 +50,7 @@ for f in \
 	/usr/bin/qmodem-task \
 	/usr/sbin/qmodem-mt5700-fix \
 	/usr/sbin/qmodem-modem-support \
+	/usr/sbin/qmodem-support-custom \
 	/usr/sbin/qmodem-worker \
 	/usr/lib/qmodem/qmodem-at-probe \
 	/etc/init.d/qmodem-mt5700-fix \

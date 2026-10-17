@@ -146,6 +146,10 @@ var PALETTES = [
 	{ id: 'ocean', name: '蓝绿渐变', sub: '默认 · 海蓝与翠绿', gradient: 'linear-gradient(115deg,#0866c4,#087f70)' },
 	{ id: 'blue', name: '清爽蓝', sub: '简洁明亮的蓝色', gradient: 'linear-gradient(115deg,#0755a8,#1678cc)' },
 	{ id: 'violet', name: '暮光紫', sub: '柔和的紫色渐变', gradient: 'linear-gradient(115deg,#6041ae,#8a4387)' },
+	{ id: 'forest', name: '森林绿', sub: '深绿与青绿', gradient: 'linear-gradient(115deg,#146b54,#119690)' },
+	{ id: 'sunset', name: '落日橙', sub: '琥珀与暖橙', gradient: 'linear-gradient(115deg,#b45d0a,#d07326)' },
+	{ id: 'rose', name: '莓果红', sub: '玫红与莓紫', gradient: 'linear-gradient(115deg,#ad3865,#894596)' },
+	{ id: 'custom', name: '自定义颜色', sub: '自行挑选渐变两端颜色', gradient: 'linear-gradient(115deg,var(--qm-custom-start,#0755a8),var(--qm-custom-end,#087f70))' },
 	{ id: 'follow', name: '跟随系统主题', sub: '使用 LuCI 的主色', gradient: 'linear-gradient(115deg,#64748b,#94a3b8)' }
 ];
 var CSS_PALETTES = [
@@ -156,6 +160,15 @@ var CSS_PALETTES = [
 	'--qm-accent-gradient:linear-gradient(115deg,#0755a8,#1678cc);--qm-hero-gradient:linear-gradient(115deg,#064b96,#126bb8)}',
 	'.qm-app[data-qm-palette="violet"]{--qm-accent:#7750c4;--qm-accent-2:#a574d6;--qm-accent-3:#b75c94;',
 	'--qm-accent-gradient:linear-gradient(115deg,#6041ae,#8a4387);--qm-hero-gradient:linear-gradient(115deg,#4f338f,#803c7d)}',
+	'.qm-app[data-qm-palette="forest"]{--qm-accent:#117c66;--qm-accent-2:#119690;--qm-accent-3:#146b54;',
+	'--qm-accent-gradient:linear-gradient(115deg,#146b54,#119690);--qm-hero-gradient:linear-gradient(115deg,#125d4e,#117d78)}',
+	'.qm-app[data-qm-palette="sunset"]{--qm-accent:#a95a0d;--qm-accent-2:#d07326;--qm-accent-3:#ad511f;',
+	'--qm-accent-gradient:linear-gradient(115deg,#b45d0a,#d07326);--qm-hero-gradient:linear-gradient(115deg,#96500a,#af5419)}',
+	'.qm-app[data-qm-palette="rose"]{--qm-accent:#b34072;--qm-accent-2:#a64eae;--qm-accent-3:#894596;',
+	'--qm-accent-gradient:linear-gradient(115deg,#ad3865,#894596);--qm-hero-gradient:linear-gradient(115deg,#932f5d,#763b88)}',
+	'.qm-app[data-qm-palette="custom"]{--qm-accent:var(--qm-custom-start);--qm-accent-2:var(--qm-custom-end);--qm-accent-3:var(--qm-custom-end);',
+	'--qm-accent-gradient:linear-gradient(115deg,var(--qm-custom-start),var(--qm-custom-end));',
+	'--qm-hero-gradient:linear-gradient(115deg,var(--qm-custom-start),var(--qm-custom-end))}',
 	'.qm-app[data-qm-tone="light"]{--qm-surface:#fff;--qm-surface-2:#f3f6f9;--qm-surface-3:#e9eef4;--qm-glass:#fff;',
 	'--qm-border:#d7e0e8;--qm-border-soft:#e6edf3;--qm-border-strong:#aabac9;',
 	'--qm-text:#162b3d;--qm-text-soft:#425669;--qm-text-muted:#65798b}',
@@ -164,7 +177,10 @@ var CSS_PALETTES = [
 	'--qm-text:#e7f0f8;--qm-text-soft:#c1cfdd;--qm-text-muted:#98aabc}',
 	'.qm-app.qm-dark[data-qm-palette="ocean"]{--qm-accent:#54c6ec;--qm-accent-2:#59d6ce;--qm-accent-3:#5ad7b1}',
 	'.qm-app.qm-dark[data-qm-palette="blue"]{--qm-accent:#74b9ff;--qm-accent-2:#76d4ff}',
-	'.qm-app.qm-dark[data-qm-palette="violet"]{--qm-accent:#b7a1ff;--qm-accent-2:#d2a6ed}'
+	'.qm-app.qm-dark[data-qm-palette="violet"]{--qm-accent:#b7a1ff;--qm-accent-2:#d2a6ed}',
+	'.qm-app.qm-dark[data-qm-palette="forest"]{--qm-accent:#61d4b6;--qm-accent-2:#5bdfd1}',
+	'.qm-app.qm-dark[data-qm-palette="sunset"]{--qm-accent:#f4b65e;--qm-accent-2:#ffc78d}',
+	'.qm-app.qm-dark[data-qm-palette="rose"]{--qm-accent:#f39abc;--qm-accent-2:#d3a2ed}'
 ].join('');
 
 var CSS_APPEARANCE = [
@@ -178,6 +194,9 @@ var CSS_APPEARANCE = [
 	'.qm-app .qm-palette-swatch{display:block;height:38px;border-radius:8px;margin-bottom:3px;background:var(--qm-preview-gradient)}',
 	'.qm-app .qm-palette-option strong{font-size:13px;line-height:1.5;white-space:normal}',
 	'.qm-app .qm-palette-option small{font-size:11.5px;color:var(--qm-text-muted);line-height:1.5}',
+	'.qm-app .qm-custom-colors{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:12px 0 14px}',
+	'.qm-app .qm-custom-colors label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--qm-text-soft)}',
+	'.qm-app .qm-custom-colors input[type="color"]{width:52px;height:38px;border:1px solid var(--qm-border);border-radius:8px;padding:3px;background:var(--qm-surface);cursor:pointer}',
 	'.qm-app .qm-appearance-status{font-size:12px;color:var(--qm-text-muted);line-height:1.6;margin-top:10px}',
 	'.qm-app .qm-topology{display:grid;grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr);align-items:center;padding:18px 0 6px;width:100%;min-width:0}',
 	'.qm-app .qm-topology-node{display:flex;align-items:center;gap:13px;min-width:0;min-height:92px;padding:16px;',
@@ -579,9 +598,12 @@ var appearanceCache = null;
 
 function normalizeAppearance(value) {
 	value = value && typeof value === 'object' ? value : {};
+	function hex(v, fallback) { return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : fallback; }
 	return {
 		palette: PALETTES.some(function(p) { return p.id === value.palette; }) ? value.palette : 'ocean',
-		tone: [ 'auto', 'light', 'dark' ].indexOf(value.tone) !== -1 ? value.tone : 'auto'
+		tone: [ 'auto', 'light', 'dark' ].indexOf(value.tone) !== -1 ? value.tone : 'auto',
+		customStart: hex(value.customStart, '#0755a8'),
+		customEnd: hex(value.customEnd, '#087f70')
 	};
 }
 
@@ -591,7 +613,7 @@ function getAppearance() {
 		try { saved = JSON.parse(window.localStorage.getItem(APPEARANCE_KEY)); } catch (e) { /* 浏览器禁用存储时使用默认配色 */ }
 		appearanceCache = normalizeAppearance(saved);
 	}
-	return { palette: appearanceCache.palette, tone: appearanceCache.tone };
+	return Object.assign({}, appearanceCache);
 }
 
 function setAppearance(value) {
@@ -682,6 +704,10 @@ function apply() {
 			body.classList.add('qm-' + tone);
 			body.setAttribute('data-qm-palette', appearance.palette);
 			body.setAttribute('data-qm-tone', appearance.tone);
+			if (body.style && body.style.setProperty) {
+				body.style.setProperty('--qm-custom-start', appearance.customStart);
+				body.style.setProperty('--qm-custom-end', appearance.customEnd);
+			}
 		}
 	} catch (e) { /* 忽略 */ }
 	return null;

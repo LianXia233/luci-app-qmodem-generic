@@ -132,15 +132,27 @@ return view.extend({
 	collect: function(ctx) {
 		var errors = [];
 		var section = ctx.section;
+		var self = this;
+		var portsPromise = this.portsUpdated && Date.now() - this.portsUpdated < 30000
+			? Promise.resolve(this.portsCache)
+			: guard(controls.getSupportPorts(), '串口映射', errors).then(function(value) {
+				self.portsCache = value || { ports: [] };
+				self.portsUpdated = Date.now();
+				return self.portsCache;
+			});
 
-		var supportPromise = controls.getSupportStatus();
-
-		return Promise.all([ supportPromise ])
+		return Promise.all([
+			guard(controls.getSupportStatus(), '模组支持库', errors),
+			portsPromise,
+			guard(controls.getCustomModels(), '自定义型号', errors)
+		])
 		.then(function(rr) {
 			var support = rr[0] || {};
+			var ports = rr[1] || { ports: [] };
+			var custom = rr[2] || { entries: [] };
 
 			if (!section)
-				return { section: null, support: support, errors: errors };
+				return { section: null, support: support, ports: ports, custom: custom, errors: errors };
 
 			return Promise.all([
 				guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
@@ -152,6 +164,8 @@ return view.extend({
 				return {
 					section: section,
 					support: support,
+					ports: ports,
+					custom: custom,
 					disabled: r[0],
 					rebootCaps: r[1],
 					atCfg: r[2],
@@ -162,7 +176,7 @@ return view.extend({
 			});
 		}).catch(function(err) {
 			errors.push('加载失败：' + ((err && err.message) || String(err)));
-			return { section: null, support: {}, errors: errors };
+			return { section: null, support: {}, ports: { ports: [] }, custom: { entries: [] }, errors: errors };
 		});
 	},
 
@@ -207,9 +221,14 @@ return view.extend({
 
 			/* 终端输出视窗 (AT 控制台与详情) */
 			'.mt-hardware-raw{background:var(--qm-surface-3);padding:16px;border-radius:14px;color:var(--qm-accent-2);font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
+			'.qm-port-list{display:grid;gap:8px}.qm-port-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2)}',
+			'.qm-port-main{min-width:0;display:grid;gap:4px}.qm-port-main strong{font-size:13px;overflow-wrap:anywhere}.qm-port-main small{color:var(--qm-text-muted);font-size:11px;overflow-wrap:anywhere}',
+			'.qm-port-actions{display:flex;flex-wrap:wrap;gap:8px}.qm-port-actions button{white-space:nowrap}.qm-custom-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}',
+			'.qm-custom-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--qm-border-soft);padding:9px 0;font-size:12px}',
 
 			/* 响应式 */
-			'@media(max-width:980px){.mt-control-grid{grid-template-columns:1fr}}',
+			'@media(max-width:980px){.mt-control-grid,.qm-custom-form{grid-template-columns:1fr}}',
+			'@media(max-width:700px){.qm-port-row{align-items:flex-start;flex-direction:column}.qm-port-actions{width:100%}}',
 			'@media(max-width:680px){.mt-hardware-head{flex-direction:column;align-items:flex-start}.mt-hardware-tools{flex-direction:column;align-items:flex-start}.mt-hardware-tool-actions{width:100%;justify-content:flex-start}}'
 		].join(''));
 	},
@@ -232,8 +251,12 @@ return view.extend({
 		var status = E('p', { 'class': 'qm-appearance-status', 'role': 'status' },
 			_('选择后立即生效，并记住当前浏览器的选择。'));
 		var buttons = [];
+		var start = E('input', { 'type': 'color', 'value': appearance.customStart, 'aria-label': _('渐变起始颜色') });
+		var end = E('input', { 'type': 'color', 'value': appearance.customEnd, 'aria-label': _('渐变结束颜色') });
 		function save() {
 			appearance.tone = tone.value;
+			appearance.customStart = start.value;
+			appearance.customEnd = end.value;
 			var persisted = theme.setAppearance(appearance);
 			buttons.forEach(function(button) {
 				var selected = button.getAttribute('data-palette') === appearance.palette;
@@ -242,6 +265,7 @@ return view.extend({
 			});
 			status.textContent = persisted ? _('外观设置已保存到当前浏览器。') : _('外观已应用，当前浏览器未允许保存设置。');
 		}
+		function saveColors() { appearance.palette = 'custom'; save(); }
 		buttons = theme.palettes().map(function(palette) {
 			return E('button', {
 				'type': 'button', 'class': 'qm-palette-option' + (appearance.palette === palette.id ? ' is-selected' : ''),
@@ -254,8 +278,13 @@ return view.extend({
 			]);
 		});
 		tone.addEventListener('change', save);
+		start.addEventListener('change', saveColors);
+		end.addEventListener('change', saveColors);
 		var card = controls.card(_('外观主题'), _('设置移动网络页面的配色与明暗模式。'), [
 			E('div', { 'class': 'qm-appearance-options', 'role': 'group', 'aria-label': _('页面配色') }, buttons),
+			E('div', { 'class': 'qm-custom-colors' }, [
+				E('label', {}, [ _('渐变起点'), start ]), E('label', {}, [ _('渐变终点'), end ])
+			]),
 			controls.row(_('明暗模式'), tone), status
 		], true);
 		card.classList.add('qm-appearance-card');
@@ -335,6 +364,12 @@ return view.extend({
 		var skipped = support.skipped || [];
 		var missing = support.missing || [];
 		var builtin = [].concat(skipped).concat(missing);
+		if (Array.isArray(support.details) && support.details.length) {
+			var label = function(x) { return (x.bus === 'pcie' ? 'PCIe ' : 'USB ') + String(x.model || '').toUpperCase(); };
+			builtin = support.details.map(label);
+			skipped = support.details.filter(function(x) { return x.state === 'skipped' || x.state === 'added'; }).map(label);
+			missing = support.details.filter(function(x) { return x.state === 'missing'; }).map(label);
+		}
 		var path = support.path || '/usr/share/qmodem/modem_support.json';
 
 		var body = [];
@@ -392,6 +427,121 @@ return view.extend({
 			ui.addNotification(null, E('p', {},
 				_('同步支持库失败：%s').format((err && err.message) || String(err))), 'danger');
 		});
+	},
+
+	usePortForCustom: function(port) {
+		var model = String(port.model || '').trim();
+		this.customDraft = Object.assign({}, this.customDraft || {}, {
+			bus: port.bus,
+			manufacturer_id: port.bus === 'usb' ? String(port.id || '').split(':')[0] : '',
+			model: /^[a-z0-9-]+$/i.test(model) ? model.toLowerCase() : ''
+		});
+		var panel = document.querySelector('.qm-custom-form');
+		if (panel) Object.keys(this.customDraft).forEach(function(key) {
+			var el = panel.querySelector('[data-custom-field="' + key + '"]');
+			if (el) el.value = this.customDraft[key];
+		}, this);
+		ui.addNotification(null, E('p', {}, _('已把设备信息填入自定义配置，请核对型号与拨号协议。')));
+	},
+
+	portCard: function(data) {
+		var self = this;
+		var ports = Array.isArray(data && data.ports) ? data.ports : [];
+		var rows = ports.map(function(port) {
+			var title = E('strong', {}, port.model || _('型号待读取'));
+			return E('div', { 'class': 'qm-port-row' }, [
+				E('div', { 'class': 'qm-port-main' }, [
+					title,
+					E('small', {}, (port.port || '') + ' · ' + (port.bus === 'pcie' ? 'PCIe' : 'USB') +
+						' · ' + (port.id || _('ID 未知')) + ' · ' + (port.location || '') +
+						' · ' + (port.confirmed ? _('QModem 已确认 AT 口') : _('候选串口，需验证 AT 功能')))
+				]),
+				E('div', { 'class': 'qm-port-actions' }, [
+					!port.confirmed ? E('button', { 'type': 'button', 'class': 'btn', 'click': function(ev) {
+						var button = ev.currentTarget;
+						button.disabled = true;
+						controls.probeSupportPort(port.port).then(function(result) {
+							if (!result || !result.success) throw new Error((result && result.error) || _('读取失败'));
+							title.textContent = port.model = result.model;
+							self.usePortForCustom(port);
+						}).catch(function(err) {
+							ui.addNotification(null, E('p', {}, _('读取型号失败：%s').format(err.message || String(err))), 'warning');
+						}).then(function() { button.disabled = false; });
+					} }, _('读取型号')) : null,
+					E('button', { 'type': 'button', 'class': 'btn', 'click': function() { self.usePortForCustom(port); } }, _('用于新配置'))
+				])
+			]);
+		});
+		return controls.card(_('串口与模组对应关系'), _('只读取系统设备树与 QModem 配置。未确认的串口可能是诊断口或 GNSS 口，可按需读取型号。'), [
+			data && data.error ? E('div', { 'class': 'mt-control-note' }, data.error) :
+			rows.length ? E('div', { 'class': 'qm-port-list' }, rows) :
+				E('div', { 'class': 'mt-control-note' }, _('未发现 USB/PCIe 模组串口；请检查驱动与设备连接。'))
+		], true);
+	},
+
+	customCard: function(data) {
+		var self = this;
+		var draft = this.customDraft || { bus: 'usb', model: '', manufacturer: 'quectel',
+			manufacturer_id: '2c7c', platform: 'qualcomm', modes: 'qmi,mbim', pdp_index: '1' };
+		this.customDraft = draft;
+		var fields = {};
+		function field(key, node) {
+			node.setAttribute('data-custom-field', key);
+			node.addEventListener('input', function() { draft[key] = node.value; });
+			node.addEventListener('change', function() { draft[key] = node.value; });
+			fields[key] = node;
+			return node;
+		}
+		var bus = field('bus', controls.select([ [ 'usb', 'USB' ], [ 'pcie', 'PCIe' ] ], draft.bus));
+		var form = E('div', { 'class': 'qm-custom-form' }, [
+			controls.row(_('连接方式'), bus),
+			controls.row(_('模组型号'), field('model', E('input', { 'type': 'text', 'value': draft.model, 'placeholder': 'rg502q-ea' }))),
+			controls.row(_('厂商标识'), field('manufacturer', E('input', { 'type': 'text', 'value': draft.manufacturer, 'placeholder': 'quectel' }))),
+			controls.row(_('USB 厂商 ID'), field('manufacturer_id', E('input', { 'type': 'text', 'value': draft.manufacturer_id, 'placeholder': '2c7c' }))),
+			controls.row(_('芯片平台'), field('platform', controls.select([
+				[ 'qualcomm', 'Qualcomm' ], [ 'mediatek', 'MediaTek' ], [ 'unisoc', 'Unisoc' ], [ 'lte', 'LTE' ]
+			], draft.platform))),
+			controls.row(_('拨号协议'), field('modes', E('input', { 'type': 'text', 'value': draft.modes, 'placeholder': 'qmi,mbim' }))),
+			controls.row(_('PDP 序号'), field('pdp_index', E('input', { 'type': 'number', 'value': draft.pdp_index, 'min': '1', 'max': '16' })))
+		]);
+		bus.addEventListener('change', function() {
+			fields.manufacturer_id.disabled = bus.value === 'pcie';
+			if (bus.value === 'pcie') { draft.modes = 'qmi,mbim'; fields.modes.value = draft.modes; }
+		});
+		fields.manufacturer_id.disabled = bus.value === 'pcie';
+		var entries = Array.isArray(data && data.entries) ? data.entries : [];
+		return controls.card(_('自定义模组配置'), _('型号请与模组 AT+CGMM 返回一致。此处补 QModem 识别定义，设备驱动仍由固件提供。'), [
+			data && data.error ? E('div', { 'class': 'mt-control-note' }, data.error) : null,
+			form,
+			E('div', { 'class': 'mt-control-actions' }, E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function(ev) {
+				var button = ev.currentTarget;
+				button.disabled = true;
+				controls.saveCustomModel(Object.assign({}, draft)).then(function(result) {
+					if (!result || !result.success) throw new Error((result && result.error) || _('保存失败'));
+					return controls.syncSupport();
+				}).then(function(result) {
+					if (result && result.error) throw new Error(result.error);
+					ui.addNotification(null, E('p', {}, _('配置已保存并同步。请重启 QModem 或设备后识别新型号。')));
+					window.location.reload();
+				}).catch(function(err) {
+					ui.addNotification(null, E('p', {}, _('配置操作未完成：%s').format(err.message || String(err))), 'warning');
+				}).then(function() { button.disabled = false; });
+			} }, _('保存并同步支持库'))),
+			E('div', { 'class': 'mt-control-note' }, _('USB ID 是厂商 VID（例如 2c7c），无需填写设备 PID；已有的官方型号不会被覆盖。候选串口请先确认可响应 AT。')),
+			entries.map(function(entry) {
+				return E('div', { 'class': 'qm-custom-entry' }, [
+					E('span', {}, entry.model + ' · ' + (entry.bus === 'pcie' ? 'PCIe' : 'USB') + ' · ' + (entry.modes || '--')),
+					E('button', { 'type': 'button', 'class': 'btn', 'click': function() {
+						controls.confirmModal(_('移除自定义型号'), _('移除 %s 的自定义配置？已写入的 QModem 官方支持库条目会保留。').format(entry.model), function() {
+							return controls.deleteCustomModel(entry.model, entry.bus).then(function(result) {
+								if (!result || !result.success) throw new Error((result && result.error) || _('删除失败'));
+								window.location.reload();
+							});
+						}, false);
+					} }, _('移除'))
+				]);
+			})
+		], true);
 	},
 
 	capabilityCard: function(section, res, disabled) {
@@ -456,7 +606,9 @@ return view.extend({
 						E('p', {}, _('QModem 依赖模组支持库识别模组型号。若本模组尚未被 QModem 收录，可在此写入内置定义。'))
 					]),
 					E('div', { 'class': 'mt-control-grid' }, [
-						this.supportCard(res.support)
+						this.supportCard(res.support),
+						this.portCard(res.ports),
+						this.customCard(res.custom)
 					])
 				]) ]
 			));
@@ -519,7 +671,9 @@ return view.extend({
 					E('p', {}, _('QModem 依赖模组支持库识别模组型号；本插件内置的型号定义可一键写入。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
-					this.supportCard(res.support)
+					this.supportCard(res.support),
+					this.portCard(res.ports),
+					this.customCard(res.custom)
 				])
 			]),
 

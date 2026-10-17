@@ -43,7 +43,7 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 | 射频与小区 Radio and Cells | 频段、邻区、锁频锁小区、诊断 |
 | 短信 Messages | 数据库／模组存储自动识别，收发、未读状态与会话视图 |
 | 模组与 SIM | 模组身份、SIM 信息与维护操作 |
-| 高级 Advanced | 模组支持库同步、诊断控制台、IP 透传 / Post-Route / DMZ 等 |
+| 高级 Advanced | 外观主题、串口与模组映射、自定义型号、支持库同步及能力诊断 |
 | AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入） |
 | 设备参数设置 | QModem `modem-device` 配置节（从「高级 / 模组与 SIM」页进入） |
 
@@ -52,7 +52,7 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 - 使用 QModem 官方 ubus 接口，全模组通用；动态字段自适应，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
 - MT5700 系列海思模组 SIM 卡槽上电自动初始化（开机服务 + 首次安装脚本）。
-- 内置模组定义自动注入 QModem 支持库（当前含 Quectel RG520N-CN），替代手工编辑 `modem_support.json`。
+- 内置 RG520N-CN、RG502Q-EA、RG650E-EU、RG650V-EU 定义；高级页可查看 USB/PCIe 串口和硬件 ID，并添加其它型号。
 
 ## 文件布局
 
@@ -143,7 +143,9 @@ QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号，未收
 | 校验 | 写入后按 JSON 解析校验，失败自动回滚备份 |
 | 兼容 | QModem 未安装时直接退出；用目录锁避免并发改写；按分组（`usb`/`pcie`）查找不误判 |
 
-**生效条件**：QModem 只在启动 / 重扫时读取支持库，注入后需 `/etc/init.d/qmodem restart` 或重启设备。追加其它型号：编辑 `/usr/share/qmodem-generic/extra_modem_support.json`（结构同 QModem 支持库），再执行 `/usr/sbin/qmodem-modem-support`。
+**生效条件**：QModem 只在启动 / 重扫时读取支持库，注入后需 `/etc/init.d/qmodem restart` 或重启设备。已有的官方型号会跳过，不覆盖原定义。RG650V-EU 已在新版官方 QModem 中收录，这里保留给旧版作兼容。
+
+高级页的「串口与模组对应关系」从系统设备树读取 USB VID:PID 或 PCI 厂商/设备 ID；QModem 配置过的 AT 口标为已确认，其余仅是候选串口，可手动点「读取型号」。自定义配置按 USB/PCIe 和型号分别保存到 `/etc/qmodem-generic/modems/`，点「保存并同步支持库」后重启 QModem 生效。USB 配置填写厂商 VID，PCIe 硬件 ID 仅用于设备识别；拨号驱动及型号专属能力仍须由 QModem 和固件提供。移除自定义配置不会删除已经注入的官方支持库条目。
 
 相关文件：`/usr/share/qmodem-generic/extra_modem_support.json`、`/usr/sbin/qmodem-modem-support`（`--status` 只查询，`--json` 机器可读）、`/etc/init.d/qmodem-modem-support`、`/usr/libexec/rpcd/qmodem_support`。
 
