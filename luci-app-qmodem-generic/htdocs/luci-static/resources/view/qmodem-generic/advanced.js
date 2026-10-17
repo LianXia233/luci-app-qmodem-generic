@@ -687,16 +687,40 @@ return view.extend({
 			} }, _('保存并同步支持库')) ]),
 			E('div', { 'class': 'mt-control-note' }, _('官方 QModem 原生型号不可修改。自定义型号发生冲突时也不允许直接覆盖。')),
 			entries.map(function(entry) {
+				var conflict = entry.state === 'conflict';
+				var status = conflict ? _('存在同名冲突') : entry.state === 'missing' ? _('未同步') : _('已同步');
+				var source = entry.source === 'builtin' ? _('插件内置 JSON') : _('用户 JSON');
 				return E('div', { 'class': 'qm-custom-entry' }, [
-					E('span', {}, entry.model + ' · ' + (entry.bus === 'pcie' ? 'PCIe' : 'USB') + ' · ' + (entry.modes || '--')),
-					E('button', { 'type': 'button', 'class': 'btn', 'click': function() {
-						controls.confirmModal(_('移除自定义型号'), _('移除 %s 的自定义配置？已写入的 QModem 官方支持库条目会保留。').format(entry.model), function() {
-							return controls.deleteCustomModel(entry.model, entry.bus).then(function(result) {
-								if (!result || !result.success) throw new Error((result && result.error) || _('删除失败'));
-								window.location.reload();
-							});
-						}, false);
-					} }, _('移除'))
+					E('span', {}, entry.model.toUpperCase() + ' · ' +
+						(entry.bus === 'pcie' ? 'PCIe' : 'USB') + ' · ' +
+						(entry.modes || '--') + ' · ' + source + ' · ' + status),
+					E('div', { 'class': 'qm-port-actions' }, [
+						E('button', {
+							'type': 'button', 'class': 'btn cbi-button-action',
+							'disabled': conflict ? 'disabled' : null,
+							'click': function() {
+								Object.assign(draft, entry, { edit:'1' });
+								self.fillCustomForm();
+								if (fields.model.scrollIntoView)
+									fields.model.scrollIntoView({ behavior:'smooth', block:'center' });
+								ui.addNotification(null, E('p', {}, _('已载入 %s，修改后保存即可同步两处 JSON。').format(entry.model)), 'info');
+							}
+						}, _('编辑')),
+						entry.source === 'user' ? E('button', {
+							'type': 'button', 'class': 'btn',
+							'click': function() {
+								controls.confirmModal(_('移除用户自定义 JSON'),
+									_('仅移除 %s 的用户源文件，已写入 QModem 的条目会保留。').format(entry.model),
+									function() {
+										return controls.deleteCustomModel(entry.model, entry.bus).then(function(result) {
+											if (!result || !result.success)
+												throw new Error((result && result.error) || _('删除失败'));
+											window.location.reload();
+										});
+									}, false);
+							}
+						}, _('移除用户配置')) : null
+					])
 				]);
 			})
 		], true);
