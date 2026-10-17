@@ -112,8 +112,10 @@ function parseMessages(raw) {
 
 /* 用户已确认删除的记录在本次会话中立即隐藏，避免被旧版 SMS 缓存重新画回。 */
 function smsMessageKey(message) {
-	return String(message.source || 'modem') + ':' +
-		(message.indexes || []).join(',') + ':' + String(message.index || '');
+	/* 加上号码、时间及内容，避免运营商随后复用同一 SIM 槽位时误隐藏新短信。 */
+	return [ message.source || 'modem', (message.indexes || []).join(','),
+		String(message.index == null ? '' : message.index), message.number || '',
+		message.date || '', message.text || '' ].join('\u001f');
 }
 
 function groupMessages(messages) {
