@@ -579,7 +579,8 @@ return view.extend({
 			fields.manufacturer_id.disabled = bus.value === 'pcie';
 			updateProtocols();
 		}
-		this.fillCustomForm = fillForm;
+		/* 从串口卡片切换到另一个总线时，同步切换可用的 QModem 模板列表。 */
+		this.fillCustomForm = function() { fillForm(); templateOptions(); };
 		templateOptions();
 		fillForm();
 		bus.addEventListener('change', function() {
