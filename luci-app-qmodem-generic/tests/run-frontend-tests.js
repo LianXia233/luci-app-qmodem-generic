@@ -37,6 +37,7 @@ function makeRuntime() {
 	var cacheDelayMs = 0;
 	var smsApi = null;
 	var modemSmsApi = null;
+	var dialResultStatus = '1';
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -211,6 +212,8 @@ function makeRuntime() {
 					else if (t.payload.args) t.result = { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } };
 					else t.result = { response: 'AT+CGMI\r\nQuectel\r\n\r\nOK', result: 'success', ret: 0 };
 				}
+				else if ([ 'modem_dial', 'modem_hang', 'modem_redial' ].indexOf(t.operation) !== -1)
+					t.result = { result: { status: dialResultStatus, message: dialResultStatus === '0' ? 'Dial command failed' : 'Dial command executed successfully' } };
 				else if (t.operation === 'stats_reset')
 					t.result = { success: true, reset: true };
 				else if (t.operation === 'support_sync')
@@ -432,6 +435,7 @@ function makeRuntime() {
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
+		setDialResultStatus: function(value) { dialResultStatus = String(value); },
 		setSmsCache: function(data) {
 			cacheDomains.sms = {
 				status:'ready', updated:NOW - 120, stale:false, ttl:600,
@@ -544,6 +548,33 @@ function testActions(rt, controls) {
 			});
 		});
 	});
+}
+
+function testDialResults() {
+	console.log('\n[4c] QModem 拨号/挂断/重拨返回值校验');
+	var rt = makeRuntime(), controls = loadControls(rt);
+	var names = [ [ 'modemDial', 'modem_dial' ], [ 'modemHang', 'modem_hang' ],
+		[ 'modemRedial', 'modem_redial' ] ];
+	return names.reduce(function(chain, pair) {
+		return chain.then(function() {
+			rt.setDialResultStatus('1');
+			return controls[pair[0]]('8_1').then(function(res) {
+				assertEq(pair[1] + ' status=1 正常成功', res.result.status, '1');
+				var task = rt.calls.filter(function(x) {
+					return x.object === 'qmodem_cache' && x.method === 'action' &&
+						x.params.method === pair[1];
+				})[0];
+				assertEq(pair[1] + ' 动态模组节 8_1 正确传递', task.params.args.config_section, '8_1');
+				rt.setDialResultStatus('0');
+				return controls[pair[0]]('8_1').then(function() {
+					ok(pair[1] + ' status=0 必须失败', false);
+				}, function(err) {
+					ok(pair[1] + ' status=0 返回实际失败错误',
+						/fail|失败|拒绝/i.test((err && err.message) || ''));
+				});
+			});
+		});
+	}, Promise.resolve());
 }
 
 function testActionPayloads() {
@@ -1051,6 +1082,7 @@ var rt = makeRuntime();
 testBootstrap(rt)
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(testActionPayloads)
+	.then(testDialResults)
 	.then(testSmsSources)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
