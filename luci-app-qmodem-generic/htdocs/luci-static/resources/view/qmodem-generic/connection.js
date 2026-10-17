@@ -173,6 +173,7 @@ return view.extend({
 
 			/* 双列地址与会话面板 */
 			'.mtconn-session-grid{display:grid;grid-template-columns:1.28fr 0.92fr;gap:16px;margin-bottom:16px}',
+			'.mtconn-session-stack{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}.mtconn-session-stack>.mtconn-card{min-width:0}.mtconn-session-stack>.mtconn-dial-summary{order:-1}.mtconn-dial-summary{padding:16px 20px}.mtconn-dial-summary .mtconn-sec-head{align-items:center;margin-bottom:10px}.mtconn-runtime-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.mtconn-runtime-item{background:var(--qm-surface-2);border:1px solid var(--qm-border-soft);border-radius:12px;padding:11px 14px;min-width:0}.mtconn-runtime-label{color:var(--qm-text-muted);font-size:11px;margin-bottom:5px}.mtconn-runtime-value{font-size:14px;font-weight:750;color:var(--qm-text);word-break:break-word}.mtconn-runtime-value.online{color:var(--qm-ok)}.mtconn-runtime-value.offline{color:var(--qm-danger)}.mtconn-dial-extra{margin-top:9px;font-size:12px;color:var(--qm-text-muted)}.mtconn-dial-extra summary{cursor:pointer;padding:6px 0}.mtconn-dial-extra .mtconn-dial-list{margin-top:5px;max-height:180px}',
 			'.mtconn-sec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}',
 			'.mtconn-sec-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px}',
 			'.mtconn-sec-sub{font-size:11px;color:var(--qm-text-muted);margin-top:2px}',
@@ -225,7 +226,7 @@ return view.extend({
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.mtconn-facts{grid-template-columns:repeat(2,1fr)}.mtconn-session-grid{grid-template-columns:1fr}.mtconn-address-grid{grid-template-columns:1fr}}',
-			'@media(max-width:680px){.mtconn-hero{flex-direction:column;align-items:flex-start}.mtconn-facts{grid-template-columns:1fr}.mtconn-config-card .cbi-value{grid-template-columns:1fr;gap:6px}}'
+			'@media(max-width:680px){.mtconn-hero{flex-direction:column;align-items:flex-start}.mtconn-facts{grid-template-columns:1fr}.mtconn-runtime-grid{grid-template-columns:1fr}.mtconn-config-card .cbi-value{grid-template-columns:1fr;gap:6px}}'
 		].join(''));
 	},
 
@@ -311,17 +312,26 @@ return view.extend({
 			dns4 = ifstat['dns-server'].map(cleanDns).filter(Boolean).join(', ');
 
 		var dialStatus = plainObject(res.dial, 'dial_status');
+		var running = dialStatus.running;
+		var serviceOn = running === true || running === 1 ||
+			/^(?:true|1|running)$/i.test(String(running));
+		var serviceKnown = running !== null && running !== undefined && String(running) !== '';
 		var dialRows = Object.keys(dialStatus || {}).filter(function(k) {
-			var v = dialStatus[k];
-			return controls.hasValue(v) && typeof v !== 'object';
-		}).slice(0, 14).map(function(k) {
+			return k !== 'running' && controls.hasValue(dialStatus[k]) && typeof dialStatus[k] !== 'object';
+		}).slice(0, 12).map(function(k) {
 			return E('div', { 'class': 'mtconn-dial-item' }, [
 				E('span', { 'class': 'mtconn-dial-key' }, k),
-				E('strong', { 'class': 'mtconn-dial-val' }, dialStatus[k] == null ? '--' : String(dialStatus[k]))
+				E('strong', { 'class': 'mtconn-dial-val' }, String(dialStatus[k]))
 			]);
 		});
+		function runtimeItem(label, value, kind) {
+			return E('div', { 'class': 'mtconn-runtime-item' }, [
+				E('div', { 'class': 'mtconn-runtime-label' }, label),
+				E('div', { 'class': 'mtconn-runtime-value' + (kind ? ' ' + kind : '') }, value)
+			]);
+		}
 
-		return E('div', { 'class': 'mtconn-session-grid' }, [
+		return E('div', { 'class': 'mtconn-session-stack' }, [
 			/* 地址与网络会话 */
 			E('section', { 'class': 'mtconn-card' }, [
 				E('div', { 'class': 'mtconn-sec-head' }, [
@@ -345,20 +355,31 @@ return view.extend({
 					self.sessionRow(_('已连接时长'), ifstat.uptime != null ? controls.formatDuration(ifstat.uptime) : '--')
 				])
 			]),
-			/* 拨号状态原始上报 */
-			E('section', { 'class': 'mtconn-card' }, [
+			/* 紧凑的连接状态带：服务运行不等于移动数据已经连接。 */
+			E('section', { 'class': 'mtconn-card mtconn-dial-summary' }, [
 				E('div', { 'class': 'mtconn-sec-head' }, [
 					E('div', {}, [
 						E('div', { 'class': 'mtconn-sec-title' }, [
 							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>'),
-							_('拨号状态')
+							_('连接与拨号状态')
 						]),
-						E('div', { 'class': 'mtconn-sec-sub' }, _('QModem dial_status 实时状态上报'))
+						E('div', { 'class': 'mtconn-sec-sub' }, _('拨号服务状态与实际联网状态分别展示'))
 					]),
-					E('span', { 'class': 'mtconn-badge online' }, 'ubus')
+					E('span', { 'class': 'mtconn-badge' + (connected ? ' online' : ' offline') },
+						connected ? _('网络已连接') : _('网络未连接'))
 				]),
-				dialRows.length ? E('div', { 'class': 'mtconn-dial-list' }, dialRows) :
-					E('div', { 'style': 'color:var(--qm-text-muted);font-size:12px;padding:20px 0;text-align:center' }, _('暂无拨号状态数据'))
+				E('div', { 'class': 'mtconn-runtime-grid' }, [
+					runtimeItem(_('拨号服务'), serviceKnown ?
+						(serviceOn ? _('正在运行') : _('已停止')) : _('等待 QModem 上报'),
+						serviceKnown ? (serviceOn ? 'online' : 'offline') : ''),
+					runtimeItem(_('移动网络'), connected ? _('已连接') : _('未连接'),
+						connected ? 'online' : 'offline'),
+					runtimeItem(_('网络接口'), res.iface || '--')
+				]),
+				dialRows.length ? E('details', { 'class': 'mtconn-dial-extra' }, [
+					E('summary', {}, _('查看 %d 项拨号诊断信息').format(dialRows.length)),
+					E('div', { 'class': 'mtconn-dial-list' }, dialRows)
+				]) : null
 			])
 		]);
 	},
