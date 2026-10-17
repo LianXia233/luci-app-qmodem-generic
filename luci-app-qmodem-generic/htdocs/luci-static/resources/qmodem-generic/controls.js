@@ -1162,7 +1162,8 @@ function deleteSmsMessage(section, message) {
 		if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error(_('无效的短信记录编号。')));
 		return withTimeoutReject(callSmsDelete(section, id), 10000, _('删除短信超时')).then(smsServiceAction);
 	}
-	var indexes = smsStorageIndexes(message.indexes || [message.index]);
+	var rawIndexes = message.indexes && message.indexes.length ? message.indexes : [message.index];
+	var indexes = smsStorageIndexes(rawIndexes);
 	if (!indexes.length)
 		return Promise.reject(new Error(_('短信缺少有效的模组存储索引，不能删除。')));
 	return deleteSms(section, indexes.join(' ')).then(modemSmsDeleteResult).then(function(result) {
