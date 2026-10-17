@@ -5,6 +5,8 @@
 'require ui';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 移动数据（Mobile Data）— 现代白色毛玻璃 (Glassmorphism) + 动态数据通路 SVG 重构
  * 数据源全部来自 QModem 的 ubus 对象及 UCI 配置：
@@ -54,7 +56,7 @@ function joinAddresses(list) {
 }
 
 function cleanDns(v) {
-	return String(v == null ? '' : v).split(/\s+/)[0] || '';
+	return controls.valueText(v).trim().split(/\s+/)[0] || '';
 }
 
 // 安全渲染 SVG 节点 helper
@@ -123,7 +125,7 @@ return view.extend({
 	styleNode: function() {
 		return E('style', {}, [
 			/* 全局毛玻璃与流动渐变底蕴 */
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mtconn-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境氛围光球 */
 			'.mtconn-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -229,6 +231,7 @@ return view.extend({
 
 	/* 顶部 4 栏关键信息卡片 */
 	renderFactCard: function(iconSvg, label, value) {
+		if (!controls.hasValue(value)) return null;
 		return E('div', { 'class': 'mtconn-card mtconn-fact-card' }, [
 			E('div', { 'class': 'mtconn-fact-icon' }, [ svgNode(iconSvg) ]),
 			E('div', {}, [
@@ -239,10 +242,7 @@ return view.extend({
 	},
 
 	sessionRow: function(label, value) {
-		return E('div', { 'class': 'mtconn-kv-row' }, [
-			E('span', { 'class': 'mtconn-kv-label' }, label),
-			E('strong', { 'class': 'mtconn-kv-val' }, value || '--')
-		]);
+		return controls.dataRow(label, value, 'mtconn-kv-row', 'mtconn-kv-label', 'mtconn-kv-val');
 	},
 
 	/* 动态 SVG 网络数据通路与拨号隧道图 */
@@ -313,7 +313,7 @@ return view.extend({
 		var dialStatus = plainObject(res.dial, 'dial_status');
 		var dialRows = Object.keys(dialStatus || {}).filter(function(k) {
 			var v = dialStatus[k];
-			return v == null || typeof v !== 'object';
+			return controls.hasValue(v) && typeof v !== 'object';
 		}).slice(0, 14).map(function(k) {
 			return E('div', { 'class': 'mtconn-dial-item' }, [
 				E('span', { 'class': 'mtconn-dial-key' }, k),
@@ -430,7 +430,7 @@ return view.extend({
 		}).connected;
 		var mode = plainObject(res.mode, 'mode');
 		var modeName = Object.keys(mode || {}).filter(function(k) {
-			return String(mode[k]) === '1';
+			return controls.isEnabled(mode[k]);
 		}).join(' / ').toUpperCase();
 		var configuredApn = uci.get('qmodem', section, 'apn') || _('自动');
 		var configuredPdp = { IPV4V6: 'IPv4 / IPv6', IPV4: 'IPv4', IPV6: 'IPv6' }[String(uci.get('qmodem', section, 'pdp_type') || '').toUpperCase()] || 'IPv4 / IPv6';
@@ -463,7 +463,7 @@ return view.extend({
 		]);
 
 		/* 入站路由与数据通路面板 */
-		var inboundPanel = E('div', { 'style': 'padding-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px' }, [
+		var inboundPanel = E('div', { 'class': 'mtconn-inbound-grid' }, [
 			controls.card(_('数据通路'), _('由 QModem 上报的模组数据通路信息。'), [
 				controls.state(_('网络接口'), res.iface),
 				controls.state(_('拨号模式'), modeName || '--'),

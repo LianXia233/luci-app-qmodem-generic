@@ -5,6 +5,8 @@
 'require ui';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 设备参数（Settings）— 现代白色毛玻璃 (Glassmorphism) + 动态配置流 SVG 重构
  * 本页编辑 QModem 的 UCI 配置 /etc/config/qmodem 中当前模组的 modem-device 配置节。
@@ -33,7 +35,7 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-diag-page{position:relative;max-width:960px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
 			'.mt-set-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',

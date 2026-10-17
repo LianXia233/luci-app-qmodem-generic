@@ -97,13 +97,13 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
 
 ## 3. 字段映射（通用；示例取自 huawei / MT5700M / FM350-GL 实测）
 - 基本信息（getBaseInfo 数组）：`name`(型号), `manufacturer`(制造商), `revision`(固件), `at_port`(AT 端口), `connect_status`, `temperature`(如 `42 °C`)
-- SIM（getSimInfo 数组）：`SIM Status`, `SIM Slot`, `SIM Number`(手机号), `ISP`(运营商), `IMEI`, `IMSI`，`ICCID`（**部分模组不返回 ICCID/手机号**，显示 `--`；ICCID/ISP 值中的换行与控制字符由 `cleanText()` 清洗）
+- SIM（getSimInfo 数组）：`SIM Status`, `SIM Slot`, `SIM Number`(手机号), `ISP`(运营商), `IMEI`, `IMSI`，`ICCID`（**部分模组不返回 ICCID/手机号**，隐藏对应行；ICCID/ISP 值中的换行与控制字符由 `cleanText()` 清洗）
 - 小区/信号（getCellInfo 数组）：`network_mode`(如 `LTE Mode`/`NR5G-SA Mode`/`EN-DC Mode`), `RSRP`(进度条值,`'-95'`), `RSRQ`, `SINR`, `Physical Cell ID`, `TAC`, `EARFCN`(LTE)或`ARFCN`(NR), `Band`, `DL Bandwidth`, `UL Bandwidth`, `MCC`, `MNC`, `SCS`
 - 网络（getNetworkInfo 数组）：`Network Type` 等；作为接入技术/运营商/APN 的回退数据源
 - 连接（getConnectStatus 数组）：`connect_status`(`Yes`/`No`)
 - DNS（getDns）：`dns.ipv4_dns1` 等（值中可能带换行+杂散数据，用 `cleanDns()` 取首个有效地址）
 - 模式（getMode）：`mode.ecm`/`mode.ncm` 为 `'1'` 表示当前模式
-- 运营商（全模组通用解析链）：① 小区 MCC/MNC（`operatorInfo(name, mcc, mnc)` 映射中国运营商）→ ② SIM/网络信息上报的运营商名称（`ISP`/`operator`/`Operator` 键，经 `cleanText()` 清洗后传入 `operatorInfo()` 第一参数做关键字映射）→ ③ 均无时 SIM 卡片显示 `--`
+- 运营商（全模组通用解析链）：① 小区 MCC/MNC（`operatorInfo(name, mcc, mnc)` 映射中国运营商）→ ② SIM/网络信息上报的运营商名称（`ISP`/`operator`/`Operator` 键，经 `cleanText()` 清洗后传入 `operatorInfo()` 第一参数做关键字映射）→ ③ 均无时隐藏 SIM 卡片的运营商行
 - 接入技术（通用解析链）：小区 `network_mode` → 各信息源 `Network Type` → `Radio Access Technology`
 - APN（通用解析链）：UCI 配置值 → QoS 上报（rpcd `qos qos_info` 的 `apn` 字段，来自 AT+CGCONTRDP）→ 网络信息的 `APN` 键
 - QoS Level 与签约速率（两级数据源，**优先 QModem 上报**）：
@@ -111,7 +111,7 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
      `AMBR UL` / `AMBR DL` 键（vendor 脚本口径，单位 Mbps，前端 ×1000 换算 kbps）；
   2) 缺失时回退 rpcd 插件 `/usr/libexec/rpcd/qos` 的 AT 探测链
      （`AT+CGEQOSRDP=<cid>` → `AT+C5GQOSRDP` → `AT+CGCONTRDP` 兜底），仍无则该行显示 `--`。
-     SIM 卡片的 QoS Level 行常显，不随数据缺失隐藏。
+     未获取到的 QoS Level 与签约速率行隐藏；其它可用信息照常显示。
 - 调制信息（rpcd 插件同一对象的 `radio_info` 方法）：返回 `{ rat, band, dl_modulation, ul_modulation, dl_mimo, ul_mimo, dl_mcs?, ul_mcs?, status }`；
   探测链：Fibocom 系 `AT+GTCAINFO?`（PCC 行含 band 编码 50x=NR x / 101+N=LTE N、MIMO 层数、调制枚举 0=BPSK…4=256QAM）
   → Quectel 系 `AT+QNWCFG="nr5g_csi"`（下行 PDSCH MCS）。前端载波卡片渲染为 `NR · MCS 20 · 64QAM`
@@ -133,13 +133,13 @@ render() 中若 `res.section` 为 null，显示"未检测到模组（请确认 Q
 | `mt5700m-at advanced-set sim-slot <n>` | setSimSlot(section, n)（huawei 支持） |
 | `mt5700m-at advanced-set sim-activation ...` | sendAt（模块 AT） |
 | `mt5700m-at airplane <0|1>` | sendAt(section, atPort, 'AT+CFUN=0'/'AT+CFUN=1,1') 或 doReboot |
-| `mt5700m-at factory-reset` | sendAt(section, atPort, 'AT+CFUN=1') 或 doReboot(section,'hard') |
+| `mt5700m-at factory-reset` | 没有通用方法；按具体型号手册使用 AT 控制台，不将开启射频或重启视为恢复出厂 |
 | `mt5700m manager connect/disconnect/redial` | modemDial / modemHang / modemRedial |
 | `mt5700m-at network`(radio 策略) | getMode/setMode, getNetworkPrefer/setNetworkPrefer, getLockBand/setLockBand |
 | `mt5700m-at advanced radio`(锁频/邻区/扫描) | getLockBand/setLockBand, getNeighborCell, getCurrentBand；扫描用 sendAt(section,atPort,'AT^CELLSCAN') 并解析返回行 |
 
 ## 5. 防御式渲染
-- 某字段对当前模组不可用（如 ICCID、部分邻区、流量统计）：显示 `--` 或给出"本模组经 QModem 暂不支持/暂无数据"的提示，不要调用旧后端。
+- 某字段未上报或为空（如 ICCID、QoS、部分小区参数）：隐藏对应数据行；整块数据不可用时可保留简短空态提示。原始调试 JSON 保留，不调用旧后端。0/false 不作为通用空值。
 - `getUsageStats` 部分模组返回 `available:0`：流量面板显示"本模组经 QModem 暂未提供流量统计（部分模组驱动未实现 usage_stats）"，不要报错。
 - `getDailyStats` 返回的 `swapped=1` 时，今日下载/上传、历史条形图与累计拆分都要交换 rx/tx，
   并显示「模组驱动上下行计数相反，已自动交换」提示；`days` 为空且今天尚无流量时显示

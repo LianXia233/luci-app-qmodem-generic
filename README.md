@@ -1,12 +1,14 @@
 # luci-app-qmodem-generic
 
-[![Build IPK & APK](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml)
+[![Build IPK & APK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
 > **QModem 的通用美化版 LuCI Web UI。** 界面数据全部经由 QModem 的 `qmodem` ubus 对象读取，不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
 >
 > 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已完全去除私有文本后端，改为纯 `qmodem` ubus 链路。
+
+未获取到的数据自动隐藏对应行。网络模式按 QModem 实际上报展示；MT5700 专有设置仅向对应型号显示，其它模组可使用通用 AT 控制台。
 
 ## 目录
 
@@ -211,6 +213,8 @@ python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 - **`settings` 与 `terminal` 页不做轮询重绘**：避免把用户未保存的表单内容 / AT 会话日志冲掉。
 
 ## 相关文档
+
+- [逐页修复与验证范围（2.5.0-3）](docs/QMODEM_PAGE_REVIEW.md)
 
 - [异步化架构（后端任务不阻塞页面加载）](docs/QMODEM_ASYNC_ARCHITECTURE.md)
 - [QModem 通用美化版 UI 重构与自我审查报告](docs/QMODEM_GENERIC_UI_REPORT.md)

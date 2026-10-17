@@ -221,6 +221,7 @@ function makeRuntime() {
 
 	/* 极简 DOM 替身 */
 	function El(tag, attrs, children) {
+		this.nodeType = 1;
 		this.tagName = String(tag || 'div').toUpperCase();
 		this.attributes = attrs || {};
 		this.children = [];
@@ -663,6 +664,44 @@ function testQosDisplay(rt, controls) {
 	return Promise.resolve();
 }
 
+function testOptionalData() {
+	console.log('\n[7.6] 不同品牌的空值、零值与字段别名');
+	var rt = makeRuntime(), controls = loadControls(rt);
+	[null, undefined, '', '  ', '--', 'N/A', 'null', 'undefined', 'unknown', NaN, [], {}].forEach(function(value) {
+		ok('空值不展示 ' + String(value), !controls.hasValue(value));
+	});
+	[0, '0', false, 'No', -11.5, '8986012345'].forEach(function(value) {
+		ok('有效上报保留 ' + String(value), controls.hasValue(value));
+	});
+	assertEq('缺失字段不生成数据行', controls.dataRow('QoS', null), null);
+	ok('零值生成数据行', !!controls.dataRow('PCI', 0));
+	ok('false 生成数据行', !!controls.dataRow('running', false));
+	var node = controls.element('div', {}, [null, undefined, [controls.element('b', {}, 'ok'), null], 0]);
+	assertEq('条件节点展开并过滤 null/undefined，保留 0', node.children.length, 2);
+	var entries = [{key:'model', value:'FM350-GL'}, {key:'sim_status', value:'READY'}, {key:'ICCID', value:'N/A'},
+		{key:'iccid', value:'8986012345'}, {key:'sinr', value:0}, {key:'PCI', value:0}];
+	assertEq('型号别名', controls.findEntry(entries, 'name'), 'FM350-GL');
+	assertEq('SIM 状态别名', controls.entryMap(entries)['SIM Status'], 'READY');
+	assertEq('空字段允许回退到有效的大小写别名', controls.findEntry(entries, 'ICCID'), '8986012345');
+	assertEq('数值 SINR 0 不丢失', controls.findEntry(entries, 'SINR'), 0);
+	assertEq('PCI 别名与 0', controls.findEntry(entries, 'Physical Cell ID'), 0);
+	assertEq('数字 MNC 1 补齐中国运营商编码', controls.operatorInfo(null, 460, 1).name, '中国联通');
+	assertEq('数字 MNC 0 不丢失', controls.operatorInfo(null, 460, 0).name, '中国移动');
+	assertEq('空信息组不显示卡片', controls.renderInfoGrouped([{key:'QCI',value:'N/A'}]).length, 0);
+	assertEq('没有凭空增加网络能力', controls.flagKeys({rndis:'1',error:'timeout'}).join(','), 'rndis');
+	ok('识别原生布尔能力', controls.isEnabled(true));
+	ok('FM350 不展示华为私有 AT 设置', !controls.supportsTdTechAt('modem1', entries));
+	ok('MT5700 保留专有设置', controls.supportsTdTechAt('modem1', [{key:'name',value:'MT5700M-CN'}]));
+	var status = rt.loadModule('view/qmodem-generic/status.js', {'luci/qmodem-generic/controls':controls});
+	assertEq('概览解析保留 SINR 0', status.parseStatus({cell:entries}).sinr, '0');
+	assertEq('概览缺失字段隐藏', status.infoRow('签约速率', '--'), null);
+	var network = rt.loadModule('view/qmodem-generic/network.js', {'luci/qmodem-generic/controls':controls});
+	assertEq('无线页缺失字段隐藏', network.row('RSRQ', 'N/A'), null);
+	assertEq('无线页缺失仪表隐藏', network.metricGauge('RSRQ', 'rsrq', null, 'dB'), null);
+	var system = rt.loadModule('view/qmodem-generic/system.js', {'luci/qmodem-generic/controls':controls});
+	assertEq('SIM 页缺失字段隐藏', system.row('ICCID', ''), null);
+}
+
 function testRender(rt) {
 	console.log('\n[8] 视图渲染：首屏数据不全也不能抛异常（白屏）');
 	rt.setUbusDelay(8000);
@@ -719,6 +758,7 @@ testBootstrap(rt)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
 	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
+	.then(testOptionalData)
 	.then(function() { return testRender(makeRuntime()); })
 	.then(function() {
 		console.log('\n----------------------------------------');

@@ -3,6 +3,8 @@
 'require ui';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * AT 命令终端（AT Terminal）
  *
@@ -28,7 +30,7 @@ function atText(res) {
 	if (typeof res === 'string')
 		return res;
 
-	var keys = [ 'result', 'response', 'at_response', 'output', 'data', 'message', 'stdout' ];
+	var keys = [ 'response', 'result', 'at_response', 'output', 'data', 'message', 'stdout' ];
 	for (var i = 0; i < keys.length; i++) {
 		var value = res[keys[i]];
 		if (typeof value === 'string' && value !== '')

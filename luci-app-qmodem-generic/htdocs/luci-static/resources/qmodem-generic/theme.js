@@ -227,7 +227,7 @@ var CARD_CLASSES = [
 	'mt-system-temp-box', 'mt-terminal-card', 'mt-ui-card', 'mtconn-card', 'mtconn-config-card',
 	'mtconn-fact-card', 'mtconn-topo-card', 'qm-glass-card', 'qm-stat-card', 'qm-cc-card',
 	'qm-address-card', 'qm-ip-box', 'qm-carrier-topo-box', 'qm-signal-dial-box', 'qm-traffic-chart-box',
-	'qm-mini-item', 'qm-cc-metrics', 'mt-locksum-chip', 'mt-band-option', 'mt-diag-card-head'
+	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option', 'mt-diag-card-head'
 ];
 /* Hero 容器类（带背景渐变的整块区域）与其内部元素类分开：
  * 背景/圆角只给容器，文字反色给容器的后代。 */
@@ -252,7 +252,7 @@ var BADGE_CLASSES = [
 ];
 var GRID_CLASSES = [
 	'mt-control-grid', 'mt-info-grid-all', 'mt-lock-cell-grid', 'mt-net-grid', 'mt-system-grid',
-	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid', 'mt-locksum-chips', 'mt-hardware-caps',
+	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid',
 	/* 视图内原本写死的 4 列 / 3 列栅格，统一交给自适应网格 */
 	'mt-net-metrics', 'mtconn-facts', 'qm-grid-2', 'qm-grid-3', 'qm-shortcuts', 'qm-traffic-layout',
 	'mt-hardware-bands', 'mt-system-thermal-form'
@@ -319,7 +319,13 @@ var CSS_LEGACY = [
 
 	/* 栅格：统一为自适应网格（原固定 2 列在窄屏会挤） */
 	sel(GRID_CLASSES) + '{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}',
-	'.qm-app .mt-locksum-chips,.qm-app .mt-hardware-caps{grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))}',
+	'.qm-app .mt-hardware-caps{display:flex;flex-wrap:wrap}',
+	'.qm-app .mt-net-row.mt-net-row-block{display:block}',
+	'.qm-app .mt-net-row-block>span:first-child{display:block;margin-bottom:8px}',
+	'.qm-app .mt-locksum{min-width:0;width:100%;padding:10px;box-sizing:border-box}',
+	'.qm-app .mt-locksum-group{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:6px 0}',
+	'.qm-app .mt-locksum-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0;max-width:100%}',
+	'.qm-app .mt-locksum-chip{flex:0 0 auto;padding:2px 7px;min-width:26px;box-shadow:none}',
 
 	/* 键值行 */
 	sel(ROW_CLASSES) + '{display:flex;align-items:baseline;justify-content:space-between;gap:12px;',
@@ -334,11 +340,12 @@ var CSS_LEGACY = [
 	'background:var(--qm-surface);color:var(--qm-text);font-size:12.5px;font-weight:650;cursor:pointer;',
 	'transition:background-color .16s ease,border-color .16s ease,filter .16s ease}',
 	selDesc(BTN_CLASSES, ':hover') + '{background:var(--qm-surface-2);border-color:var(--qm-border-strong)}',
+	'.qm-app .mtconn-btn-primary,.qm-app .mt-sys-btn-primary,.qm-app .mt-sms-btn-primary',
+	'{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
+	'.qm-app .mtconn-btn-danger,.qm-app .mt-sys-btn-danger',
+	'{background:var(--qm-danger-soft);border-color:var(--qm-danger-border);color:var(--qm-danger)}',
 	sel(BTN_CLASSES.filter(function(c) { return /primary|save/.test(c); })) +
 		'{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
-	sel(BTN_CLASSES.filter(function(c) { return /danger/.test(c); })) +
-		'{background:var(--qm-danger);border-color:var(--qm-danger);color:#fff}',
-
 	/* 等宽输出块 */
 	sel(MONO_CLASSES) + '{font-family:var(--qm-font-mono);font-size:12px;line-height:1.55;',
 	'white-space:pre-wrap;word-break:break-all;background:var(--qm-surface-2);color:var(--qm-text);',
@@ -353,6 +360,16 @@ var CSS_LEGACY = [
 	selDesc(HERO_CLASSES.concat(HERO_INNER_CLASSES), ' svg') + '{stroke:var(--qm-on-hero)!important}',
 	selDesc(HERO_CLASSES, ' [class*="badge"]') + ',' + selDesc(HERO_CLASSES, ' [class*="-dot"]') +
 		'{background:rgba(255,255,255,.18)!important}',
+	/* Hero 内的白底按钮/温度卡必须使用深色字，不能继承白色强制规则。 */
+	selDesc(HERO_CLASSES, ' button') + ',' + selDesc(HERO_CLASSES, ' a.btn') +
+		'{background:var(--qm-surface)!important;color:var(--qm-text)!important;-webkit-text-fill-color:var(--qm-text)!important}',
+	selDesc(HERO_CLASSES, ' button *') + ',' + selDesc(HERO_CLASSES, ' a.btn *') +
+		'{color:var(--qm-text)!important;-webkit-text-fill-color:var(--qm-text)!important}',
+	selDesc(HERO_CLASSES, ' button svg') + ',' + selDesc(HERO_CLASSES, ' a.btn svg') +
+		'{stroke:var(--qm-text)!important}',
+	'.qm-app .mt-system-hero .mt-system-temp-box{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.28);box-shadow:none}',
+	'.qm-app .qm-hero-op,.qm-app .qm-hero .qm-pill-tag,.qm-app .mtconn-hero .mtconn-state',
+	'{background:rgba(255,255,255,.16)!important;border-color:rgba(255,255,255,.28)!important}',
 
 	/* 进度条 / 条形图轨道 */
 	'.qm-app .qm-mini-bar,.qm-app .mt-sbar-track,.qm-app .mt-sbar{background:var(--qm-surface-3);border-radius:999px;overflow:hidden}',
@@ -363,7 +380,18 @@ var CSS_LEGACY = [
 	'.qm-app .cbi-input-text,.qm-app .cbi-input-select,.qm-app .cbi-input-textarea,',
 	'.qm-app input[type="text"],.qm-app input[type="password"],.qm-app select,.qm-app textarea',
 	'{background:var(--qm-surface);color:var(--qm-text);border:1px solid var(--qm-border);',
-	'border-radius:var(--qm-radius-xs);padding:6px 9px;max-width:100%}',
+	'border-radius:var(--qm-radius-xs);padding:6px 9px;max-width:100%;min-width:0;box-sizing:border-box}',
+	'.qm-app .mt-control-row{grid-template-columns:minmax(0,120px) minmax(0,1fr)}',
+	'.qm-app .mt-control-row>*,.qm-app .cbi-value>*,.qm-app .cbi-value-field>*,.qm-app .mt-sms-compose-row>*{min-width:0;max-width:100%}',
+	'.qm-app .mtconn-config-card .cbi-value,.qm-app .mt-diag-card .cbi-value{grid-template-columns:minmax(0,160px) minmax(0,1fr);gap:12px}',
+	'.qm-app .mtconn-config-card .cbi-value-title,.qm-app .mt-diag-card .cbi-value-title{float:none;width:auto;padding:0;text-align:left}',
+	'.qm-app .mtconn-config-card .cbi-value-field,.qm-app .mt-diag-card .cbi-value-field{margin:0;padding:0;min-width:0;width:100%}',
+	'.qm-app .mtconn-address-grid{grid-template-columns:1fr}',
+	'.qm-app .mtconn-inbound-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px;padding-top:14px}',
+	'.qm-app .qm-ip-val,.qm-app .mtconn-kv-val,.qm-app .mt-system-row strong,.qm-app .mt-net-row strong,.qm-app .qm-list-row strong',
+	'{min-width:0;overflow-wrap:anywhere;word-break:normal}',
+	'.qm-app .qm-list-row>span:first-child,.qm-app .mt-net-row>span:first-child,.qm-app .mt-system-row>span:first-child{flex:0 1 45%;min-width:0}',
+	'.qm-app .mt-hardware-head h2{background:none;-webkit-text-fill-color:currentColor;color:var(--qm-text)}',
 	'.qm-app .cbi-button:focus,.qm-app .btn:focus{outline:2px solid var(--qm-accent);outline-offset:2px}',
 	/* 分区标题（设置/高级/网络等表单页） */
 	'.qm-app .mt-control-section{margin-top:18px}',
@@ -464,7 +492,7 @@ var CSS_RESPONSIVE = [
 	'.qm-app .mt-sms-shell{grid-template-columns:1fr!important}',
 	'.qm-app .mt-sms-sidebar,.qm-app .mt-sms-contacts-scroll{max-height:220px}',
 	'.qm-app [class*="-hero"] [class*="-title"]{font-size:18px}',
-	'.qm-app .qm-kv-val,.qm-app ' + sel(VAL_CLASSES) + '{text-align:right}',
+	'.qm-app .qm-kv-val,' + sel(VAL_CLASSES) + '{text-align:right}',
 	'}',
 
 	/* 无障碍：尊重"减少动态效果" */

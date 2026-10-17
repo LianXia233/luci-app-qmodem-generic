@@ -3,6 +3,7 @@
 'require ui';
 'require uci';
 'require rpc';
+'require dom';
 'require qmodem-generic.theme as theme';
 
 /*
@@ -31,14 +32,8 @@
  * ------------------------------------------------------------------ *
  * LuCI 26.x（OpenWrt/ImmortalWrt Master 26.246+）旧 API 兼容层            *
  * ------------------------------------------------------------------ *
- * 新版 LuCI 已移除两个历史全局辅助：
- *   1) String.prototype.format —— 仅保留 String.prototype.format.call()，
- *      直接写 'x'.format(...) 会抛 ".format is not a function"；
- *   2) 全局 E()（旧 dom.create 别名）与 findParent()。
- * 本包视图仍沿用这些写法（共计数百处），在 26.x 上会出现"菜单正常、内容区
- * 永远停在 Loading view"的现象。这里在本模块被 require 时（早于任何视图体
- * 执行）按需补齐，缺失才注入、已存在绝不覆盖，避免影响其它插件。
- * 后续若视图整体迁移到 L.dom.create / 模板字符串，本段可直接删除。
+ * 旧视图使用 String.prototype.format 和 findParent；缺失时按需补齐。
+ * E 已迁移为下方局部 DOM 工厂，不再往 window 写入不完整的 DOM 实现。
  */
 (function installLuCILegacyCompat() {
 	if (typeof window === 'undefined')
@@ -89,29 +84,6 @@
 		};
 	}
 
-	if (typeof window.E === 'undefined') {
-		window.E = function(elem, attrs, data) {
-			if (elem instanceof Node)
-				return elem;
-			var e = document.createElement(String(elem));
-			if (attrs != null && typeof attrs === 'object') {
-				for (var k in attrs)
-					e.setAttribute(k, attrs[k]);
-			}
-			if (data != null) {
-				if (data instanceof Array)
-					data.forEach(function(x) {
-						e.appendChild(x instanceof Node ? x : document.createTextNode(String(x)));
-					});
-				else if (data instanceof Node)
-					e.appendChild(data);
-				else
-					e.innerHTML = String(data);
-			}
-			return e;
-		};
-	}
-
 	if (typeof window.findParent === 'undefined') {
 		window.findParent = function(node, selector) {
 			while (node && node.parentNode) {
@@ -133,6 +105,47 @@
 		window._ = function(s) { return String(s == null ? '' : s); };
 	}
 })();
+
+/* 本插件局部使用的 DOM 工厂，不修改 LuCI 的全局 E。
+ * 25.12 的 dom.append 会将数组中的 null/undefined 转成文字；先展开并过滤
+ * 条件节点，再交给 dom.create 绑定事件和属性。纯文本总以数组传入，避免把
+ * 模组名称、短信和 AT 返回值当作 HTML。数值 0 必须保留。 */
+function E(tag, attrs, children) {
+	var nodes = [];
+	function add(value) {
+		if (Array.isArray(value)) value.forEach(add);
+		else if (value != null && value !== false) nodes.push(value);
+	}
+	add(children);
+	return dom.create(tag, attrs || {}, nodes);
+}
+
+/* 空值只影响展示，不改变 RPC 原始数据或 UCI 配置。false/0 是有效上报。 */
+function hasValue(value) {
+	if (value == null) return false;
+	if (typeof value === 'number') return isFinite(value);
+	if (typeof value === 'boolean') return true;
+	if (Array.isArray(value)) return value.some(hasValue);
+	if (typeof value === 'object') {
+		if (value.nodeType) return true;
+		return Object.keys(value).some(function(k) { return hasValue(value[k]); });
+	}
+	return !/^(?:\s*|[-–—]+|n\s*\/\s*a|none|null|undefined|nan|unknown|not available|not supported|unsupported)$/i.test(String(value).trim());
+}
+
+function valueText(value) {
+	if (!hasValue(value)) return '';
+	if (Array.isArray(value)) return value.filter(hasValue).map(valueText).join(', ');
+	return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+function dataRow(label, value, rowClass, keyClass, valClass) {
+	if (!hasValue(value)) return null;
+	return E('div', { 'class': rowClass || 'qm-kv-row' }, [
+		E('span', { 'class': keyClass || '' }, label),
+		value && value.nodeType ? value : E('strong', { 'class': valClass || '' }, valueText(value))
+	]);
+}
 
 var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { }, nobatch: true });
 var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { }, nobatch: true });
@@ -685,11 +698,51 @@ function registerLivePoller(poller) {
 /* ------------------------------------------------------------------ */
 
 // 从 { modem_info: [ {key,value,...} ] } 数组中按 key 取出 value
+var INFO_KEYS = [
+	[ 'name', 'model', 'Model Name' ],
+	[ 'manufacturer', 'vendor' ],
+	[ 'revision', 'firmware', 'Firmware Version' ],
+	[ 'at_port', 'AT Port' ],
+	[ 'connect_status', 'connection_status' ],
+	[ 'SIM Status', 'sim_status' ],
+	[ 'SIM Slot', 'sim_slot' ],
+	[ 'SIM Number', 'MSISDN', 'Phone Number', 'phone_number' ],
+	[ 'ISP', 'operator', 'Operator Name' ],
+	[ 'network_mode', 'Network Type', 'Radio Access Technology' ],
+	[ 'Physical Cell ID', 'PCI', 'physical_cell_id' ],
+	[ 'Cell ID', 'CID', 'cell_id', 'NR Cell ID' ],
+	[ 'DL Bandwidth', 'dl_bandwidth' ], [ 'UL Bandwidth', 'ul_bandwidth' ],
+	[ 'IMEI' ], [ 'IMSI' ], [ 'ICCID' ], [ 'temperature' ]
+];
+
+function infoKey(key) { return String(key).toLowerCase().replace(/[\s_-]/g, ''); }
+
+function flagKeys(obj) {
+	return Object.keys(obj || {}).filter(function(k) { return /^(?:0|1|true|false)$/i.test(String(obj[k])); });
+}
+
+function isEnabled(value) { return /^(?:1|true)$/i.test(String(value)); }
+
+/* 下列 AT^ 私有设置仅在已知的 MT5700 系列上提供；其它品牌仍可用 AT 终端。 */
+function supportsTdTechAt(section, base) {
+	var model = findEntry(base, 'name') || '';
+	if (!model) try { model = uci.get('qmodem', section, 'model') || ''; } catch (e) {}
+	return /\bMT5700M?(?:[-\s]|$)/i.test(model);
+}
+
 function findEntry(arr, key) {
 	if (!Array.isArray(arr)) return undefined;
 	for (var i = 0; i < arr.length; i++) {
-		if (arr[i] && arr[i].key === key) return arr[i].value;
+		if (arr[i] && arr[i].key === key && hasValue(arr[i].value)) return arr[i].value;
 	}
+	var wanted = [ infoKey(key) ];
+	INFO_KEYS.forEach(function(keys) {
+		if (keys.some(function(k) { return infoKey(k) === wanted[0]; }))
+			wanted = keys.map(infoKey);
+	});
+	for (var j = 0; j < arr.length; j++)
+		if (arr[j] && wanted.indexOf(infoKey(arr[j].key)) !== -1 && hasValue(arr[j].value))
+			return arr[j].value;
 	return undefined;
 }
 
@@ -702,7 +755,15 @@ function entryList(v) {
 function entryMap(arr) {
 	var map = {};
 	entryList(arr).forEach(function(item) {
-		if (item && item.key != null) map[item.key] = item.value;
+		if (item && item.key != null && hasValue(item.value)) map[item.key] = item.value;
+	});
+	INFO_KEYS.forEach(function(keys) {
+		keys.forEach(function(key) {
+			if (!hasValue(map[key])) {
+				var value = findEntry(arr, key);
+				if (hasValue(value)) map[key] = value;
+			}
+		});
 	});
 	return map;
 }
@@ -1485,14 +1546,14 @@ var LABEL_ZH = {
 // 把 QModem 的 modem_info 渲染为分组卡片（每 class 一张 mt-ui-card），
 // 用于"完整信息"面板——QModem 返回什么就显示什么。
 function renderInfoGrouped(entries) {
-	var grouped = groupByClass(entries);
+	var grouped = groupByClass(entryList(entries).filter(function(item) { return item && hasValue(item.value); }));
 	var cards = [];
 	Object.keys(grouped).forEach(function(cls) {
 		var rows = grouped[cls].map(function(item) {
 			var rawName = item.full_name || item.key || '';
 			var name = LABEL_ZH[rawName] || _(rawName);
 			var display = item.extra_info ? (name + ' (' + item.extra_info + ')') : name;
-			var val = (item.value == null || item.value === '') ? '--' : String(item.value);
+			var val = valueText(item.value);
 			return E('div', { 'class': 'mt-info-row' }, [
 				E('span', { 'class': 'mt-info-key' }, display),
 				E('strong', { 'class': 'mt-info-val' }, val)
@@ -1565,7 +1626,7 @@ function card(title, desc, body, wide) {
 }
 
 function state(label, value) {
-	return E('div', { 'class': 'mt-control-state' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
+	return dataRow(label, value, 'mt-control-state');
 }
 
 /* 保留历史导出：视图仍在调用 controls.styleNode()。
@@ -1618,8 +1679,10 @@ function confirmModal(title, message, onConfirm, restartRequired) {
 
 // 根据 MCC/MNC（或运营商名）返回中文名 + logo。
 function operatorInfo(name, mcc, mnc) {
-	var n = (name || '').toUpperCase().replace(/\s+/g, ' ').trim();
-	var code = (mcc && mnc) ? String(mcc) + String(mnc) : '';
+	var n = valueText(name).toUpperCase().replace(/\s+/g, ' ').trim();
+	var country = valueText(mcc), network = valueText(mnc);
+	if (country === '460' && /^\d$/.test(network)) network = '0' + network;
+	var code = country && network ? country + network : '';
 	if (!code && /^\d{5,6}$/.test(n)) code = n;
 	if (/^4600[02478]$/.test(code)) n = 'CHINA MOBILE';
 	else if (/^4600[169]$/.test(code)) n = 'CHINA UNICOM';
@@ -1633,7 +1696,7 @@ function operatorInfo(name, mcc, mnc) {
 		return { name: '中国电信', logo: null };
 	if (n.indexOf('BROADNET') !== -1 || n.indexOf('CBN') !== -1)
 		return { name: '中国广电', logo: null };
-	return { name: name || _('Mobile Network'), logo: null };
+	return { name: valueText(name) || _('Mobile Network'), logo: null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1788,6 +1851,13 @@ return baseclass.extend({
 	groupByClass: groupByClass,
 	formatSignal: formatSignal,
 	renderInfoGrouped: renderInfoGrouped,
+	element: E,
+	hasValue: hasValue,
+	valueText: valueText,
+	dataRow: dataRow,
+	flagKeys: flagKeys,
+	isEnabled: isEnabled,
+	supportsTdTechAt: supportsTdTechAt,
 	normalizeTemperature: normalizeTemperature,
 
 	formatBytes: formatBytes,

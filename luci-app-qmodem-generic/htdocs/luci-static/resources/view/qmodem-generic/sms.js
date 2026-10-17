@@ -4,6 +4,8 @@
 'require dom';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 短信（Messages）— 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 交互重构
  * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（封装于 qmodem-generic.controls）：
@@ -51,7 +53,7 @@ function atText(res) {
 		return '';
 	if (typeof res === 'string')
 		return res;
-	var text = pick(res, [ 'result', 'response', 'at_response', 'output', 'data', 'message' ]);
+	var text = pick(res, [ 'response', 'result', 'at_response', 'output', 'data', 'message' ]);
 	if (typeof text === 'string')
 		return text;
 	try { return JSON.stringify(res); } catch (e) { return String(res); }
@@ -209,7 +211,7 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-sms{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
 			'.mt-sms-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -546,7 +548,7 @@ return view.extend({
 					E('p', {}, _('Conversations using the SIM installed in the module.')),
 					E('div', { 'class': 'mt-sms-storage' }, [
 						svgNode('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>'),
-						'本机号码：' + (simNumber || '--') + '　·　模组内短信：' + modemMessages.length + ' 条'
+						(simNumber ? '本机号码：' + simNumber + '　·　' : '') + '模组内短信：' + modemMessages.length + ' 条'
 					])
 				]),
 				E('div', { 'class': 'mt-sms-hero-actions' }, [

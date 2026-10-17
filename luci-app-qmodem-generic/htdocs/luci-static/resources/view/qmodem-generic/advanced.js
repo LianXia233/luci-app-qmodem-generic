@@ -4,6 +4,8 @@
 'require dom';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 高级设置（Advanced Settings）— 现代白色毛玻璃 (Glassmorphism) + 动态硬件总线 SVG 重构
  * 数据与动作全部经由 QModem 的 `qmodem` ubus 对象（由 qmodem-generic.controls 封装）：
@@ -26,7 +28,7 @@ function ci(obj, names) {
 	for (var i = 0; i < names.length; i++) {
 		var want = String(names[i]).toLowerCase().replace(/[\s_\-]/g, '');
 		for (var j = 0; j < keys.length; j++) {
-			if (keys[j].toLowerCase().replace(/[\s_\-]/g, '') === want)
+			if (keys[j].toLowerCase().replace(/[\s_\-]/g, '') === want && controls.hasValue(obj[keys[j]]))
 				return obj[keys[j]];
 		}
 	}
@@ -212,7 +214,7 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-hardware{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境光晕 */
 			'.mt-adv-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -441,28 +443,29 @@ return view.extend({
 
 	capabilityCard: function(section, res, disabled) {
 		var caps = plainObject(res.rebootCaps, 'reboot_caps');
-		var soft = String(ci(caps, [ 'soft_reboot_caps', 'soft' ]) || '0') === '1';
-		var hard = String(ci(caps, [ 'hard_reboot_caps', 'hard' ]) || '0') === '1';
+		var softValue = ci(caps, [ 'soft_reboot_caps', 'soft' ]);
+		var hardValue = ci(caps, [ 'hard_reboot_caps', 'hard' ]);
+		var soft = controls.isEnabled(softValue), hard = controls.isEnabled(hardValue);
 
 		var chips = disabled.length
 			? (res.disabled && ci(res.disabled, [ 'disabled_features' ]) || []).map(function(name) {
 				return E('span', { 'class': 'mt-hardware-cap' }, featureLabel(name));
 			})
-			: [ E('span', { 'class': 'mt-hardware-cap ok' }, _('QModem 未报告任何被禁用的特性')) ];
+			: [];
 
 		return controls.card(_('模组能力'),
 			_('由 QModem 的 get_disabled_features / get_reboot_caps 上报。被禁用的特性已隐藏或降级只读。'), [
 				controls.state(_('配置节'), section),
-				controls.state(_('软重启（AT 复位）'), soft ? _('支持') : _('不支持')),
-				controls.state(_('硬重启（断电复位）'), hard ? _('支持') : _('不支持')),
+				controls.state(_('软重启（AT 复位）'), controls.hasValue(softValue) ? (soft ? _('支持') : _('不支持')) : ''),
+				controls.state(_('硬重启（断电复位）'), controls.hasValue(hardValue) ? (hard ? _('支持') : _('不支持')) : ''),
 				E('div', { 'class': 'mt-hardware-caps' }, chips)
 			]);
 	},
 
 	rebootCard: function(section, res) {
 		var caps = plainObject(res.rebootCaps, 'reboot_caps');
-		var soft = String(ci(caps, [ 'soft_reboot_caps', 'soft' ]) || '0') === '1';
-		var hard = String(ci(caps, [ 'hard_reboot_caps', 'hard' ]) || '0') === '1';
+		var soft = controls.isEnabled(ci(caps, [ 'soft_reboot_caps', 'soft' ]));
+		var hard = controls.isEnabled(ci(caps, [ 'hard_reboot_caps', 'hard' ]));
 
 		function rebootButton(method, label, cls, supported, message) {
 			return E('button', {
@@ -503,10 +506,9 @@ return view.extend({
 			]);
 
 		var mode = plainObject(modeRaw, 'mode');
-		var keys = Object.keys(mode);
+		var keys = controls.flagKeys(mode);
 		var active = '';
-		keys.forEach(function(k) { if (String(mode[k]) === '1') active = k; });
-		[ 'ecm', 'ncm' ].forEach(function(k) { if (keys.indexOf(k) === -1) keys.push(k); });
+		keys.forEach(function(k) { if (controls.isEnabled(mode[k])) active = k; });
 
 		var buttons = keys.map(function(k) {
 			var isActive = (String(k).toLowerCase() === String(active).toLowerCase());
@@ -544,20 +546,20 @@ return view.extend({
 
 		var prefer = plainObject(preferRaw, 'network_prefer');
 		var order = [ '3G', '4G', '5G' ];
-		var keys = Object.keys(prefer);
-		order.forEach(function(k) { if (keys.indexOf(k) === -1) keys.push(k); });
+		var keys = controls.flagKeys(prefer);
 		keys = keys.filter(function(k) { return order.indexOf(k) !== -1; })
 			.sort(function(a, b) { return order.indexOf(a) - order.indexOf(b); });
+		if (!keys.length) return controls.card(_('网络优选'), '', [ E('p', {}, _('QModem 暂未提供可设置的网络制式。')) ]);
 
 		var boxes = {};
 		var options = keys.map(function(k) {
 			var box = E('input', {
 				'type': 'checkbox',
 				'value': k,
-				'checked': String(prefer[k]) === '1' ? 'checked' : null
+				'checked': controls.isEnabled(prefer[k]) ? 'checked' : null
 			});
 			boxes[k] = box;
-			var lbl = E('label', { 'class': 'mt-band-option' + (String(prefer[k]) === '1' ? ' checked' : '') }, [ box, E('span', {}, k) ]);
+			var lbl = E('label', { 'class': 'mt-band-option' + (controls.isEnabled(prefer[k]) ? ' checked' : '') }, [ box, E('span', {}, k) ]);
 			box.addEventListener('change', function() {
 				lbl.classList[box.checked ? 'add' : 'remove']('checked');
 			});
@@ -708,11 +710,11 @@ return view.extend({
 						var command = (input.value || '').trim();
 						if (!command)
 							return ui.addNotification(null, E('p', {}, _('请输入 AT 命令。')), 'warning');
-						dom.content(output, _('正在下发，请稍候…'));
+						output.textContent = _('正在下发，请稍候…');
 						controls.sendAt(section, atPort, command).then(function(r) {
-							dom.content(output, atText(r) || _('模组未返回内容。'));
+							output.textContent = atText(r) || _('模组未返回内容。');
 						}).catch(function(err) {
-							dom.content(output, _('下发失败：%s').format((err && err.message) || String(err)));
+							output.textContent = _('下发失败：%s').format((err && err.message) || String(err));
 						});
 					}
 				}, _('下发命令'))),
@@ -861,8 +863,8 @@ return view.extend({
 			/* 频段锁定 */
 			this.lockBandSection(section, res.lockband, disabled),
 
-			/* 专有硬件设置 (AT 透传) */
-			E('section', { 'class': 'mt-control-section' }, [
+			/* 专有 AT 指令按已验证的型号展示，不能跨品牌下发。 */
+			controls.supportsTdTechAt(section, res.base) ? E('section', { 'class': 'mt-control-section' }, [
 				E('div', { 'class': 'mt-control-section-head' }, [
 					E('h3', {}, _('模块专有硬件设置（AT 透传）')),
 					E('p', {}, _('以下能力在 QModem 中没有通用方法，只能经 send_at 以模块私有 AT 命令下发；可点击「读取当前值」向模组查询。'))
@@ -932,10 +934,10 @@ return view.extend({
 						ok: _('热保护命令已被接受。'),
 						note: _('日常使用请保持热保护开启。当前模组温度：%s').format(shown(controls.normalizeTemperature(baseMap['temperature']))),
 						restart: false
-					}),
-					this.passthroughCard(section, atPort)
+					})
 				])
-			]),
+			]) : null,
+			this.passthroughCard(section, atPort),
 
 			/* 诊断与开发者工具 */
 			E('section', { 'class': 'mt-adv-card mt-hardware-tools' }, [

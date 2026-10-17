@@ -6,6 +6,8 @@
 'require uci';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 网络与小区（Radio & Cells）— 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 射频仪表重构
  * 数据源全部来自 QModem 的 `qmodem` ubus 对象（经 qmodem-generic.controls 封装）：
@@ -40,7 +42,7 @@ function ci(obj, names) {
 	for (var i = 0; i < names.length; i++) {
 		var want = String(names[i]).toLowerCase().replace(/[\s_\-]/g, '');
 		for (var j = 0; j < keys.length; j++) {
-			if (keys[j].toLowerCase().replace(/[\s_\-]/g, '') === want)
+			if (keys[j].toLowerCase().replace(/[\s_\-]/g, '') === want && controls.hasValue(obj[keys[j]]))
 				return obj[keys[j]];
 		}
 	}
@@ -83,11 +85,11 @@ function disabledSet(raw) {
 	var list = (raw && (ci(raw, [ 'disabled_features' ]) || raw)) || [];
 	if (!Array.isArray(list))
 		list = [];
-	return list.map(function(x) { return String(x).toLowerCase(); });
+	return list.map(function(x) { return String(x).toLowerCase().replace(/[\s_-]/g, ''); });
 }
 
 function isDisabled(list, name) {
-	return list.indexOf(String(name).toLowerCase()) !== -1;
+	return list.indexOf(String(name).toLowerCase().replace(/[\s_-]/g, '')) !== -1;
 }
 
 function atText(raw) {
@@ -250,7 +252,7 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [ 'network', 'signal', 'device' ],
+	DOMAINS: [ 'network', 'signal', 'device', 'status', 'sim' ],
 	POLL_INTERVAL: 8000,
 
 	load: function() {
@@ -277,7 +279,9 @@ return view.extend({
 			guard(controls.getCurrentBandCapabilities(section), '当前频段能力', errors),
 			guard(controls.getCellInfo(section), '小区信息', errors),
 			guard(controls.getDisabledFeatures(section), '特性支持列表', errors),
-			guard(controls.getAtCfg(section), 'AT 端口配置', errors)
+			guard(controls.getAtCfg(section), 'AT 端口配置', errors),
+			guard(controls.getBaseInfo(section), '模组信息', errors),
+			guard(controls.getSimInfo(section), 'SIM 信息', errors)
 		]).then(function(r) {
 			return {
 				section: section,
@@ -290,6 +294,8 @@ return view.extend({
 				cell: r[6],
 				disabled: r[7],
 				atCfg: r[8],
+				base: r[9],
+				sim: r[10],
 				errors: errors
 			};
 		});
@@ -297,7 +303,7 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-net{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境光晕 */
 			'.mt-net-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -396,13 +402,13 @@ return view.extend({
 	},
 
 	row: function(label, value) {
-		var valueNode = isNode(value) ? value : E('strong', {}, shown(value));
-		return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, label), valueNode ]);
+		return controls.dataRow(label, value, 'mt-net-row');
 	},
 
 	/* 动态 SVG 射频仪表 (RSRP / RSRQ / SINR) */
 	metricGauge: function(label, kind, rawValue, unit) {
 		var n = num(rawValue), has = !isNaN(n), pct = 0, cls = 'unknown', ql = '';
+		if (!has) return null;
 		var tags = { excellent: _('优秀'), good: _('良好'), fair: _('一般'), weak: _('较弱') };
 		var strokeColor = '#94a3b8';
 		if (has) {
@@ -441,6 +447,7 @@ return view.extend({
 	},
 
 	metricBand: function(label, band) {
+		if (!controls.hasValue(band)) return null;
 		return E('div', { 'class': 'mt-net-card mt-net-metric-card' }, [
 			E('div', { 'class': 'mt-net-metric-head' }, [
 				E('span', { 'class': 'mt-net-metric-label' }, label),
@@ -454,15 +461,14 @@ return view.extend({
 		]);
 	},
 
-	modeCard: function(section, modeRaw) {
+	modeCard: function(section, modeRaw, disabled) {
+		if (isDisabled(disabled || [], 'setmode'))
+			return controls.card(_('网络模式'), '', [ E('p', {}, _('本模组经 QModem 已禁用拨号模式切换。')) ]);
 		var mode = plainObject(modeRaw, 'mode');
-		var keys = Object.keys(mode);
+		var keys = controls.flagKeys(mode);
 		var active = '';
 		keys.forEach(function(k) {
-			if (String(mode[k]) === '1') active = k;
-		});
-		[ 'ecm', 'ncm' ].forEach(function(k) {
-			if (keys.indexOf(k) === -1) keys.push(k);
+			if (controls.isEnabled(mode[k])) active = k;
 		});
 
 		var buttons = keys.map(function(k) {
@@ -487,23 +493,25 @@ return view.extend({
 			]);
 	},
 
-	preferCard: function(section, preferRaw) {
+	preferCard: function(section, preferRaw, disabled) {
+		if (isDisabled(disabled || [], 'networkprefer') || isDisabled(disabled || [], 'setnetworkprefer'))
+			return controls.card(_('网络优选'), '', [ E('p', {}, _('本模组经 QModem 已禁用网络优选。')) ]);
 		var prefer = plainObject(preferRaw, 'network_prefer');
 		var order = [ '3G', '4G', '5G' ];
-		var keys = Object.keys(prefer);
-		order.forEach(function(k) { if (keys.indexOf(k) === -1) keys.push(k); });
+		var keys = controls.flagKeys(prefer);
 		keys = keys.filter(function(k) { return order.indexOf(k) !== -1; })
 			.sort(function(a, b) { return order.indexOf(a) - order.indexOf(b); });
+		if (!keys.length) return controls.card(_('网络优选'), '', [ E('p', {}, _('QModem 暂未提供可设置的网络制式。')) ]);
 
 		var boxes = {};
 		var options = keys.map(function(k) {
 			var box = E('input', {
 				'type': 'checkbox',
 				'value': k,
-				'checked': String(prefer[k]) === '1' ? 'checked' : null
+				'checked': controls.isEnabled(prefer[k]) ? 'checked' : null
 			});
 			boxes[k] = box;
-			var lbl = E('label', { 'class': 'mt-band-option' + (String(prefer[k]) === '1' ? ' checked' : '') }, [ box, E('span', {}, k) ]);
+			var lbl = E('label', { 'class': 'mt-band-option' + (controls.isEnabled(prefer[k]) ? ' checked' : '') }, [ box, E('span', {}, k) ]);
 			box.addEventListener('change', function() {
 				lbl.classList[box.checked ? 'add' : 'remove']('checked');
 			});
@@ -512,9 +520,7 @@ return view.extend({
 
 		return controls.card(_('网络优选'),
 			_('选择模组允许驻网的制式。至少保留一项。'), [
-				E('div', { 'class': 'mt-control-state mt-control-state-current' },
-					[ E('span', {}, _('当前优选')), E('strong', {},
-						keys.filter(function(k) { return String(prefer[k]) === '1'; }).join(' / ') || '--') ]),
+				controls.dataRow(_('当前优选'), keys.filter(function(k) { return controls.isEnabled(prefer[k]); }).join(' / '), 'mt-control-state mt-control-state-current'),
 				E('div', { 'class': 'mt-band-options' }, options),
 				E('div', { 'style': 'display:flex;justify-content:flex-end;margin-top:12px' }, E('button', {
 					'type': 'button', 'class': 'btn cbi-button-apply',
@@ -661,10 +667,12 @@ return view.extend({
 	},
 
 	currentBandSection: function(currentRaw) {
+		var self = this;
 		var current = plainObject(currentRaw, 'current_band');
 		var cells = ci(current, [ 'cells' ]);
 		if (!Array.isArray(cells)) cells = [];
 
+		cells = cells.filter(function(c) { return c && controls.hasValue(c); });
 		var cards = cells.map(function(c) {
 			var role = String(pick(c, [ 'role' ]) || '').toLowerCase();
 			var rat = pick(c, [ 'rat' ]);
@@ -676,12 +684,10 @@ return view.extend({
 			var ul = pick(c, [ 'ul_bandwidth' ]);
 			var scs = pick(c, [ 'scs' ]);
 			var rows = [
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('制式')), E('strong', {}, shown(rat)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('频段')), E('strong', {}, shown(band)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, channelType || _('频点')), E('strong', {}, shown(channel)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('物理小区标识（PCI）')), E('strong', {}, shown(pci)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('下行带宽')), E('strong', {}, shown(dl)) ]),
-				E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('上行带宽')), E('strong', {}, shown(ul)) ])
+				self.row(_('制式'), rat), self.row(_('频段'), band),
+				self.row(channelType || _('频点'), channel),
+				self.row(_('物理小区标识（PCI）'), pci),
+				self.row(_('下行带宽'), dl), self.row(_('上行带宽'), ul)
 			];
 			if (scs)
 				rows.push(E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('子载波间隔')), E('strong', {}, scsText(scs)) ]));
@@ -729,7 +735,7 @@ return view.extend({
 				'freq', 'frequency', 'pci', 'physical_cell_id', 'physicalcellid', 'rsrp', 'rsrq', 'sinr', 'rssnr' ];
 			var extra = Object.keys(d).filter(function(k) {
 				return used.indexOf(k.toLowerCase().replace(/[\s\-]/g, '_')) === -1
-					&& d[k] !== null && typeof d[k] !== 'object';
+					&& controls.hasValue(d[k]) && typeof d[k] !== 'object';
 			}).map(function(k) {
 				return E('div', { 'class': 'mt-net-row' }, [ E('span', {}, k), E('strong', {}, shown(d[k])) ]);
 			});
@@ -850,14 +856,15 @@ return view.extend({
 		var ulBw = pick(cell, [ 'UL Bandwidth' ]);
 		var scs = pick(cell, [ 'SCS' ]);
 
-		var opInfo = controls.operatorInfo(null, mcc, mnc);
-		var operatorName = (mcc && mnc) ? opInfo.name : '--';
+		var reportedOperator = controls.findEntry(res.sim, 'ISP') || controls.findEntry(res.base, 'ISP') || '';
+		var opInfo = controls.operatorInfo(reportedOperator, mcc, mnc);
+		var operatorName = (mcc && mnc) || reportedOperator ? opInfo.name : '';
 		var registered = !!(networkMode || pci || earfcn);
 
 		var mode = plainObject(res.mode, 'mode');
-		var activeMode = Object.keys(mode).filter(function(k) { return String(mode[k]) === '1'; })[0] || '';
+		var activeMode = Object.keys(mode).filter(function(k) { return controls.isEnabled(mode[k]); })[0] || '';
 		var prefer = plainObject(res.prefer, 'network_prefer');
-		var preferOn = Object.keys(prefer).filter(function(k) { return String(prefer[k]) === '1'; });
+		var preferOn = Object.keys(prefer).filter(function(k) { return controls.isEnabled(prefer[k]); });
 		var lockband = plainObject(res.lockband, 'lockband');
 
 		var lockClasses = Object.keys(lockband).filter(function(k) {
@@ -951,11 +958,11 @@ return view.extend({
 						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>'),
 						_('无线状态')
 					]),
-					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('运营商')), E('strong', {}, operatorName) ]),
-					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络模式')), E('strong', {}, activeMode ? modeLabel(activeMode) : '--') ]),
-					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('网络优选')), E('strong', {}, preferOn.length ? preferOn.join(' / ') : '--') ]),
-					E('div', { 'class': 'mt-net-row mt-net-row-block' }, [ E('span', {}, _('频段锁定')), lockedSummaryNode || E('strong', {}, _('未锁定')) ]),
-					E('div', { 'class': 'mt-net-row' }, [ E('span', {}, _('AT 端口')), E('strong', {}, shown(atPort)) ])
+					this.row(_('运营商'), operatorName),
+					this.row(_('网络模式'), activeMode ? modeLabel(activeMode) : ''),
+					this.row(_('网络优选'), preferOn.join(' / ')),
+					lockedSummaryNode ? E('div', { 'class': 'mt-net-row mt-net-row-block' }, [ E('span', {}, _('频段锁定')), lockedSummaryNode ]) : null,
+					this.row(_('AT 端口'), atPort)
 				])
 			]),
 
@@ -980,9 +987,9 @@ return view.extend({
 					E('p', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin:0' }, _('配置驻网模式、网络制式优选及射频扫描。'))
 				]),
 				E('div', { 'class': 'mt-control-grid' }, [
-					this.modeCard(section, res.mode),
-					this.preferCard(section, res.prefer),
-					this.scanSection(section, atPort)
+					this.modeCard(section, res.mode, disabled),
+					this.preferCard(section, res.prefer, disabled),
+					controls.supportsTdTechAt(section, res.base) ? this.scanSection(section, atPort) : null
 				])
 			]),
 
