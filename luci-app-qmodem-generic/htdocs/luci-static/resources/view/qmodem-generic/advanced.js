@@ -56,6 +56,18 @@ function shown(value) {
 	return (value === undefined || value === null || value === '') ? '--' : String(value);
 }
 
+/* 只展示确实上报的频段：旧 QModem / 未填写型号可返回 null、"0"、
+ * nullnullnullnull 等无效内容。不能把 DOM 空节点当作文字输出。 */
+function supportedBandText(value) {
+	if (value === null || value === undefined || value === false) return '';
+	var raw = String(value).trim();
+	if (!raw || /^(?:0|n\/a|none|unknown|undefined|null)+$/i.test(raw)) return '';
+	/* 官方定义以数字或 / 分隔，也允许厂商标记 N78/B3；不展示错误对象。 */
+	if (!/^[0-9a-zA-Z/,+\s-]+$/.test(raw) || /null|undefined|nan/i.test(raw)) return '';
+	return raw;
+}
+
+
 function disabledSet(raw) {
 	var list = (raw && (ci(raw, [ 'disabled_features' ]) || raw)) || [];
 	if (!Array.isArray(list))
@@ -228,6 +240,7 @@ return view.extend({
 			'.qm-custom-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--qm-border-soft);padding:9px 0;font-size:12px}',
 
 			/* 响应式 */
+			'.mt-support-detail{border:1px solid var(--qm-border-soft);border-radius:10px;background:var(--qm-surface-2);padding:10px 13px;color:var(--qm-text-muted);font-size:12px}.mt-support-detail .mt-control-state:last-child{border-bottom:0}',
 			'@media(max-width:980px){.mt-control-grid,.qm-custom-form{grid-template-columns:1fr}}',
 			'@media(max-width:700px){.qm-port-row{align-items:flex-start;flex-direction:column}.qm-port-actions{width:100%}}',
 			'@media(max-width:680px){.mt-hardware-head{flex-direction:column;align-items:flex-start}.mt-hardware-tools{flex-direction:column;align-items:flex-start}.mt-hardware-tool-actions{width:100%;justify-content:flex-start}}'
@@ -373,22 +386,29 @@ return view.extend({
 				(item.bus === 'pcie' ? 'PCIe · ' : 'USB · ') + item.model.toUpperCase());
 		})));
 		selector.disabled = !entries.length;
-		var details = E('div', { 'class': 'mt-control-note', 'style': 'margin-top:10px' },
-			_('此处只能查看，不能修改 QModem 原生型号。'));
+		var details = E('div', { 'class': 'mt-support-detail', 'style': 'margin-top:10px' },
+			_('此处仅用于查看 QModem 型号定义。'));
 		selector.addEventListener('change', function() {
 			var index = parseInt(selector.value, 10), item = entries[index];
 			if (!item) { dom.content(details, _('选择型号查看 QModem 当前配置。')); return; }
-			var d = item.data || {};
-			dom.content(details, [
-				controls.state(_('厂商'), d.manufacturer || '--'),
-				controls.state(_('芯片平台'), d.platform || '--'),
-				controls.state(_('拨号协议'), Array.isArray(d.modes) ? d.modes.join(', ') : '--'),
-				controls.state(_('PDP 序号'), d.pdp_index || '--'),
-				controls.state(_('3G WCDMA 频段'), d.wcdma_band || '--'),
-				controls.state(_('4G LTE 频段'), d.lte_band || '--'),
-				controls.state(_('5G NSA 频段'), d.nsa_band || '--'),
-				controls.state(_('5G SA 频段'), d.sa_band || '--')
-			]);
+			var d = item.data || {}, rows = [
+				controls.state(_('厂商'), d.manufacturer),
+				controls.state(_('芯片平台'), d.platform),
+				controls.state(_('拨号协议'), Array.isArray(d.modes) && d.modes.length ? d.modes.join(', ') : null),
+				/* 数字 0 是部分模组有效的 PDP 序号，必须保留 */
+				controls.state(_('PDP 序号'), d.pdp_index)
+			];
+			[
+				[ _('3G WCDMA 频段'), d.wcdma_band ],
+				[ _('4G LTE 频段'), d.lte_band ],
+				[ _('5G NSA 频段'), d.nsa_band ],
+				[ _('5G SA 频段'), d.sa_band ]
+			].forEach(function(field) {
+				var band = supportedBandText(field[1]);
+				if (band) rows.push(controls.state(field[0], band));
+			});
+			/* 不给 dom.content() 传 null；避免某些 LuCI 版本渲染为字面文本。 */
+			dom.content(details, rows.filter(function(node) { return node != null; }));
 		});
 		return controls.card(_('QModem 官方支持库（只读）'),
 			_('查看当前 QModem 支持库的 USB / PCIe 型号；已同步的自定义型号也会显示在此，不能直接改动官方原生条目。'), [
