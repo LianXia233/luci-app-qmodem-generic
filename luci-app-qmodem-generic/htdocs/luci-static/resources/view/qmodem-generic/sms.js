@@ -72,7 +72,14 @@ function formatTime(value) {
 
 function normalizeMessage(item, position, source) {
 	var rawIndex = pick(item, [ 'index', 'idx', 'id', 'sms_index', 'message_index' ]);
-	var indexes = (Array.isArray(rawIndex) ? rawIndex : rawIndex === '' ? [] : [ rawIndex ]).map(String).filter(function(index) { return /^\d+$/.test(index); });
+	/* 官方 QModem 的分段短信索引可能为 "1 2 3"，也可能是数组；
+	 * index=0 仍是有效存储位置。 */
+	var indexes = [], values = Array.isArray(rawIndex) ? rawIndex : rawIndex === '' ? [] : [ rawIndex ];
+	values.forEach(function(raw) {
+		String(raw).trim().split(/[\s,;]+/).forEach(function(index) {
+			if (/^\d+$/.test(index) && indexes.indexOf(index) === -1) indexes.push(index);
+		});
+	});
 	var index = indexes[0] || '';
 	var status = String(pick(item, [ 'status', 'state', 'stat', 'type' ]) || '');
 	var number = String(pick(item, [ 'sender', 'number', 'phone_number', 'phone', 'from', 'address', 'oa', 'recipient' ]) || '');
@@ -101,6 +108,12 @@ function parseMessages(raw) {
 	return smsEntries(raw).map(function(item, position) { return normalizeMessage(item, position, raw && raw._smsSource); }).sort(function(a, b) {
 		return (a.order || 0) - (b.order || 0);
 	});
+}
+
+/* 用户已确认删除的记录在本次会话中立即隐藏，避免被旧版 SMS 缓存重新画回。 */
+function smsMessageKey(message) {
+	return String(message.source || 'modem') + ':' +
+		(message.indexes || []).join(',') + ':' + String(message.index || '');
 }
 
 function groupMessages(messages) {
@@ -413,7 +426,8 @@ return view.extend({
 		this.smsSource = res.sms && res.sms._smsSource || 'modem';
 		var database = this.smsSource === 'database';
 
-		var modemMessages = parseMessages(res.sms);
+		var selfDeleted = this.smsDeletedKeys || {};
+		var modemMessages = parseMessages(res.sms).filter(function(msg) { return !selfDeleted[smsMessageKey(msg)]; });
 		var messages = modemMessages.concat(this.sentHistory());
 		var groups = groupMessages(messages);
 		var simNumber = controls.findEntry(controls.entryList(res.sim), 'SIM Number') || '';
@@ -467,13 +481,27 @@ return view.extend({
 									E('button', {
 										'type': 'button', 'class': 'btn cbi-button-negative',
 										'click': function() {
+											if (self.smsDeleting) return;
 											ui.hideModal();
 											if (msg.source === 'browser') {
 												window.localStorage.setItem('modem.sms.sent', JSON.stringify(self.sentHistory().filter(function(item) { return item.order !== msg.order; })));
 												window.location.reload();
 												return;
 											}
-											self.removeMessages([msg]).then(function() { window.location.reload(); }).catch(failed);
+											self.smsDeleting = true;
+											self.removeMessages([msg]).then(function() {
+												self.smsDeletedKeys = self.smsDeletedKeys || {};
+												self.smsDeletedKeys[smsMessageKey(msg)] = true;
+												/* 不直接重载旧缓存：立即从会话删除，轮询再从后台确认状态。 */
+												group.messages = group.messages.filter(function(item) { return item !== msg; });
+												if (group.messages.length) {
+													showThread(group, button, false);
+												} else {
+													if (button && button.parentNode) button.parentNode.removeChild(button);
+													showThread(null, null, false);
+												}
+												ui.addNotification(null, E('p', {}, _('短信已删除。')), 'info');
+											}).catch(failed).then(function() { self.smsDeleting = false; });
 										}
 									}, _('Delete'))
 								])
