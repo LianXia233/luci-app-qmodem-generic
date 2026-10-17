@@ -598,6 +598,7 @@ function testActionPayloads() {
 			if (!call) return;
 			[ 'modes', 'wcdma_band', 'lte_band', 'nsa_band', 'sa_band' ].forEach(function(key) {
 				assertEq('自定义模组 RPC 保留 ' + key, call.params[key], cfg[key]);
+			assertEq('普通新增默认非编辑', call.params.edit, '0');
 			});
 		});
 	});
