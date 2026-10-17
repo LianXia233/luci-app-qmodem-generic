@@ -1124,15 +1124,55 @@ function sendSmsInbox(section, phoneNumber, content, source) {
 	return withTimeoutReject(callSmsSend(section, phoneNumber, content), 60000, _('短信发送超时，请核对发送记录后再决定是否重试。')).then(smsServiceAction);
 }
 
+/*
+ * 老版本 qmodem.delete_sms 的 index 属于 ubus String（并非 Integer），
+ * 支持 "1 2 3" 同时删除一条分段短信；0 也是合法的模组槽位。
+ * 失败必须保留原消息和错误，不能当作成功后只刷新页面。
+ */
+function modemSmsDeleteResult(result) {
+	if (!result || typeof result !== 'object')
+		throw new Error(_('QModem 没有返回删除结果。'));
+	var body = result.delete_sms && typeof result.delete_sms === 'object' ? result.delete_sms :
+		(result.result && typeof result.result === 'object' ? result.result : result);
+	var status = body.status === undefined ? result.status : body.status;
+	var reason = body.error || result.error || body.modem_response || result.modem_response;
+	if (reason || body.success === false || result.success === false ||
+		status === false || status === 0 || status === '0' ||
+		typeof status === 'string' && /^(?:error|failed|failure)$/i.test(status))
+		throw new Error(String(reason || _('模组拒绝删除短信，请检查短信存储位置。')));
+	/* 官方响应 result.status="1"；部分旧版返回 success:true 或 status:success。 */
+	if (status == null && body.success !== true && result.success !== true &&
+		result.result !== 'success')
+		throw new Error(_('QModem 未确认删除成功，请检查后再重试。'));
+	return result;
+}
+
+function smsStorageIndexes(indexes) {
+	var tokens = [];
+	(indexes || []).forEach(function(item) {
+		String(item).trim().split(/[\s,;]+/).forEach(function(value) {
+			if (/^\d+$/.test(value) && tokens.indexOf(value) === -1) tokens.push(value);
+		});
+	});
+	return tokens;
+}
 function deleteSmsMessage(section, message) {
 	if (message.source === 'database') {
 		var id = Number(message.index);
 		if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error(_('无效的短信记录编号。')));
 		return withTimeoutReject(callSmsDelete(section, id), 10000, _('删除短信超时')).then(smsServiceAction);
 	}
-	return (message.indexes || []).reduce(function(chain, index) {
-		return chain.then(function() { return deleteSms(section, Number(index)).then(smsServiceResult); });
-	}, Promise.resolve());
+	var indexes = smsStorageIndexes(message.indexes || [message.index]);
+	if (!indexes.length)
+		return Promise.reject(new Error(_('短信缺少有效的模组存储索引，不能删除。')));
+	return deleteSms(section, indexes.join(' ')).then(modemSmsDeleteResult).then(function(result) {
+		/* 删除后废弃浏览器旧短信短缓存，并通知 worker 刷新模组存储。 */
+		delete legacySmsStore[section];
+		delete legacySmsLastAttempt[section];
+		touch(section);
+		requestRefresh(section, [ 'sms' ], true).catch(function() {});
+		return result;
+	});
 }
 
 function markSmsRead(section, messages) {
@@ -1360,8 +1400,12 @@ function sendRawPdu(section, command) {
 		function() { return withTimeoutReject(callSendRawPdu(section, command), DIRECT_RPC_TIMEOUT, _('PDU request timed out')); }, 60000);
 }
 function deleteSms(section, index) {
-	return qmodemAction(section, 'delete_sms', { index: index },
-		function() { return withTimeoutReject(callDeleteSms(section, index), DIRECT_RPC_TIMEOUT, _('Deleting SMS timed out')); }, 60000);
+	/* qmodem.delete_sms index 的 ubus 签名是 String，即便仅一个槽位也不能传数字。 */
+	var value = String(index);
+	if (!/^\d+(?: \d+)*$/.test(value))
+		return Promise.reject(new Error(_('无效的模组短信索引。')));
+	return qmodemAction(section, 'delete_sms', { index: value },
+		function() { return withTimeoutReject(callDeleteSms(section, value), DIRECT_RPC_TIMEOUT, _('删除模组短信超时')); }, 60000);
 }
 function setMode(section, mode) {
 	return qmodemAction(section, 'set_mode', { mode: mode },
