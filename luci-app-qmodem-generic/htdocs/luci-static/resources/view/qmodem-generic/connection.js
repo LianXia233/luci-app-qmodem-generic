@@ -484,7 +484,7 @@ return view.extend({
 			return controls.isEnabled(mode[k]);
 		}).join(' / ').toUpperCase();
 		var configuredApn = uci.get('qmodem', section, 'apn') || _('自动');
-		var configuredPdp = { IPV4V6: 'IPv4 / IPv6', IPV4: 'IPv4', IPV6: 'IPv6' }[String(uci.get('qmodem', section, 'pdp_type') || '').toUpperCase()] || 'IPv4 / IPv6';
+		var configuredPdp = { IPV4V6: 'IPv4 / IPv6', IPV4: 'IPv4', IP: 'IPv4', IPV6: 'IPv6', ETHERNET: 'Ethernet' }[String(uci.get('qmodem', section, 'pdp_type') || '').toUpperCase()] || 'IPv4 / IPv6';
 
 		res.connected = connected;
 
@@ -690,28 +690,37 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
-		o.value('IPV4V6', 'IPv4 / IPv6');
-		o.value('IPV4', 'IPv4');
-		o.value('IPV6', 'IPv6');
-		o.default = 'IPV4V6';
+		/* 兼容旧版 UI 写入的大写值；保存时规范为 QModem 官方小写枚举。 */
+		o.value('ipv4v6', 'IPv4 / IPv6');
+		o.value('ip', 'IPv4');
+		o.value('ipv6', 'IPv6');
+		o.value('ethernet', 'Ethernet');
+		o.default = 'ipv4v6';
 		o.rmempty = false;
+		o.cfgvalue = function(sectionId) {
+			var raw = String(uci.get('qmodem', sectionId, 'pdp_type') || 'ipv4v6');
+			return { IPV4: 'ip', IPV6: 'ipv6', IPV4V6: 'ipv4v6' }[raw.toUpperCase()] || raw.toLowerCase();
+		};
 
 		o = s.option(form.ListValue, 'auth', _('认证方式'));
 		o.value('none', _('无'));
 		o.value('pap', 'PAP');
 		o.value('chap', 'CHAP');
+		o.value('MsChapV2', 'MSCHAPv2');
 		o.default = 'none';
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'username', _('用户名'));
 		o.depends('auth', 'pap');
 		o.depends('auth', 'chap');
+		o.depends('auth', 'MsChapV2');
 		o.rmempty = true;
 
 		o = s.option(form.Value, 'password', _('密码'));
 		o.password = true;
 		o.depends('auth', 'pap');
 		o.depends('auth', 'chap');
+		o.depends('auth', 'MsChapV2');
 		o.rmempty = true;
 
 		o = s.option(form.DynamicList, 'dns_list', _('自定义 DNS'));
@@ -723,22 +732,36 @@ return view.extend({
 			self._apnFormNode = formNode;
 			return formNode;
 		}).catch(function(err) {
+			self._apnMap = null;
 			self._apnFormNode = E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger)' },
 				_('拨号设置渲染失败：') + ((err && err.message) || String(err)));
 			return self._apnFormNode;
 		});
 	},
 
-	saveApn: function() {
+	saveApn: function(button) {
 		var self = this;
-		if (!self._apnMap)
+		if (this._apnSaving) return Promise.resolve();
+		if (!this._apnMap) {
+			ui.addNotification(null, E('p', {}, _('APN 配置表单尚未正常加载，无法保存。')), 'danger');
 			return Promise.resolve();
-		return self._apnMap.save(null, true).then(function() {
+		}
+		this._apnSaving = true;
+		if (button) button.disabled = true;
+		return Promise.resolve().then(function() {
+			/* CBI Map 解析用户当前输入，提交到 UCI，然后持久化。 */
+			return self._apnMap.save(null, true);
+		}).then(function() {
 			return uci.commit('qmodem');
 		}).then(function() {
-			ui.addNotification(null, E('p', {}, _('APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。')));
+			ui.addNotification(null, E('p', {},
+				_('APN 配置已写入 /etc/config/qmodem。重新拨号后生效。')), 'info');
 		}).catch(function(err) {
-			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			ui.addNotification(null, E('p', {},
+				_('APN 保存失败：%s').format((err && err.message) || String(err))), 'danger');
+		}).then(function() {
+			self._apnSaving = false;
+			if (button) button.disabled = false;
 		});
 	},
 
