@@ -192,7 +192,8 @@ var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', ex
 var callSupportPorts = rpc.declare({ object: 'qmodem_support', method: 'ports', expect: { }, nobatch: true });
 var callCustomList = rpc.declare({ object: 'qmodem_support', method: 'custom_list', expect: { }, nobatch: true });
 var callCustomSave = rpc.declare({ object: 'qmodem_support', method: 'custom_save',
-	params: ['model', 'bus', 'manufacturer', 'manufacturer_id', 'platform', 'modes', 'pdp_index'], expect: { }, nobatch: true });
+	params: ['model', 'bus', 'manufacturer', 'manufacturer_id', 'platform', 'modes', 'pdp_index',
+		'wcdma_band', 'lte_band', 'nsa_band', 'sa_band'], expect: { }, nobatch: true });
 var callCustomDelete = rpc.declare({ object: 'qmodem_support', method: 'custom_delete', params: ['model', 'bus'], expect: { }, nobatch: true });
 var callProbePort = rpc.declare({ object: 'qmodem_support', method: 'probe_port', params: ['port'], expect: { }, nobatch: true });
 
@@ -1226,7 +1227,8 @@ function getCustomModels() { return withTimeout(callCustomList(), DIRECT_RPC_TIM
 	{ entries: [], error: '自定义模组服务未响应，请检查 rpcd 与本插件安装状态' }); }
 function saveCustomModel(data) {
 	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
-		data.platform, data.modes, data.pdp_index);
+		data.platform, data.modes, data.pdp_index, data.wcdma_band, data.lte_band,
+		data.nsa_band, data.sa_band);
 }
 function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
 function probeSupportPort(port) { return callProbePort(port); }
