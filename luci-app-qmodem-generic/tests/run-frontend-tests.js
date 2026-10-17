@@ -271,7 +271,10 @@ function makeRuntime() {
 	};
 	El.prototype.querySelectorAll = function() { return []; };
 	El.prototype.contains = function() { return false; };
-	El.prototype.addEventListener = function() {};
+	El.prototype.addEventListener = function(ev, callback) {
+		(this._handlers = this._handlers || {})[ev] = callback;
+	};
+	El.prototype.fire = function(ev) { if (this._handlers && this._handlers[ev]) this._handlers[ev](); };
 	El.prototype.setAttribute = function(k, v) { this.attributes[k] = v; };
 	El.prototype.getAttribute = function(k) { return this.attributes[k]; };
 	El.prototype.focus = function() {};
@@ -915,11 +918,60 @@ function testOptionalData() {
 	var status = rt.loadModule('view/qmodem-generic/status.js', {'luci/qmodem-generic/controls':controls});
 	assertEq('概览解析保留 SINR 0', status.parseStatus({cell:entries}).sinr, '0');
 	assertEq('概览缺失字段隐藏', status.infoRow('签约速率', '--'), null);
+
+	/* QModem 官方支持库的部分型号（例如 FM350-GL）不提供频段；
+	 * 这些空值必须隐藏，而不是在详情下方生成 nullnull... */
+	function allNodes(root) {
+		if (!root || typeof root !== 'object') return [];
+		var arr = [root], children = root.children || [];
+		children.forEach(function(child) { arr = arr.concat(allNodes(child)); });
+		return arr;
+	}
+	var adv = rt.loadModule('view/qmodem-generic/advanced.js', {'luci/qmodem-generic/controls':controls});
+	var readOnly = adv.supportCard({path:'/usr/share/qmodem/modem_support.json'}, {
+		presets:{pcie:{'fm350-gl':{
+			manufacturer:'fibocom',platform:'mediatek',modes:['mbim'],pdp_index:'0',
+			wcdma_band:null,lte_band:'nullnullnullnull',nsa_band:undefined,sa_band:'0'
+		}}}
+	});
+	var selector = allNodes(readOnly).filter(function(el) {
+		return el.tagName === 'SELECT';
+	})[0];
+	ok('QModem 官方库只读型号可查看', !!selector && !!selector.fire);
+	selector.value = '0';
+	selector.fire('change');
+	var nodes = allNodes(readOnly);
+	var details = nodes.map(function(el) { return el.text || ''; }).join(' ');
+	ok('空频段及 nullnullnullnull 不生成节点', details.indexOf('nullnullnullnull') === -1
+		&& details.indexOf('WCDMA 频段') === -1 && details.indexOf('SA 频段') === -1);
+	ok('PDP 0 和已知厂商正常显示', details.indexOf('fibocom') >= 0 && details.indexOf('0') >= 0);
+	ok('官方库没有任何修改按钮', !nodes.some(function(el) { return el.tagName === 'BUTTON'; }));
+
 	var network = rt.loadModule('view/qmodem-generic/network.js', {'luci/qmodem-generic/controls':controls});
 	assertEq('无线页缺失字段隐藏', network.row('RSRQ', 'N/A'), null);
 	assertEq('无线页缺失仪表隐藏', network.metricGauge('RSRQ', 'rsrq', null, 'dB'), null);
 	var system = rt.loadModule('view/qmodem-generic/system.js', {'luci/qmodem-generic/controls':controls});
 	assertEq('SIM 页缺失字段隐藏', system.row('ICCID', ''), null);
+}
+
+function testAdvancedNonblocking() {
+	console.log('\n[7.7] 高级页首次打开不等待完整支持库');
+	var rt = makeRuntime(), controls = loadControls(rt), resolveCustom;
+	controls.getCustomModels = function() {
+		return new Promise(function(resolve) { resolveCustom = resolve; });
+	};
+	var adv = rt.loadModule('view/qmodem-generic/advanced.js',
+		{'luci/qmodem-generic/controls':controls});
+	return Promise.race([
+		adv.load().then(function(res) { return !!(res && res.section); }),
+		new Promise(function(resolve) { setTimeout(function() { resolve(false); }, 2000); })
+	]).then(function(fast) {
+		ok('完整自定义库请求挂起时高级页仍可先显示', fast);
+		resolveCustom({entries: [],presets:{}});
+		return adv.initialAuxPromise.then(function() {
+			ok('异步支持库最终补充缓存', !!adv.auxData && !!adv.auxData.custom);
+		});
+	});
 }
 
 function testRender(rt) {
@@ -981,6 +1033,7 @@ testBootstrap(rt)
 	.then(function() { return testViews(makeRuntime()); })
 	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
 	.then(testOptionalData)
+	.then(testAdvancedNonblocking)
 	.then(function() { return testRender(makeRuntime()); })
 	.then(function() {
 		console.log('\n----------------------------------------');
