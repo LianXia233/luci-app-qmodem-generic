@@ -58,7 +58,7 @@ apply_custom() {
 		fi
 	fi
 	_target_tmp="$SUPPORT.custom.$$"
-	if ! jq --arg bus "$_bus" --arg model "$_model" --slurpfile data "$_tmp" \
+	if ! jq --indent 4 --arg bus "$_bus" --arg model "$_model" --slurpfile data "$_tmp" \
 		'.modem_support[$bus][$model] = $data[0].modem_support[$bus][$model]' "$SUPPORT" > "$_target_tmp" 2>/dev/null ||
 		! jq -e --arg bus "$_bus" --arg model "$_model" \
 		'.modem_support[$bus][$model].modes | type == "array"' "$_target_tmp" >/dev/null 2>&1; then
