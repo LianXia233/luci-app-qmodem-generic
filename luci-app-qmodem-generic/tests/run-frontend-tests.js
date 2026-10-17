@@ -644,6 +644,29 @@ async function testSmsSources() {
 	assertEq('用户刷新时才请求数据库同步', db.rt.countCalls('qmodem.sms','sync'), 1);
 	await rejects('无效数据库 id 不发出删除请求', db.controls.deleteSmsMessage('6_2',{source:'database',index:'-1'}), /无效/);
 
+	/* 老版本 QModem delete_sms.index 必须是字符串；分段短信一次传递所有索引。 */
+	var oldDelete = runtime();
+	await oldDelete.controls.deleteSmsMessage('8_1', {source:'modem',index:'1',indexes:['1','2','3']});
+	var deletionJobs = oldDelete.rt.calls.filter(function(c) {
+		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+	});
+	assertEq('旧版多段短信只产生一次删除任务', deletionJobs.length, 1);
+	assertEq('旧版短信删除参数为字符串，而非整数', deletionJobs[0].params.args.index, '1 2 3');
+	assertEq('模组动态配置节传递正确', deletionJobs[0].params.args.config_section, '8_1');
+	ok('删除成功后主动刷新短信缓存', oldDelete.rt.calls.some(function(c) {
+		return c.object === 'qmodem_cache' && c.method === 'refresh';
+	}));
+	await oldDelete.controls.deleteSmsMessage('8_1', {source:'modem',index:'0',indexes:['0']});
+	var deleteZero = oldDelete.rt.calls.filter(function(c) {
+		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+	})[1];
+	assertEq('模组短信槽位 0 有效', deleteZero.params.args.index, '0');
+	await rejects('非法索引直接拒绝删除', oldDelete.controls.deleteSmsMessage('8_1',
+		{source:'modem',index:'-5',indexes:[]}), /索引/);
+	assertEq('非法索引不会触发额外删除请求', oldDelete.rt.calls.filter(function(c) {
+		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+	}).length, 2);
+
 	var legacy = runtime();
 	assertEq('旧版没有短信服务时回退模组存储', (await legacy.controls.getSmsInbox('6_1'))._smsSource, 'modem');
 	await legacy.controls.getSmsInbox('6_1');
