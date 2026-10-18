@@ -112,6 +112,11 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
   }
   if (scenario === 'empty' || scenario === 'absent') data = {};
   if (scenario === 'sms_legacy') data.sms.get_sms = { sms: { msg: [{ index:0, sender:'10010', content:'SIM 保留短信', timestamp:'26/10/17,20:10:00+32' }] } };
+  if (scenario === 'sms_multipart') data.sms.get_sms = { sms: { msg: [
+    { index:7, sender:'10010', reference:34, total:2, part:2, content:'第二段', timestamp:'26/10/17,20:10:00+32' },
+    { index:6, sender:'10010', reference:34, total:2, part:1, content:'第一段', timestamp:'26/10/17,20:10:00+32' },
+    { index:0, sender:'10086', content:'单条短信', timestamp:'26/10/16,20:10:00+32' }
+  ] } };
   if (scenario === 'sms_legacy_missing') delete data.sms;
   window.calls = [];
   window.notifications = [];
@@ -131,6 +136,8 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '实时收到短信', timestamp: '26/10/17,20:10:00+32' }] } });
+    if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_multipart')
+      return Promise.resolve(window.deletedSms ? { sms: { msg: [{ index:0, sender:'10086', content:'单条短信' }] } } : data.sms.get_sms);
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
         return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'));
@@ -155,6 +162,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
         const payload = args[3];
         if (!payload || payload.config_section !== args[0]) return Promise.resolve({ error: 'explicit valid modem section required' });
         if (['send_at','send_sms','do_reboot'].includes(args[2]) && (!payload.params || typeof payload.params !== 'object')) return Promise.resolve({ error: 'missing params object' });
+        if (scenario === 'sms_multipart' && args[2] === 'delete_sms') window.deletedSms = true;
       }
       const id = 'test-' + (++task);
       tasks[id] = { config_section: args[0], state: window.atTaskFailure ? 'failed' : 'success',
@@ -314,7 +322,7 @@ async function run() {
 async function runDom() {
   const { Window } = await import(require.resolve('happy-dom'));
   let cases = 0;
-  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech', 'sms_database', 'sms_database_error', 'sms_legacy', 'sms_legacy_missing']) for (const viewName of views) {
+  for (const dark of [false, true]) for (const width of [1440, 375]) for (const scenario of ['full', 'sparse', 'empty', 'absent', 'tdtech', 'sms_database', 'sms_database_error', 'sms_legacy', 'sms_legacy_missing', 'sms_multipart']) for (const viewName of views) {
     if (scenario.startsWith('sms_') && viewName !== 'sms') continue;
     const window = new Window({ url: 'http://qmodem.test', width, height: 1000 });
     try {
@@ -554,6 +562,21 @@ async function runDom() {
         const settings = [...app.querySelectorAll('.mt-sms-hero button')].find(b => b.textContent.trim() === '设置');
         settings.click();
         assert(!window.calls.some(c => c.method === 'action' && c.args[3]?.params?.at === 'AT^IMSSWITCH?'), 'Fibocom settings must not issue TD-Tech private queries');
+      }
+      if (viewName === 'sms' && scenario === 'sms_multipart') {
+        assert(text.includes('模组内短信：2 条'), 'Multipart SMS counts as one message');
+        assert.equal(app.querySelectorAll('.mt-sms-contact').length, 2);
+        assert.equal(app.querySelectorAll('.mt-sms-bubblewrap').length, 1, 'Multipart SMS renders as one bubble');
+        assert(app.querySelector('.mt-sms-bubble').textContent.includes('第一段第二段'), 'Fragments appear in part order');
+        app.querySelector('.mt-sms-delete').click();
+        window.document.querySelector('#modal .cbi-button-negative').click();
+        await new Promise(resolve => setTimeout(resolve, 260));
+        const action = window.calls.find(c => c.method === 'action' && c.args[2] === 'delete_sms');
+        assert.equal(action.args[3].index, '7 6', 'Deletion submits every segment in descending storage order');
+        assert(window.calls.some(c => c.object === 'qmodem' && c.method === 'get_sms' && !window.initialCalls.includes(c)), 'Deleted segments are checked with a fresh modem read');
+        assert(!app.textContent.includes('第一段第二段'), 'Deleted conversation disappears without a manual refresh');
+        assert(app.textContent.includes('模组内短信：1 条'), 'Count updates immediately after deletion');
+        assert.equal(app.querySelector('.mt-sms-count-badge').textContent, '1');
       }
       console.log('PASS ' + viewName + '/' + scenario + '/' + width + (dark ? '/dark' : '/light'));
       cases++;

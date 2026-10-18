@@ -1258,15 +1258,18 @@ function deleteSmsMessage(section, message) {
 	var indexes = smsStorageIndexes(rawIndexes);
 	if (!indexes.length)
 		return Promise.reject(new Error(_('短信缺少有效的模组存储索引，不能删除。')));
+	/* 与 QModem 官方短信页一致，先删较大的槽位，避免较小槽位删除后
+	 * 模组重新编排索引而删错后续分段。 */
+	indexes.sort(function(a, b) { return Number(b) - Number(a); });
 	return deleteSms(section, indexes.join(' ')).then(function(result) {
 		var confirmed = modemSmsDeleteResult(result);
 		/* 旧版 QModem 有时不带确认状态；等待先前读取结束后再直读一次，
-		 * 只有全部索引确实消失才允许把短信从 UI 隐藏。 */
+		 * 多段删除时即便末段返回成功，也要核对全部索引确实消失。 */
 		var previous = legacySmsInFlight[section];
 		return (previous ? previous.catch(function() {}) : Promise.resolve()).then(function() {
 			delete legacySmsStore[section];
 			delete legacySmsLastAttempt[section];
-			if (confirmed) return result;
+			if (confirmed && indexes.length === 1) return result;
 			return readLegacySms(section).then(function(fresh) {
 				var items = modemSmsItems(fresh);
 				if (!items) throw new Error(_('删除命令已发送，但无法核对模组短信列表。'));

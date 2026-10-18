@@ -105,7 +105,41 @@ function normalizeMessage(item, position, source) {
 }
 
 function parseMessages(raw) {
-	return smsEntries(raw).map(function(item, position) { return normalizeMessage(item, position, raw && raw._smsSource); }).sort(function(a, b) {
+	var source = raw && raw._smsSource;
+	var groups = [], multipart = Object.create(null);
+	smsEntries(raw).forEach(function(item, position) {
+		var reference = pick(item, [ 'reference' ]);
+		/* QModem 的 get_sms 把长短信按存储槽位拆开；官方页面按
+		 * reference + sender 合并，删除时需要带上每段的 index。 */
+		if (source !== 'database' && reference !== '') {
+			var key = String(reference) + '\u001f' + String(pick(item, [ 'sender', 'number', 'phone_number', 'phone', 'from', 'address', 'oa' ])) +
+				'\u001f' + String(pick(item, [ 'total' ]));
+			if (!multipart[key]) {
+				multipart[key] = [];
+				groups.push(multipart[key]);
+			}
+			multipart[key].push({ item: item, position: position });
+		} else {
+			groups.push([ { item: item, position: position } ]);
+		}
+	});
+	return groups.map(function(parts) {
+		parts.sort(function(a, b) { return (Number(a.item.part) || 0) - (Number(b.item.part) || 0); });
+		var message = normalizeMessage(parts[0].item, parts[0].position, source);
+		if (parts.length > 1) {
+			message.indexes = [];
+			message.text = '';
+			parts.forEach(function(part) {
+				var fragment = normalizeMessage(part.item, part.position, source);
+				message.text += fragment.text;
+				fragment.indexes.forEach(function(index) {
+					if (message.indexes.indexOf(index) === -1) message.indexes.push(index);
+				});
+			});
+			message.index = message.indexes[0] || '';
+		}
+		return message;
+	}).sort(function(a, b) {
 		return (a.order || 0) - (b.order || 0);
 	});
 }
@@ -497,11 +531,27 @@ return view.extend({
 												self.smsDeletedKeys = self.smsDeletedKeys || {};
 												self.smsDeletedKeys[smsMessageKey(msg)] = true;
 												/* 不直接重载旧缓存：立即从会话删除，轮询再从后台确认状态。 */
+												var removed = modemMessages.indexOf(msg);
+												if (removed !== -1) modemMessages.splice(removed, 1);
+												removed = messages.indexOf(msg);
+												if (removed !== -1) messages.splice(removed, 1);
+												var page = contacts.closest('.mt-sms');
+												if (page) {
+													var storageCount = page.querySelector('.mt-sms-storage-text');
+													if (storageCount) storageCount.textContent = (simNumber ? '本机号码：' + simNumber + '　·　' : '') +
+														(database ? '数据库短信：' : '模组内短信：') + modemMessages.length + ' 条';
+												}
 												group.messages = group.messages.filter(function(item) { return item !== msg; });
 												if (group.messages.length) {
+													var last = group.messages[group.messages.length - 1];
+													var preview = button && button.querySelector('.mt-sms-contact-preview');
+													var date = button && button.querySelector('.mt-sms-contact-date');
+													if (preview) preview.textContent = last.text || _('Empty message');
+													if (date) date.textContent = String(last.date || '').substring(5);
 													showThread(group, button, false);
 												} else {
 													if (button && button.parentNode) button.parentNode.removeChild(button);
+													if (page) page.querySelector('.mt-sms-count-badge').textContent = String(contacts.children.length);
 													showThread(null, null, false);
 												}
 												controls.notify(null, E('p', {}, _('短信已删除。')), 'info');
@@ -609,7 +659,8 @@ return view.extend({
 					E('p', {}, _('Conversations using the SIM installed in the module.')),
 					E('div', { 'class': 'mt-sms-storage' }, [
 						svgNode('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>'),
-						(simNumber ? '本机号码：' + simNumber + '　·　' : '') + (res.sms && res.sms._smsPending ? '正在读取模组短信…' : res.sms ? (database ? '数据库短信：' : '模组内短信：') + modemMessages.length + ' 条' : '短信读取失败')
+						E('span', { 'class': 'mt-sms-storage-text' },
+							(simNumber ? '本机号码：' + simNumber + '　·　' : '') + (res.sms && res.sms._smsPending ? '正在读取模组短信…' : res.sms ? (database ? '数据库短信：' : '模组内短信：') + modemMessages.length + ' 条' : '短信读取失败'))
 					])
 				]),
 				E('div', { 'class': 'mt-sms-hero-actions' }, [

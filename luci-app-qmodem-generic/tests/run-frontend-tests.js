@@ -678,13 +678,15 @@ async function testSmsSources() {
 
 	/* 老版本 QModem delete_sms.index 必须是字符串；分段短信一次传递所有索引。 */
 	var oldDelete = runtime();
+	oldDelete.rt.setModemSmsApi(function() { return { sms: { msg: [] } }; });
 	await oldDelete.controls.deleteSmsMessage('8_1', {source:'modem',index:'1',indexes:['1','2','3']});
 	var deletionJobs = oldDelete.rt.calls.filter(function(c) {
 		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
 	});
 	assertEq('旧版多段短信只产生一次删除任务', deletionJobs.length, 1);
-	assertEq('旧版短信删除参数为字符串，而非整数', deletionJobs[0].params.args.index, '1 2 3');
+	assertEq('旧版短信删除索引按官方要求降序传入字符串', deletionJobs[0].params.args.index, '3 2 1');
 	assertEq('模组动态配置节传递正确', deletionJobs[0].params.args.config_section, '8_1');
+	assertEq('多段删除即使返回成功也重新读取核对', oldDelete.rt.countCalls('qmodem','get_sms'), 1);
 	ok('删除成功后主动刷新短信缓存', oldDelete.rt.calls.some(function(c) {
 		return c.object === 'qmodem_cache' && c.method === 'refresh';
 	}));
@@ -693,6 +695,10 @@ async function testSmsSources() {
 		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
 	})[1];
 	assertEq('模组短信槽位 0 有效', deleteZero.params.args.index, '0');
+	var partial = runtime();
+	partial.rt.setModemSmsApi(function() { return { sms: { msg: [{ index: 2, sender: '10010' }] } }; });
+	await rejects('多段中有一段仍存在不能误报删除成功', partial.controls.deleteSmsMessage('8_1',
+		{source:'modem',index:'1',indexes:['1','2','3']}), /仍返回/);
 	var noStatus = runtime();
 	noStatus.rt.setDeleteResult({ result: {} });
 	noStatus.rt.setModemSmsApi(function() { return { sms: { msg: [] } }; });
