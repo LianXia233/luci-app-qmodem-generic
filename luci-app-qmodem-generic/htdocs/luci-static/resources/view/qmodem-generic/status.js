@@ -1051,7 +1051,7 @@ return view.extend({
 			/* 顶部 Hero 玻璃卡片 */
 			E('section', { 'class': 'qm-glass-card qm-hero' }, [
 				E('div', {}, [
-					E('h2', { 'class': 'qm-hero-title' }, data.model || _('移动模组')),
+					controls.pageTitle('status', data.model || _('移动模组'), 'qm-hero-title'),
 					E('div', { 'class': 'qm-hero-sub' }, !reachable
 						? _('模组未响应，请检查模组连接。')
 						: connected ? _('移动网络已连接并正常运行。')

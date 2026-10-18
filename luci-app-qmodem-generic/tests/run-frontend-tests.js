@@ -295,6 +295,7 @@ function makeRuntime() {
 		visibilityState: 'visible',
 		activeElement: null,
 		createElement: function(t) { return new El(t); },
+		createElementNS: function(ns, t) { return new El(t); },
 		createTextNode: function(t) { return { nodeType: 3, text: String(t) }; },
 		addEventListener: function(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
 		removeEventListener: function() {},

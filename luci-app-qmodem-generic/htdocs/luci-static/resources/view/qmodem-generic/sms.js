@@ -449,7 +449,7 @@ return view.extend({
 				this.styleNode(), controls.styleNode(),
 				E('section', { 'class': 'mt-sms-hero' }, [
 					E('div', {}, [
-						E('h2', {}, _('Messages')),
+						controls.pageTitle('sms', _('Messages')),
 						E('p', {}, _('Conversations using the SIM installed in the module.'))
 					])
 				]),
@@ -652,10 +652,7 @@ return view.extend({
 			/* 顶部 Hero 玻璃卡片 */
 			E('section', { 'class': 'mt-sms-hero' }, [
 				E('div', {}, [
-					E('h2', {}, [
-						svgNode('<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'),
-						_('Messages')
-					]),
+					controls.pageTitle('sms', _('Messages')),
 					E('p', {}, _('Conversations using the SIM installed in the module.')),
 					E('div', { 'class': 'mt-sms-storage' }, [
 						svgNode('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>'),

@@ -543,7 +543,7 @@ return view.extend({
 				/* 顶部 Hero 玻璃卡片 */
 				E('section', { 'class': 'mtconn-card mtconn-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mtconn-title' }, _('移动数据')),
+						controls.pageTitle('connection', _('移动数据'), 'mtconn-title'),
 						E('div', { 'class': 'mtconn-sub' }, _('管理移动网络连接会话、配置 APN 及拨号策略。'))
 					]),
 					E('div', { 'class': 'mtconn-state' + (connected ? ' online' : '') }, [

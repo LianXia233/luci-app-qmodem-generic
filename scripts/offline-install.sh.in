@@ -1,0 +1,37 @@
+#!/bin/sh
+# 自带 APK 的离线安装包；可在 iStore 手动安装页直接上传 .run。
+set -eu
+
+fail() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+[ "$(id -u)" = 0 ] || fail '请使用 root 安装。'
+command -v apk >/dev/null 2>&1 || fail '此安装包需要使用 APK 的 OpenWrt / ImmortalWrt 25.12 或更新系统。'
+for dependency in luci-base qmodem; do
+	apk --no-network --repositories-file /dev/null info -e "$dependency" >/dev/null 2>&1 \
+		|| fail "缺少已安装依赖：$dependency。请先安装依赖，再运行本离线包。"
+done
+
+QM_OFFLINE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/qmodem-generic.XXXXXX")
+trap 'rm -rf "$QM_OFFLINE_TMP"' EXIT
+trap 'exit 1' HUP INT TERM
+
+printf '%s\n' '正在校验离线安装包…'
+base64 -d > "$QM_OFFLINE_TMP/payload.tar.gz" <<'__QMODEM_OFFLINE_PAYLOAD__'
+@PAYLOAD@
+__QMODEM_OFFLINE_PAYLOAD__
+printf '%s  %s\n' '@PAYLOAD_SHA256@' "$QM_OFFLINE_TMP/payload.tar.gz" \
+	| sha256sum -c - >/dev/null || fail '安装包校验失败，请重新复制完整的 .run 文件。'
+tar -xzf "$QM_OFFLINE_TMP/payload.tar.gz" -C "$QM_OFFLINE_TMP"
+
+printf '%s\n' '正在离线安装 QModem WebUI…'
+# 同时隔离软件源与禁用网络；保留正常依赖检查和包安装钩子。
+if apk --no-network --repositories-file /dev/null add --allow-untrusted "$QM_OFFLINE_TMP"/*.apk; then
+	printf '%s\n' '安装完成，请刷新 LuCI 页面。'
+else
+	QM_OFFLINE_STATUS=$?
+	printf '%s\n' '离线安装失败，请检查上面的错误信息。' >&2
+	exit "$QM_OFFLINE_STATUS"
+fi

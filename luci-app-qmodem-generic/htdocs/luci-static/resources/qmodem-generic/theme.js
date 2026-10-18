@@ -595,7 +595,23 @@ var CSS_NAV_TABS = [
   '@media(max-width:680px){.qm-app #tabmenu{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}.qm-app #tabmenu ul.tabs{display:flex;flex-wrap:nowrap;min-width:max-content}.qm-app #tabmenu a.qm-tab-link{gap:6px;min-height:40px}}'
 ].join('');
 
-var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS ].join('\n');
+/* 显式重置主题给 h2 加的缩进/伪元素，图标与文字只保留一个固定间距。 */
+var CSS_PAGE_TITLES = [
+	'.qm-app h2.qm-page-title{display:flex;align-items:center;gap:10px;min-width:0;max-width:100%;',
+	'margin:0 0 6px!important;padding:0!important;border:0!important;text-indent:0!important;',
+	'font-size:24px!important;font-weight:800;line-height:1.35;letter-spacing:-.02em;',
+	'white-space:normal;overflow:visible;text-overflow:clip;background:none!important;',
+	'-webkit-text-fill-color:currentColor!important}',
+	'.qm-app h2.qm-page-title::before,.qm-app h2.qm-page-title::after{content:none!important;display:none!important}',
+	'.qm-app h2.qm-page-title>.qm-page-title-icon{display:block;width:24px;height:24px;flex:0 0 24px;',
+	'margin:0!important;padding:0!important;stroke:currentColor;pointer-events:none}',
+	'.qm-app .qm-page-title-text{min-width:0;overflow-wrap:anywhere}',
+	'.qm-app .qm-page-title-text img{display:inline-block;vertical-align:middle;margin:0 8px 0 0}',
+	'@media(max-width:560px){.qm-app h2.qm-page-title{font-size:21px!important;gap:8px}',
+	'.qm-app h2.qm-page-title>.qm-page-title-icon{width:22px;height:22px;flex-basis:22px}}'
+].join('');
+
+var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS, CSS_PAGE_TITLES ].join('\n');
 
 /* ------------------------------------------------------------------ */
 /* 6) 运行时：注入 + 明暗探测                                            */
@@ -699,15 +715,43 @@ function detectTone() {
 /* 整体的 try/catch 兜底：极简 DOM 替身（单元测试）或异常环境下一律静默跳过，
  * 绝不让"注入皮肤"这件事本身把页面/测试搞崩。 */
 /* 固定 SVG 轮廓，不加载第三方图标库、不改菜单地址或事件。 */
-var TAB_ICON_PATHS = {
+var ICON_PATHS = {
   status: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
   connection: 'M7 3v14m-4-4 4 4 4-4M17 21V7m-4 4 4-4 4 4',
   network: 'M12 21V10m-4 11h8M10 14l2-5 2 5M5 7a10 10 0 0 1 14 0M2 4a14 14 0 0 1 20 0',
   sms: 'M20 11.5a8 8 0 0 1-8 8c-1.4 0-2.7-.3-3.9-.9L3 21l1.7-5.1A8 8 0 1 1 20 11.5zM8 11h8m-8 3h5',
   system: 'M8 2h6l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a3 3 0 0 1 3-3zM9 12h6v6H9zM12 12v6',
-  advanced: 'M3 6h10m4 0h4M3 18h4m4 0h10M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0'
+  advanced: 'M3 6h10m4 0h4M3 18h4m4 0h10M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0',
+  settings: 'M4 5h16v14H4zM8 9h8M8 15h8M10 7v4M14 13v4',
+  terminal: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM7 8l4 4-4 4M13 16h4'
 };
 var tabIconObserver = null, tabIconReadyListener = false;
+
+function icon(kind, className) {
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	var attrs = { 'class': className, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+		'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+		'aria-hidden': 'true', focusable: 'false' };
+	Object.keys(attrs).forEach(function(key) { svg.setAttribute(key, attrs[key]); });
+	var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	path.setAttribute('d', ICON_PATHS[kind] || ICON_PATHS.status);
+	svg.appendChild(path);
+	return svg;
+}
+
+/* 标题内容只按文本/DOM 节点追加，模组名称不能作为 HTML 解析。 */
+function pageTitle(kind, label, className) {
+	var title = document.createElement('h2');
+	title.setAttribute('class', 'qm-page-title' + (className ? ' ' + className : ''));
+	title.appendChild(icon(kind, 'qm-page-title-icon'));
+	var text = document.createElement('span');
+	text.setAttribute('class', 'qm-page-title-text');
+	(Array.isArray(label) ? label : [ label ]).forEach(function(value) {
+		if (value != null) text.appendChild(value.nodeType ? value : document.createTextNode(String(value)));
+	});
+	title.appendChild(text);
+	return title;
+}
 
 function decorateNavTabs() {
   if (!document.querySelectorAll || !document.createElementNS) return;
@@ -716,20 +760,7 @@ function decorateNavTabs() {
     var a = links[i], href = a.getAttribute('href') || '';
     var match = href.match(/\/admin\/modem\/qmodem-generic\/(status|connection|network|sms|system|advanced)\/?(?:[?#]|$)/);
     if (!match || (a.querySelector && a.querySelector('svg.qm-tab-icon'))) continue;
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', 'qm-tab-icon');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.8');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', TAB_ICON_PATHS[match[1]]);
-    svg.appendChild(path);
-    a.insertBefore(svg, a.firstChild);
+    a.insertBefore(icon(match[1], 'qm-tab-icon'), a.firstChild);
     if (a.classList) a.classList.add('qm-tab-link');
   }
 }
@@ -891,6 +922,7 @@ var API = {
 	setAppearance: setAppearance,
 	palettes: function() { return PALETTES.map(function(p) { return Object.assign({}, p); }); },
 	topology: topology,
+	pageTitle: pageTitle,
 	detectTone: detectTone,
 	card: card,
 	kv: kv,

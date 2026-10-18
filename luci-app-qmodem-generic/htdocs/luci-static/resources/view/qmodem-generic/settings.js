@@ -135,7 +135,7 @@ return view.extend({
 				modemBar,
 				E('section', { 'class': 'mt-diag-card mt-diag-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mt-diag-title' }, _('设备参数')),
+						controls.pageTitle('settings', _('设备参数'), 'mt-diag-title'),
 						E('p', { 'class': 'mt-diag-sub' }, _('编辑 QModem 配置（/etc/config/qmodem）中当前模组的设备参数。'))
 					]),
 					E('span', { 'class': 'mt-diag-badge' }, [
@@ -237,7 +237,7 @@ return view.extend({
 				/* 顶部 Hero 玻璃卡片 */
 				E('section', { 'class': 'mt-diag-card mt-diag-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mt-diag-title' }, _('设备参数')),
+						controls.pageTitle('settings', _('设备参数'), 'mt-diag-title'),
 						E('p', { 'class': 'mt-diag-sub' }, _('编辑 QModem 配置中当前模组的设备参数（配置节：%s）。').format(shown(section)))
 					]),
 					E('span', { 'class': 'mt-diag-badge' }, [

@@ -56,6 +56,11 @@ jobs:
         run: |
           find "$PKG_DIR/root" -name '*.json' -print0 | xargs -0 -r -n1 python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))"
 
+      - name: Offline installer checks
+        run: |
+          sh -n scripts/offline-install.sh.in
+          python3 "$PKG_DIR/tests/test-offline-install.py"
+
       - name: PO sanity check
         run: |
           sudo apt-get update -qq
@@ -173,11 +178,19 @@ jobs:
             exit 1
           fi
 
+      - name: Build offline iStore installer
+        run: |
+          set -euo pipefail
+          main_apk=$(find output -maxdepth 1 -name 'luci-app-qmodem-generic-*.apk' -print -quit)
+          python3 scripts/build-offline-run.py "${main_apk%.apk}-offline.run" output/*.apk
+
       - uses: actions/upload-artifact@v4
         id: apk
         with:
           name: qmodem-generic-apk
-          path: output/*.apk
+          path: |
+            output/*.apk
+            output/*.run
           if-no-files-found: error
           retention-days: 30
 
@@ -188,13 +201,15 @@ jobs:
           {
             echo '## APK 已生成'
             echo
-            echo "[下载本次 APK 压缩包]($ARTIFACT_URL)（解压后安装主包）"
+            echo "[下载本次安装包]($ARTIFACT_URL)（解压后优先安装 offline.run）"
             echo
             echo "[Releases 下载页]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)（发布步骤成功后可直接下载 APK）"
             echo
             echo '构建环境：ImmortalWrt 25.12 SDK；包架构：all。'
             echo
-            for f in output/*.apk; do
+            echo '离线安装：将 offline.run 上传到 iStore 手动安装页，不访问软件源。'
+            echo
+            for f in output/*.apk output/*.run; do
               echo "- $(basename "$f")"
             done
           } >> "$GITHUB_STEP_SUMMARY"
@@ -252,9 +267,12 @@ jobs:
             echo "QModem 通用美化版 LuCI Web UI，适用于任意被 QModem 识别的模组。"
             echo
             echo "### 安装"
+            echo 'iStore 手动安装请上传 `*-offline.run`，内含 APK 和翻译包，安装时不访问软件源。'
+            echo '设备需已安装 `luci-base` 与 `qmodem`；缺少依赖会直接提示。'
+            echo
             echo '```sh'
             echo '# apk（ImmortalWrt 25.12 / 25.12-SNAPSHOT）'
-            echo 'apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
+            echo 'apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
             echo '```'
             echo
             echo '> 运行时依赖 `qmodem`，请先安装 QModem。'
@@ -289,7 +307,9 @@ jobs:
           name: ${{ steps.meta.outputs.name }}
           body_path: release-notes.md
           prerelease: ${{ inputs.prerelease }}
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/*.run
           fail_on_unmatched_files: true
 
       # Release Action 返回成功仍要校验附件，避免显示成功却没有可下载 APK。
@@ -301,8 +321,9 @@ jobs:
           set -euo pipefail
           release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CURRENT_TAG")
           main_count=$(echo "$release_json" | jq '[.assets[].name | select(test("^luci-app-qmodem-generic-.*\\.apk$"))] | length')
-          if [ "$main_count" -lt 1 ]; then
-            echo "::error::Release $CURRENT_TAG 没有主 APK 附件，停止后续清理"
+          offline_count=$(echo "$release_json" | jq '[.assets[].name | select(test("^luci-app-qmodem-generic-.*-offline\\.run$"))] | length')
+          if [ "$main_count" -lt 1 ] || [ "$offline_count" -lt 1 ]; then
+            echo "::error::Release $CURRENT_TAG 缺少主 APK 或离线 RUN 附件，停止后续清理"
             exit 1
           fi
           release_url=$(echo "$release_json" | jq -r '.html_url')

@@ -266,7 +266,7 @@ async function run() {
       const page = await browser.newPage({ viewport: { width, height: 1000 }, reducedMotion: 'reduce' });
       page.on('pageerror', e => errors.push(viewName + ': ' + e.message));
       await page.goto('http://127.0.0.1:' + server.address().port);
-      await page.addStyleTag({ content: `body{margin:0;padding:20px;background:${dark ? '#121820' : '#f5f7fa'};color:${dark ? '#eef2f7' : '#16202c'};font:14px Arial,sans-serif}body *{box-sizing:border-box}button,a,input,select,textarea{font:inherit}.cbi-value-title{float:left;width:200px}.cbi-value-field{margin-left:220px}input,select{min-width:240px}.btn{display:inline-flex;padding:8px 14px;border:1px solid #ccd2dc;border-radius:8px}#app{max-width:1280px;margin:auto}` });
+      await page.addStyleTag({ content: `body{margin:0;padding:20px;background:${dark ? '#121820' : '#f5f7fa'};color:${dark ? '#eef2f7' : '#16202c'};font:14px Arial,sans-serif}body *{box-sizing:border-box}button,a,input,select,textarea{font:inherit}h2{padding-left:20px;text-indent:10px}h2::before{content:"";display:inline-block;width:16px;margin-right:8px}.cbi-value-title{float:left;width:200px}.cbi-value-field{margin-left:220px}input,select{min-width:240px}.btn{display:inline-flex;padding:8px 14px;border:1px solid #ccd2dc;border-radius:8px}#app{max-width:1280px;margin:auto}` });
       await page.evaluate(mount, { sources, translations, viewName, scenario: 'full', dark });
       const report = await page.evaluate(() => {
         const app = document.querySelector('#app');
@@ -275,7 +275,22 @@ async function run() {
         const overflowing = [...app.querySelectorAll('input:not([type=checkbox]),select,textarea')].filter(el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().right > el.closest('section,.mt-control-card,.mt-sms-compose,#app').getBoundingClientRect().right + 1).map(el => el.outerHTML.slice(0, 100));
         const walker = document.createTreeWalker(app, NodeFilter.SHOW_TEXT); let node, leaked = [];
         while ((node = walker.nextNode())) if (!['STYLE', 'SCRIPT', 'PRE'].includes(node.parentElement.tagName) && /^(null|undefined|nullnull)$/.test(node.textContent.trim())) leaked.push(node.textContent);
-        return { text, badRows, overflowing, leaked, width: document.documentElement.scrollWidth, viewport: innerWidth,
+        const title = app.querySelector('h2.qm-page-title');
+        const icon = title?.querySelector('svg.qm-page-title-icon');
+        const copy = title?.querySelector('.qm-page-title-text');
+        const titleMetrics = title && icon && copy ? {
+          count: app.querySelectorAll('h2.qm-page-title').length,
+          icons: title.querySelectorAll('svg.qm-page-title-icon').length,
+          namespace: icon.namespaceURI, width: icon.getBoundingClientRect().width,
+          padding: getComputedStyle(title).paddingLeft,
+          indent: getComputedStyle(title).textIndent,
+          before: getComputedStyle(title, '::before').content,
+          after: getComputedStyle(title, '::after').content,
+          gap: copy.getBoundingClientRect().left - icon.getBoundingClientRect().right,
+          aligned: Math.abs(icon.getBoundingClientRect().left - title.nextElementSibling.getBoundingClientRect().left) < 1,
+          inside: copy.getBoundingClientRect().right <= title.getBoundingClientRect().right + 1
+        } : null;
+        return { text, badRows, overflowing, leaked, titleMetrics, width: document.documentElement.scrollWidth, viewport: innerWidth,
           slowCalls: window.initialCalls.filter(c => ['qmodem', 'qos', 'luci-rpc'].includes(c.object)),
           chips: [...app.querySelectorAll('.mt-locksum-chips')].map(el => getComputedStyle(el).display) };
       });
@@ -284,6 +299,17 @@ async function run() {
       assert.deepEqual(report.badRows, [], `${viewName}: missing-data rows`);
       assert.deepEqual(report.overflowing, [], `${viewName} ${width}: overflowing fields`);
       assert(report.width <= report.viewport + 1, `${viewName} ${width}: page overflow ${report.width}`);
+      assert(report.titleMetrics, `${viewName}: missing title/icon`);
+      assert.equal(report.titleMetrics.count, 1, `${viewName}: duplicated title`);
+      assert.equal(report.titleMetrics.icons, 1, `${viewName}: duplicated icon`);
+      assert.equal(report.titleMetrics.namespace, 'http://www.w3.org/2000/svg');
+      assert.equal(report.titleMetrics.padding, '0px', `${viewName}: inherited title padding`);
+      assert.equal(report.titleMetrics.indent, '0px', `${viewName}: inherited title indent`);
+      assert.equal(report.titleMetrics.before, 'none');
+      assert.equal(report.titleMetrics.after, 'none');
+      assert.equal(report.titleMetrics.width, width <= 560 ? 22 : 24);
+      assert.equal(report.titleMetrics.gap, width <= 560 ? 8 : 10);
+      assert(report.titleMetrics.aligned && report.titleMetrics.inside, `${viewName}: title alignment/overflow`);
       assert.deepEqual(report.slowCalls, [], `${viewName}: read touched modem`);
       if (viewName === 'network') assert(report.chips.every(v => v === 'flex'));
       if (viewName === 'system') assert(report.text.includes('89860118802028653177'), 'ICCID should use actual data');
@@ -350,6 +376,10 @@ async function runDom() {
           c.object === 'qmodem' && c.method === 'get_sms')),
         `${viewName}/${scenario}: unexpected modem request`);
       assert.equal(window.document.body.getAttribute('data-qm-palette'), 'ocean', 'Default palette must be blue/green');
+      if (scenario !== 'absent') {
+        assert.equal(app.querySelectorAll('h2.qm-page-title').length, 1, `${viewName}: one page title`);
+        assert.equal(app.querySelectorAll('h2.qm-page-title>svg.qm-page-title-icon').length, 1, `${viewName}: one title SVG`);
+      }
       let fired = false;
       const button = window.controls.element('button', { click: () => { fired = true; } }, 'check');
       button.click();

@@ -93,14 +93,23 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 
 ## 安装
 
+**iStore 手动安装：优先上传 Releases 中的 `*-offline.run`。** 该文件自带主 APK 和翻译包，安装时禁用网络、不更新软件源；需已安装 `luci-base` 与 `qmodem`，缺少依赖会直接提示。
+
+直接上传 `.apk` 时，iStore 自带的 APK 安装命令仍可能访问软件源。离线包通过 iStore 原生支持的 `.run` 入口安装，无需修改系统软件源或 iStore。
+
 ```sh
-# apk（ImmortalWrt 25.12 / snapshot）
-apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk
+# SSH 安装离线 RUN（ImmortalWrt 25.12 / snapshot）
+sh ./luci-app-qmodem-generic-*-offline.run
+
+# 或直接离线安装本地主 APK（需要的翻译 APK 也可加在命令末尾）
+apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk
 ```
 
 > 若设备上此前安装过旧版 `luci-app-mt5700m`，请先 `opkg remove luci-app-mt5700m` 再安装本包，避免旧包残留的菜单与 ACL 条目干扰。
 
 安装后在 LuCI 菜单 **移动网络 → 模组管理** 下使用。
+
+自 `2.5.0-r22` 起，安装钩子使用 `rpcd reload` 保留 LuCI 会话；更新后刷新页面即可。`r23` 同时清理 LuCI 页面缓存，保留已有配置、短信与流量记录。
 
 ## 流量统计
 
@@ -167,9 +176,9 @@ make package/luci-app-qmodem-generic/compile V=s
 
 1. `lint` — JS 语法（`node --check`）、JSON 解析、`msgfmt` 校验、ACL/菜单一致性检查
 2. `build` — 只用 ImmortalWrt 25.12 SDK 编译一套 APK；包架构为 `all`，可用于对应环境的 ARM / x86 设备
-3. `release` — 编译成功后自动把 APK 上传到 Release（tag 可在触发时指定，留空则自动生成）
+3. `release` — 编译成功后自动把 APK 和自带 APK 的离线 RUN 上传到 Release（tag 可在触发时指定，留空则自动生成）
 
-下载位置：运行摘要中的「下载本次 APK 压缩包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的 APK 附件。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
+下载位置：运行摘要中的「下载本次安装包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的附件；iStore 安装选择 `*-offline.run`。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
 
 ## 界面主题与响应式（QM UI v2）
 
@@ -217,7 +226,7 @@ python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 - **字段未上报时的降级显示**：部分模组不会上报全部字段，QModem 会以占位值回填（如 FM350-GL 温度回 `"0°C"`、带宽回 `"M"`）。本包对占位值做归一化，未上报字段统一显示 `--`。
 - **上下行调制**：来自 `qos` 对象的 `radio_info`；模组/固件不支持时返回 `{"status":"unavailable"}`，页面显示 `--` 属预期降级。
 - **LuCI 26.x（Master 26.246+）**：移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失才注入，不覆盖已有实现）。
-- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重启，前端会在 60 s 冷却窗口内退回直连 QModem。升级后请执行 `/etc/init.d/rpcd restart` 与 `/etc/init.d/qmodem-worker restart`。
+- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重新加载，前端会在 60 s 冷却窗口内退回直连 QModem。升级时安装钩子会自动执行 `/etc/init.d/rpcd reload`；需要手动补加载时也使用 `reload`，保留登录会话。
 - **短信列表按需采集**：读短信在部分模组上极慢，`sms` 域不进周期采集；进入「短信」页时后台排队，数据到位后自动补上。
 - **`settings` 与 `terminal` 页不做轮询重绘**：避免把用户未保存的表单内容 / AT 会话日志冲掉。
 

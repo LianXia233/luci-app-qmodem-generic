@@ -2329,6 +2329,7 @@ return baseclass.extend({
 	groupByClass: groupByClass,
 	formatSignal: formatSignal,
 	renderInfoGrouped: renderInfoGrouped,
+	pageTitle: theme.pageTitle,
 	element: E,
 	hasValue: hasValue,
 	valueText: valueText,

@@ -878,7 +878,7 @@ return view.extend({
 			/* 顶部 Hero 玻璃卡片 */
 			E('section', { 'class': 'mt-adv-card mt-hardware-head' }, [
 				E('div', {}, [
-					E('h2', {}, _('高级设置与外观')),
+					controls.pageTitle('advanced', _('高级设置与外观')),
 					E('p', {}, _('调整页面配色，查看硬件连接与模组支持情况。'))
 				])
 			])

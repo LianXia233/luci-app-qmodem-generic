@@ -405,7 +405,7 @@ return view.extend({
 			E('section', { 'class': 'mt-system-card mt-system-hero' }, [
 				E('div', {}, [
 					E('div', { 'class': 'mt-system-kicker' }, _('模组系统与 SIM 卡')),
-					E('h2', { 'class': 'mt-system-title' }, model),
+					controls.pageTitle('system', model, 'mt-system-title'),
 					E('div', { 'class': 'mt-system-sub' }, revision || _('硬件标识与订阅卡管理'))
 				]),
 				temperature ? E('div', { 'class': 'mt-system-temp-box' }, [

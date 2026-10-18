@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.5.0
-PKG_RELEASE:=22
+PKG_RELEASE:=23
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -40,6 +40,7 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # 模组支持库合并放后台，modem 探测完全交给 qmodem-worker 后台服务。
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
 for f in \
 	/usr/libexec/rpcd/qos \
 	/usr/libexec/rpcd/qmodem_stats \
@@ -76,6 +77,8 @@ fi
 
 # rpcd reload 会注册新的 qmodem_cache / qmodem_stats 插件，同时保留 LuCI 登录会话。
 # 不使用 restart：重启 rpcd 将中断安装页面的 ubus 会话，导致被踢回登录页。
+rm -f /tmp/luci-indexcache.*
+rm -rf /tmp/luci-modulecache/
 /etc/init.d/rpcd reload 2>/dev/null || true
 # 采集服务立即拉起（start 只向 procd 注册实例，不做任何 modem 探测）
 /etc/init.d/qmodem-worker start 2>/dev/null || true

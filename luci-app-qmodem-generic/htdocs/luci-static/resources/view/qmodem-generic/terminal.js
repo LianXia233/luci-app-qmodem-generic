@@ -248,7 +248,7 @@ return view.extend({
 		});
 
 		var hero = E('section', { 'class': 'mt-terminal-hero mt-ui-hero' }, [ E('div', {}, [
-			E('h2', {}, _('AT command console')),
+			controls.pageTitle('terminal', _('AT command console')),
 			E('p', {}, _('Diagnostic console for advanced users. Commands are sent directly to the module and are not automatically validated.'))
 		]) ]);
 

@@ -1141,10 +1141,10 @@ return view.extend({
 			E('section', { 'class': 'mt-net-card mt-net-hero' }, [
 				E('div', {}, [
 					E('div', { 'class': 'mt-net-kicker' }, _('无线射频与蜂窝小区')),
-					E('h2', { 'class': 'mt-net-title' }, [
+					controls.pageTitle('network', [
 						opInfo.logo ? E('img', { 'class': 'mt-op-logo', 'src': opInfo.logo, 'alt': operatorName }) : null,
 						operatorName
-					]),
+					], 'mt-net-title'),
 					E('div', { 'class': 'mt-net-sub' }, _('实时监控服务小区物理参数、载波聚合配置及多频段策略。'))
 				]),
 				E('span', { 'class': 'mt-net-badge' + (registered ? '' : ' off') },
