@@ -278,12 +278,26 @@ return view.extend({
 				if (!/^\d{15}$/.test(value) || value === currentImei)
 					return controls.notify(null, E('p', {}, _('请输入一个不同的 15 位 IMEI。')), 'warning');
 				ui.hideModal();
-				controls.confirmModal(_('写入设备标识'), _('该操作可能导致无法入网，仅在恢复模组标签所印标识时继续。'), function() {
-					return controls.setImei(self.section, value).catch(function(err) {
-						controls.notify(null, E('p', {}, _('IMEI 写入失败：%s').format((err && err.message) || String(err))), 'danger');
-						throw err;
+				var pending = false;
+				var apply = E('button', { 'type':'button', 'class':'btn cbi-button-negative', 'click':function() {
+					if (pending) return;
+					pending = true; apply.disabled = true; apply.textContent = _('写入并核对中…');
+					controls.setImei(self.section, value).then(function(fresh) {
+						self.verifiedImei = { section: self.section, value: fresh.imei };
+						var displayed = document.querySelector('.mt-sys-imei-value');
+						if (displayed) displayed.textContent = fresh.imei;
+						ui.hideModal();
+						controls.notify(null, E('p', {}, _('IMEI 已写入，并从模组回读确认。')), 'info');
+					}, function(err) {
+						controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+						pending = false; apply.disabled = false; apply.textContent = _('确认写入');
 					});
-				}, true);
+				} }, _('确认写入'));
+				ui.showModal(_('写入设备标识'), [
+					E('p', {}, _('该操作可能导致无法入网，仅在恢复模组标签所印标识时继续。')),
+					E('div', { 'class':'alert-message warning' }, _('部分模组需要重启或切换飞行模式后才会生效。')),
+					E('div', { 'class':'right' }, [ E('button', { 'type':'button', 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', apply ])
+				]);
 			} }, _('确认修改')) ])
 		]);
 	},
@@ -340,6 +354,11 @@ return view.extend({
 		var iccid = controls.findEntry(res.sim, 'ICCID') || controls.findEntry(res.base, 'ICCID') || '';
 		var imsi = simMap['IMSI'] || '--';
 		var imei = (res.imei && res.imei.imei) || controls.findEntry(res.sim, 'IMEI') || '--';
+		var verified = this.verifiedImei;
+		if (verified && verified.section === res.section) {
+			if (imei === verified.value) this.verifiedImei = null;
+			else imei = verified.value;
+		}
 		var currentSlot = (res.slot && res.slot.sim_slot != null) ? String(res.slot.sim_slot) : (simMap['SIM Slot'] != null ? String(simMap['SIM Slot']) : '');
 
 		var rebootCaps = (res.rebootCaps && res.rebootCaps.reboot_caps) || res.rebootCaps || {};
@@ -417,7 +436,7 @@ return view.extend({
 					this.row(_('型号'), model),
 					this.row(_('制造商'), manufacturer),
 					this.row(_('固件版本'), revision),
-					this.row('IMEI', imei),
+					this.row('IMEI', imei !== '--' ? E('strong', { 'class':'mt-sys-imei-value' }, imei) : ''),
 					this.row(_('AT 串口'), atPortLabel)
 				]),
 				E('section', { 'class': 'mt-system-card' }, [

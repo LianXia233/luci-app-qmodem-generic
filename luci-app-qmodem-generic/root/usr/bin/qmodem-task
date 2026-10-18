@@ -266,8 +266,10 @@ t_run() {
 			_rc=$?
 			qm_unlock "$_lock"
 			trap - EXIT INT TERM
-			# 动作完成后刷新缓存，让页面下一次轮询立刻看到新状态
-			[ "$_rc" = 0 ] && run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" 'status network registration' >/dev/null 2>&1
+			# IMEI 写入后页面会直接回读 get_imei 并单独补采 sim。
+			# 这里若同步补采无关的状态/网络/注册域，写入任务会长时间显示“处理中”。
+			[ "$_rc" = 0 ] && [ "$_m" != set_imei ] && \
+				run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" 'status network registration' >/dev/null 2>&1
 			;;
 		sync_support)
 			t_write "$ID" running '{}' '' 'merging support library'

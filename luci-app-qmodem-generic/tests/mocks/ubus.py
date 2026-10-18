@@ -125,6 +125,11 @@ def send_at_response(at_cmd):
 
 def reply(obj, method, payload):
     if obj == 'qmodem':
+        if method == 'set_imei':
+            try:
+                return {'imei': json.loads(payload)['imei'], 'result': {'status': '1'}}
+            except (KeyError, TypeError, ValueError):
+                return {'result': {'status': '0'}}
         if method == 'send_at':
             # payload 是 ubus 传给我们的原始 JSON 字符串，读取出实际 AT 命令，
             # 命中 send_at_response 对应分支

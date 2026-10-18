@@ -37,8 +37,10 @@ function makeRuntime() {
 	var cacheDelayMs = 0;
 	var smsApi = null;
 	var modemSmsApi = null;
+	var modemImeiApi = null;
 	var dialResultStatus = '1';
 	var deleteResult = { result: { status: '1' } };
+	var imeiResult = { imei: '860000000000002', result: { status: '1' } };
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -123,6 +125,8 @@ function makeRuntime() {
 				body = smsApi ? smsApi(method, p) : { __rpcError: 'RPC call to qmodem.sms/config_get failed with ubus code 4: Not found' };
 			} else if (object === 'qmodem' && method === 'get_sms' && modemSmsApi) {
 				body = modemSmsApi(method, p);
+			} else if (object === 'qmodem' && method === 'get_imei' && modemImeiApi) {
+				body = modemImeiApi(method, p);
 			} else if (object === 'qmodem_cache' || object === 'qmodem_stats' || object === 'qmodem_support') {
 				body = handleCache(method, p);
 			} else if (object === 'qmodem' || object === 'qos' ||
@@ -214,6 +218,8 @@ function makeRuntime() {
 					t.result = { result: { status: dialResultStatus, message: dialResultStatus === '0' ? 'Dial command failed' : 'Dial command executed successfully' } };
 				else if (t.operation === 'delete_sms')
 					t.result = deleteResult;
+				else if (t.operation === 'set_imei')
+					t.result = imeiResult;
 				else if (t.operation === 'stats_reset')
 					t.result = { success: true, reset: true };
 				else if (t.operation === 'support_sync')
@@ -435,7 +441,9 @@ function makeRuntime() {
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
+		setModemImeiApi: function(handler) { modemImeiApi = handler; },
 		setDeleteResult: function(result) { deleteResult = result; },
+		setImeiResult: function(result) { imeiResult = result; },
 		setDialResultStatus: function(value) { dialResultStatus = String(value); },
 		setSmsCache: function(data) {
 			cacheDomains.sms = {
@@ -637,6 +645,41 @@ function testActionPayloads() {
 			});
 		});
 	});
+}
+
+async function testImeiReadback() {
+	console.log('\n[4d] IMEI 写入后直接回读并刷新 SIM 缓存');
+	var newImei = '860000000000002', oldImei = '860000000000001';
+	var rt = makeRuntime(), controls = loadControls(rt);
+	rt.setModemImeiApi(function() { return { imei: newImei }; });
+	var fresh = await controls.setImei('8_1', newImei);
+	assertEq('IMEI 实际回读值被返回', fresh.imei, newImei);
+	var action = rt.calls.filter(function(c) { return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'set_imei'; })[0];
+	assertEq('写入使用官方模组节', action.params.args.config_section, '8_1');
+	assertEq('写入携带目标 IMEI', action.params.args.imei, newImei);
+	assertEq('写入后直接读取模组而不是旧快照', rt.countCalls('qmodem','get_imei'), 1);
+	var refreshes = rt.calls.filter(function(c) { return c.object === 'qmodem_cache' && c.method === 'refresh'; });
+	assertEq('仅后台补采 SIM 域', JSON.stringify(refreshes.map(function(c) { return c.params.domains; })), JSON.stringify([[ 'sim' ]]));
+
+	var stale = makeRuntime(), staleControls = loadControls(stale);
+	stale.setModemImeiApi(function() { return { imei: oldImei }; });
+	try {
+		await staleControls.setImei('8_1', newImei);
+		ok('QModem 仅回显新值时不能误报成功', false);
+	} catch (err) {
+		ok('QModem 仅回显新值时不能误报成功', /尚未确认生效/.test(err.message), err.message);
+	}
+	assertEq('旧值出现时重试一次回读', stale.countCalls('qmodem','get_imei'), 2);
+
+	var denied = makeRuntime(), deniedControls = loadControls(denied);
+	denied.setImeiResult({ imei: newImei, result: { status: '0' } });
+	try {
+		await deniedControls.setImei('8_1', newImei);
+		ok('明确拒绝写入不回读', false);
+	} catch (err) {
+		ok('明确拒绝写入不回读', /拒绝/.test(err.message), err.message);
+	}
+	assertEq('明确失败时不读取旧 IMEI', denied.countCalls('qmodem','get_imei'), 0);
 }
 
 async function testSmsSources() {
@@ -1114,6 +1157,7 @@ testBootstrap(rt)
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(testActionPayloads)
 	.then(testDialResults)
+	.then(testImeiReadback)
 	.then(testSmsSources)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })

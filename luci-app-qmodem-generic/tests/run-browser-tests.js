@@ -118,6 +118,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
     { index:0, sender:'10086', content:'单条短信', timestamp:'26/10/16,20:10:00+32' }
   ] } };
   if (scenario === 'sms_legacy_missing') delete data.sms;
+  window.currentImei = '860000000000001';
   window.calls = [];
   window.notifications = [];
   let task = 0;
@@ -132,6 +133,7 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
       entries: ['rg650v-eu','rg520n-cn','rg502q-ea'].map(model => ({ bus:'usb', model, source:'user', state:'synced', modes:'qmi,mbim', manufacturer:'quectel', platform:'qualcomm', manufacturer_id:'2c7c', pdp_index:'1' })),
       presets: { usb:{}, pcie:{} }
     } : { entries: [] });
+    if (def.object === 'qmodem' && def.method === 'get_imei') return Promise.resolve({ imei: window.currentImei });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy_missing')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy')
@@ -163,11 +165,13 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
         if (!payload || payload.config_section !== args[0]) return Promise.resolve({ error: 'explicit valid modem section required' });
         if (['send_at','send_sms','do_reboot'].includes(args[2]) && (!payload.params || typeof payload.params !== 'object')) return Promise.resolve({ error: 'missing params object' });
         if (scenario === 'sms_multipart' && args[2] === 'delete_sms') window.deletedSms = true;
+        if (args[2] === 'set_imei' && window.imeiWriteTakesEffect !== false) window.currentImei = payload.imei;
       }
       const id = 'test-' + (++task);
       tasks[id] = { config_section: args[0], state: window.atTaskFailure ? 'failed' : 'success',
         error: window.atTaskFailure || null,
-        result: window.atTaskReply || { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } } };
+        result: def.method === 'action' && args[2] === 'set_imei' ? { imei: args[3].imei, result: { status: '1' } } :
+          window.atTaskReply || { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } } };
       return Promise.resolve({ task_id: id, state: 'running' });
     }
     return Promise.resolve({});
@@ -649,6 +653,21 @@ async function runDom() {
     window.document.querySelector('#modal .cbi-button-negative').click();
     await settle();
     assert(window.calls.some(c => c.method === 'action' && c.args[2] === 'send_at' && c.args[3]?.params?.at === 'AT+CFUN=0'));
+    clickNamed(app, '设置IMEI');
+    const newImei = '860000000000002';
+    window.document.querySelector('#modal input').value = newImei;
+    window.document.querySelector('#modal .cbi-button-negative').click();
+    const confirm = window.document.querySelector('#modal .cbi-button-negative');
+    confirm.click(); confirm.click();
+    await settle();
+    assert.equal(window.calls.filter(c => c.method === 'action' && c.args[2] === 'set_imei').length, 1, 'Double click must write IMEI once');
+    assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_imei').length, 1, 'Read back the modem IMEI after writing');
+    assert.equal(app.querySelector('.mt-sys-imei-value').textContent, newImei, 'Confirmed value appears without a reload');
+    assert(!window.document.querySelector('#modal'), 'Confirmation closes after actual readback');
+    assert(window.notifications.some(args => args[1]?.textContent.includes('回读确认')), 'Show confirmation only after readback');
+    const cached = await window.currentView.collect({ section: '6_1' });
+    app.replaceChildren(window.currentView.paintContent(cached));
+    assert.equal(app.querySelector('.mt-sys-imei-value').textContent, newImei, 'An old snapshot must not restore the former IMEI');
   });
   await checkButtons('advanced', 'custom_entries', async (window, app) => {
     const timers = [], original = window.setTimeout.bind(window);

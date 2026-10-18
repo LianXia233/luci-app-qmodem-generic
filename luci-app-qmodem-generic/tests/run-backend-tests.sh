@@ -339,6 +339,25 @@ t_tasks() {
 	_deleted=$(grep -c 'qmodem delete_sms ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
 	assert_eq "both SMS delete commands reached QModem" 2 "$_deleted"
 
+	# IMEI 写入不应等待状态、网络、注册等无关域采集完才完成任务。
+	: > "$MOCK_UBUS_LOG"
+	_imei=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"set_imei","args":{"config_section":"modem0","imei":"860000000000002"}}')
+	_imei_id=$(jsonfilter -s "$_imei" -e '@.task_id' 2>/dev/null)
+	_i=0; _imei_state=queued
+	while [ "$_i" -lt 80 ]; do
+		_imei_task=$(rpcd_call qmodem_cache get_task "{\"task_id\":\"$_imei_id\"}")
+		_imei_state=$(printf '%s' "$_imei_task" | jsonfilter -e '@.state' 2>/dev/null)
+		case "$_imei_state" in success|failed|missing) break ;; esac
+		sleep 0.25
+		_i=$(( _i + 1 ))
+	done
+	assert_eq "IMEI action completed" success "$_imei_state"
+	assert_json "IMEI action returns official echoed value" "$_imei_task" '@.result.imei' '860000000000002'
+	_imei_calls=$(grep -c 'qmodem set_imei ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "IMEI action reached QModem once" 1 "$_imei_calls"
+	_unrelated=$(grep -Ec 'qmodem (base_info|network_info|get_connect_status|dial_status) ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "IMEI action does not block on unrelated collection" 0 "$_unrelated"
+
 	# 未知方法 / 非法参数必须快速失败而不是挂住
 	assert_fast "unknown method returns fast" 500 \
 		"rpcd_call qmodem_cache bogus_method '{}'"

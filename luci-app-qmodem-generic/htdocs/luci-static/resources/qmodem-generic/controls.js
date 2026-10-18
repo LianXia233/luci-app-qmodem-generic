@@ -543,7 +543,6 @@ function qmodemAction(section, method, args, directFn, timeoutMs) {
 			set_network_prefer: [ 'network', 'signal' ],
 			set_neighborcell: [ 'network', 'signal' ],
 			set_sim_slot: [ 'sim', 'status' ],
-			set_imei: [ 'sim' ],
 			set_traffic_reset_schedule: [ 'stats' ],
 			clear_stats: [ 'stats' ],
 			clear_dial_log: [ 'status' ],
@@ -1527,7 +1526,27 @@ function setMode(section, mode) {
 }
 function setImei(section, imei) {
 	return qmodemAction(section, 'set_imei', { imei: imei },
-		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000);
+		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000).then(function(result) {
+		var body = result && result.result && typeof result.result === 'object' ? result.result : result;
+		if (!result || result.error || body && (body.error || body.success === false || body.status === '0' || body.status === 0 || body.status === false))
+			throw new Error(String(result && (result.error || body && body.error) || _('QModem 拒绝写入 IMEI。')));
+		/* QModem 部分版本会回显提交值及 status=1，不能据此认为已生效。
+		 * 直接回读同一模组，避开尚未更新的 worker 快照。 */
+		function readBack(retry) {
+			return withTimeoutReject(callGetImei(section), DIRECT_RPC_TIMEOUT,
+				_('IMEI 写入命令已完成，但模组回读超时，尚无法确认结果。')).then(function(fresh) {
+				var actual = String(fresh && fresh.imei || '').trim();
+				if (actual === imei) {
+					touch(section);
+					requestRefresh(section, [ 'sim' ], true).catch(function() {});
+					return { imei: actual };
+				}
+				if (retry) return new Promise(function(resolve) { window.setTimeout(resolve, 800); }).then(function() { return readBack(false); });
+				throw new Error(_('写入命令已完成，但模组回读的 IMEI 仍为 %s，尚未确认生效。').format(actual || '--'));
+			});
+		}
+		return readBack(true);
+	});
 }
 function setLockBand(section, params) {
 	return qmodemAction(section, 'set_lockband', { params: params },
