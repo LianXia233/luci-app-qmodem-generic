@@ -753,6 +753,12 @@ async function testSmsSources() {
 	stillThere.rt.setModemSmsApi(function() { return { sms: { msg: [{ index: '7', sender: '10010' }] } }; });
 	await rejects('无确认状态且短信仍存在不能误报成功', stillThere.controls.deleteSmsMessage('8_1',
 		{source:'modem',index:'7',indexes:['7']}), /仍返回/);
+	var reportedSuccess = runtime();
+	reportedSuccess.rt.setDeleteResult({ result: { status: '1' } });
+	reportedSuccess.rt.setModemSmsApi(function() { return { sms: { msg: [{ index: '7', sender: '10010' }] } }; });
+	await rejects('旧脚本单条返回成功但模组仍有短信时不能隐藏消息', reportedSuccess.controls.deleteSmsMessage('8_1',
+		{source:'modem',index:'7',indexes:['7']}), /仍返回/);
+	assertEq('单条状态成功仍回读模组核对', reportedSuccess.rt.countCalls('qmodem','get_sms'), 1);
 	var rejected = runtime();
 	rejected.rt.setDeleteResult({ result: { status: '0' } });
 	await rejects('官方明确拒绝删除时如实报错', rejected.controls.deleteSmsMessage('8_1',

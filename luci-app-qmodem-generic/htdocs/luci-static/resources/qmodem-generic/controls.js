@@ -1260,15 +1260,18 @@ function deleteSmsMessage(section, message) {
 	/* 与 QModem 官方短信页一致，先删较大的槽位，避免较小槽位删除后
 	 * 模组重新编排索引而删错后续分段。 */
 	indexes.sort(function(a, b) { return Number(b) - Number(a); });
-	return deleteSms(section, indexes.join(' ')).then(function(result) {
-		var confirmed = modemSmsDeleteResult(result);
-		/* 旧版 QModem 有时不带确认状态；等待先前读取结束后再直读一次，
-		 * 多段删除时即便末段返回成功，也要核对全部索引确实消失。 */
+	/* 先等已有读取结束，避免它在删除后把旧数据重新写入短信缓存。 */
+	var reading = legacySmsInFlight[section];
+	return (reading ? reading.catch(function() {}) : Promise.resolve()).then(function() {
+		return deleteSms(section, indexes.join(' '));
+	}).then(function(result) {
+		modemSmsDeleteResult(result);
+		/* 官方旧界面的脚本可能只报告命令已执行；单条、多段均需回读确认。
+		 * 验证完成前保留页面原消息，不凭任务结束或 status=1 隐藏短信。 */
 		var previous = legacySmsInFlight[section];
 		return (previous ? previous.catch(function() {}) : Promise.resolve()).then(function() {
 			delete legacySmsStore[section];
 			delete legacySmsLastAttempt[section];
-			if (confirmed && indexes.length === 1) return result;
 			return readLegacySms(section).then(function(fresh) {
 				var items = modemSmsItems(fresh);
 				if (!items) throw new Error(_('删除命令已发送，但无法核对模组短信列表。'));

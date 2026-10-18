@@ -61,6 +61,9 @@ jobs:
           sh -n scripts/offline-install.sh.in
           python3 "$PKG_DIR/tests/test-offline-install.py"
 
+      - name: Legacy SMS deletion checks
+        run: python3 "$PKG_DIR/tests/test-legacy-sms-delete.py"
+
       - name: PO sanity check
         run: |
           sudo apt-get update -qq
