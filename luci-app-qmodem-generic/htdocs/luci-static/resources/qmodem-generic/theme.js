@@ -586,7 +586,16 @@ var CSS_RESPONSIVE = [
 	'.qm-app .qm-topology-link::before,.qm-app .qm-topology-link::after{animation:none!important}}'
 ].join('');
 
-var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE ].join('\n');
+/* QModem 主标签：SVG 随文字着色，保持 LuCI 原生点击与选中状态。 */
+var CSS_NAV_TABS = [
+  '.qm-app #tabmenu a.qm-tab-link{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;text-decoration:none;transition:color .18s ease,background-color .18s ease}',
+  '.qm-app #tabmenu a.qm-tab-link .qm-tab-icon{display:block;width:16px;height:16px;flex:none;opacity:.86;pointer-events:none}',
+  '.qm-app #tabmenu a.qm-tab-link:hover .qm-tab-icon,.qm-app #tabmenu li.active a.qm-tab-link .qm-tab-icon{opacity:1}',
+  '.qm-app #tabmenu a.qm-tab-link:hover{background:var(--qm-accent-soft);border-radius:8px;text-decoration:none}',
+  '@media(max-width:680px){.qm-app #tabmenu{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}.qm-app #tabmenu ul.tabs{display:flex;flex-wrap:nowrap;min-width:max-content}.qm-app #tabmenu a.qm-tab-link{gap:6px;min-height:40px}}'
+].join('');
+
+var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS ].join('\n');
 
 /* ------------------------------------------------------------------ */
 /* 6) 运行时：注入 + 明暗探测                                            */
@@ -689,11 +698,61 @@ function detectTone() {
 
 /* 整体的 try/catch 兜底：极简 DOM 替身（单元测试）或异常环境下一律静默跳过，
  * 绝不让"注入皮肤"这件事本身把页面/测试搞崩。 */
+/* 固定 SVG 轮廓，不加载第三方图标库、不改菜单地址或事件。 */
+var TAB_ICON_PATHS = {
+  status: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+  connection: 'M7 3v14m-4-4 4 4 4-4M17 21V7m-4 4 4-4 4 4',
+  network: 'M12 21V10m-4 11h8M10 14l2-5 2 5M5 7a10 10 0 0 1 14 0M2 4a14 14 0 0 1 20 0',
+  sms: 'M20 11.5a8 8 0 0 1-8 8c-1.4 0-2.7-.3-3.9-.9L3 21l1.7-5.1A8 8 0 1 1 20 11.5zM8 11h8m-8 3h5',
+  system: 'M8 2h6l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a3 3 0 0 1 3-3zM9 12h6v6H9zM12 12v6',
+  advanced: 'M3 6h10m4 0h4M3 18h4m4 0h10M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0'
+};
+var tabIconObserver = null, tabIconReadyListener = false;
+
+function decorateNavTabs() {
+  if (!document.querySelectorAll || !document.createElementNS) return;
+  var links = document.querySelectorAll('#tabmenu a[href]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i], href = a.getAttribute('href') || '';
+    var match = href.match(/\/admin\/modem\/qmodem-generic\/(status|connection|network|sms|system|advanced)\/?(?:[?#]|$)/);
+    if (!match || (a.querySelector && a.querySelector('svg.qm-tab-icon'))) continue;
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'qm-tab-icon');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.8');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', TAB_ICON_PATHS[match[1]]);
+    svg.appendChild(path);
+    a.insertBefore(svg, a.firstChild);
+    if (a.classList) a.classList.add('qm-tab-link');
+  }
+}
+function ensureNavTabIcons() {
+  if (!document.querySelectorAll || !document.createElementNS) return;
+  decorateNavTabs();
+  /* 仅观察 LuCI 标签栏，支持异步重建，避免监视整页数据轮询。 */
+  var tabmenu = document.getElementById('tabmenu');
+  if (tabmenu && !tabIconObserver && typeof MutationObserver !== 'undefined') {
+    tabIconObserver = new MutationObserver(function() { decorateNavTabs(); });
+    tabIconObserver.observe(tabmenu, { childList: true, subtree: true });
+  } else if (!tabmenu && !tabIconReadyListener && document.addEventListener && document.readyState === 'loading') {
+    tabIconReadyListener = true;
+    document.addEventListener('DOMContentLoaded', ensureNavTabIcons, { once: true });
+  }
+}
+
 function apply() {
 	try {
 		if (typeof document === 'undefined' || !document.createElement)
 			return null;
 		injectOnce();
+		ensureNavTabIcons();
 		var body = document.body || document.documentElement;
 		if (body && body.classList) {
 			var appearance = getAppearance();
