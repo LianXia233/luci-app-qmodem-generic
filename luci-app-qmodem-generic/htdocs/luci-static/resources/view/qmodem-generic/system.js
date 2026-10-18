@@ -517,7 +517,7 @@ return view.extend({
 				E('div', { 'class':'mt-system-maint-tools' }, [
 					E('a', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'href':L.url('admin/modem/qmodem-generic/settings') }, _('诊断')),
 					privateAt ? E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showThermalManager(temperature); } }, _('热保护阈值')) : null,
-					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('修改IMEI')),
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('设置IMEI')),
 					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click':function() { self.showFactoryReset(); } }, _('恢复出厂设置')),
 					this.rebootButton('soft', _('重启模组')),
 					hardReboot ? this.rebootButton('hard', _('硬重启模组')) : null
