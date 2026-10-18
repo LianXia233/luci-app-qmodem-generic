@@ -616,14 +616,24 @@ function createPoller(opts) {
 
 	function start() {
 		if (stopped) return;
-		if (timer === null && !busy) schedule();
+		/* render() 返回后 LuCI 才把节点挂进 document。首次启动时不能
+		 * 调用 alive()，否则所有页面的轮询器都会在挂载前被永久停止。 */
+		if (timer === null && !busy) {
+			var iv = (typeof document !== 'undefined' && document.hidden) ? hiddenInterval : interval;
+			timer = window.setTimeout(tick, iv);
+		}
+	}
+	function kick() {
+		if (stopped || busy) return;
+		if (timer !== null) { window.clearTimeout(timer); timer = null; }
+		tick();
 	}
 	function stop() {
 		stopped = true;
 		if (timer !== null) { window.clearTimeout(timer); timer = null; }
 	}
 
-	return { start: start, stop: stop, isRunning: function() { return !stopped; } };
+	return { start: start, stop: stop, kick: kick, isRunning: function() { return !stopped; } };
 }
 
 /*
@@ -658,7 +668,7 @@ function liveView(view, res, opts) {
 			return false;
 
 		var active = (typeof document !== 'undefined') ? document.activeElement : null;
-		if (active && holder.contains(active) &&
+		if (opts.skipIfFocused !== false && active && holder.contains(active) &&
 			/^(input|textarea|select)$/i.test(active.tagName || ''))
 			return true;
 
@@ -692,7 +702,7 @@ function liveView(view, res, opts) {
 		});
 	}
 
-	paint(res);
+	var initialPaint = paint(res);
 
 	if (res && res.section && opts.paint && opts.domains) {
 		if (view.poller && view.poller.stop) view.poller.stop();
@@ -718,6 +728,15 @@ function liveView(view, res, opts) {
 			}
 		});
 		view.poller.start();
+		/* 旧版短信首屏先显示读取中；AT 返回后立即补画，无需用户点刷新。
+		 * 失败也补画一次，让 collect() 的错误提示及时出现。 */
+		if (opts.wakeOn) Promise.resolve(opts.wakeOn).then(function() {}, function() {}).then(function() {
+			return initialPaint;
+		}).then(function() {
+			window.setTimeout(function() {
+				if (view.poller && view.poller.isRunning()) view.poller.kick();
+			}, 0);
+		});
 	}
 
 	if (view.poller)
@@ -1018,6 +1037,10 @@ var legacySmsInFlight = {};
 var legacySmsLastAttempt = {};  /* 后台读取失败时也限流，防止每次轮询重试 */
 var legacySmsError = {};
 
+function smsReadInFlight(section) {
+	return legacySmsInFlight[section] || null;
+}
+
 function readLegacySms(section) {
 	var saved = legacySmsStore[section];
 	if (legacySmsInFlight[section])
@@ -1200,11 +1223,20 @@ function modemSmsDeleteResult(result) {
 		status === false || status === 0 || status === '0' ||
 		typeof status === 'string' && /^(?:error|failed|failure)$/i.test(status))
 		throw new Error(String(reason || _('模组拒绝删除短信，请检查短信存储位置。')));
-	/* 官方响应 result.status="1"；部分旧版返回 success:true 或 status:success。 */
-	if (status == null && body.success !== true && result.success !== true &&
-		result.result !== 'success')
-		throw new Error(_('QModem 未确认删除成功，请检查后再重试。'));
-	return result;
+	/* 官方响应 result.status="1"；没有状态时不能仅凭任务完成判断成功，
+	 * 后续将重新读取模组短信并核对存储索引。 */
+	return status === '1' || status === 1 || status === true || status === 'success' ||
+		body.success === true || result.success === true || result.result === 'success';
+}
+
+function modemSmsItems(raw) {
+	if (Array.isArray(raw)) return raw;
+	if (!raw || typeof raw !== 'object') return null;
+	var keys = [ 'sms', 'msg', 'messages', 'received' ];
+	for (var i = 0; i < keys.length; i++)
+		if (raw[keys[i]] && typeof raw[keys[i]] === 'object')
+			return modemSmsItems(raw[keys[i]]);
+	return null;
 }
 
 function smsStorageIndexes(indexes) {
@@ -1226,10 +1258,28 @@ function deleteSmsMessage(section, message) {
 	var indexes = smsStorageIndexes(rawIndexes);
 	if (!indexes.length)
 		return Promise.reject(new Error(_('短信缺少有效的模组存储索引，不能删除。')));
-	return deleteSms(section, indexes.join(' ')).then(modemSmsDeleteResult).then(function(result) {
-		/* 删除后废弃浏览器旧短信短缓存，并通知 worker 刷新模组存储。 */
-		delete legacySmsStore[section];
-		delete legacySmsLastAttempt[section];
+	return deleteSms(section, indexes.join(' ')).then(function(result) {
+		var confirmed = modemSmsDeleteResult(result);
+		/* 旧版 QModem 有时不带确认状态；等待先前读取结束后再直读一次，
+		 * 只有全部索引确实消失才允许把短信从 UI 隐藏。 */
+		var previous = legacySmsInFlight[section];
+		return (previous ? previous.catch(function() {}) : Promise.resolve()).then(function() {
+			delete legacySmsStore[section];
+			delete legacySmsLastAttempt[section];
+			if (confirmed) return result;
+			return readLegacySms(section).then(function(fresh) {
+				var items = modemSmsItems(fresh);
+				if (!items) throw new Error(_('删除命令已发送，但无法核对模组短信列表。'));
+				var remaining = items.some(function(item) {
+					return item && smsStorageIndexes([ item.index, item.indexes || '' ]).some(function(index) {
+						return indexes.indexOf(index) !== -1;
+					});
+				});
+				if (remaining) throw new Error(_('模组仍返回这条短信，删除未生效。'));
+				return result;
+			});
+		});
+	}).then(function(result) {
 		touch(section);
 		requestRefresh(section, [ 'sms' ], true).catch(function() {});
 		return result;
@@ -2194,6 +2244,7 @@ return baseclass.extend({
 	getDns: getDns,
 	getSms: getSms,
 	getSmsInbox: getSmsInbox,
+	smsReadInFlight: smsReadInFlight,
 	refreshSmsInbox: refreshSmsInbox,
 	sendSmsInbox: sendSmsInbox,
 	deleteSmsMessage: deleteSmsMessage,

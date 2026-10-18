@@ -22,7 +22,7 @@ for (const match of po.matchAll(/^msgid (".*")\nmsgstr (".*")/gm)) {
   try { translations[JSON.parse(match[1])] = JSON.parse(match[2]); } catch (_) {}
 }
 
-async function mount({ sources, translations, viewName, scenario, dark, multi }) {
+async function mount({ sources, translations, viewName, scenario, dark, multi, live }) {
   const baseclass = { extend: value => value };
   // Matches native LuCI create/attr/append semantics, including the null bug.
   const dom = {
@@ -229,7 +229,8 @@ async function mount({ sources, translations, viewName, scenario, dark, multi })
   const view = load('view/qmodem-generic/' + viewName);
   window.currentView = view;
   const res = await view.load();
-  const node = await (view.paintContent ? view.paintContent(res) : view.render(res));
+  if (live) view.POLL_INTERVAL = 80;
+  const node = await (live ? view.render(res) : (view.paintContent ? view.paintContent(res) : view.render(res)));
   document.querySelector('#app').replaceChildren(node);
   if (viewName === 'advanced' && view.initialAuxPromise) {
     const meta = await view.initialAuxPromise;
@@ -574,6 +575,19 @@ async function runDom() {
     return button;
   };
   const settle = () => new Promise(resolve => setTimeout(resolve, 240));
+  {
+    const window = new Window({ url: 'http://qmodem.test', width: 1440, height: 1000 });
+    try {
+      window.document.body.innerHTML = '<main id="app"></main>';
+      await window.eval('(' + mount.toString() + ')(' + JSON.stringify({ sources, translations, viewName:'sms', scenario:'sms_legacy_missing', dark:false, multi:false, live:true }) + ')');
+      await settle();
+      const app = window.document.querySelector('#app');
+      assert(app.textContent.includes('旧版直读短信'), 'Legacy SMS must appear automatically without clicking Refresh');
+      assert(window.calls.filter(c => c.object === 'qmodem_cache' && c.method === 'snapshot').length >
+        window.initialCalls.filter(c => c.object === 'qmodem_cache' && c.method === 'snapshot').length,
+      'Polling must start after LuCI mounts the page');
+    } finally { await window.happyDOM.close(); }
+  }
   for (const viewName of ['status', 'network', 'advanced']) {
     await checkButtons(viewName, 'full', async (window, app) => {
       clickNamed(app, viewName === 'status' ? '刷新' : '刷新状态');

@@ -38,6 +38,7 @@ function makeRuntime() {
 	var smsApi = null;
 	var modemSmsApi = null;
 	var dialResultStatus = '1';
+	var deleteResult = { result: { status: '1' } };
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -211,6 +212,8 @@ function makeRuntime() {
 				}
 				else if ([ 'modem_dial', 'modem_hang', 'modem_redial' ].indexOf(t.operation) !== -1)
 					t.result = { result: { status: dialResultStatus, message: dialResultStatus === '0' ? 'Dial command failed' : 'Dial command executed successfully' } };
+				else if (t.operation === 'delete_sms')
+					t.result = deleteResult;
 				else if (t.operation === 'stats_reset')
 					t.result = { success: true, reset: true };
 				else if (t.operation === 'support_sync')
@@ -432,6 +435,7 @@ function makeRuntime() {
 		setCacheDelay: function(ms) { cacheDelayMs = ms; },
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
+		setDeleteResult: function(result) { deleteResult = result; },
 		setDialResultStatus: function(value) { dialResultStatus = String(value); },
 		setSmsCache: function(data) {
 			cacheDomains.sms = {
@@ -689,6 +693,20 @@ async function testSmsSources() {
 		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
 	})[1];
 	assertEq('模组短信槽位 0 有效', deleteZero.params.args.index, '0');
+	var noStatus = runtime();
+	noStatus.rt.setDeleteResult({ result: {} });
+	noStatus.rt.setModemSmsApi(function() { return { sms: { msg: [] } }; });
+	await noStatus.controls.deleteSmsMessage('8_1', {source:'modem',index:'7',indexes:['7']});
+	assertEq('无确认状态时重新读取模组核对删除', noStatus.rt.countCalls('qmodem','get_sms'), 1);
+	var stillThere = runtime();
+	stillThere.rt.setDeleteResult({ result: {} });
+	stillThere.rt.setModemSmsApi(function() { return { sms: { msg: [{ index: '7', sender: '10010' }] } }; });
+	await rejects('无确认状态且短信仍存在不能误报成功', stillThere.controls.deleteSmsMessage('8_1',
+		{source:'modem',index:'7',indexes:['7']}), /仍返回/);
+	var rejected = runtime();
+	rejected.rt.setDeleteResult({ result: { status: '0' } });
+	await rejects('官方明确拒绝删除时如实报错', rejected.controls.deleteSmsMessage('8_1',
+		{source:'modem',index:'7',indexes:['7']}), /拒绝/);
 	await rejects('非法索引直接拒绝删除', oldDelete.controls.deleteSmsMessage('8_1',
 		{source:'modem',index:'-5',indexes:[]}), /索引/);
 	assertEq('非法索引不会触发额外删除请求', oldDelete.rt.calls.filter(function(c) {

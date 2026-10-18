@@ -312,7 +312,32 @@ t_tasks() {
 
 	_r3=$(rpcd_call qmodem_cache get_tasks '{"config_section":"modem0"}')
 	assert_json "get_tasks lists the task" "$_r3" '@.tasks[0].id' "$_id"
+
+	# 写操作即使属于同一模组，也不得复用上一个命令的 task_id。
+	# 否则一次删除会读到其它 action 的结果，命令本身根本没有执行。
+	_a1=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"delete_sms","args":{"config_section":"modem0","index":"1"}}')
+	_a2=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"delete_sms","args":{"config_section":"modem0","index":"2"}}')
+	_aid1=$(jsonfilter -s "$_a1" -e '@.task_id' 2>/dev/null)
+	_aid2=$(jsonfilter -s "$_a2" -e '@.task_id' 2>/dev/null)
+	if [ -n "$_aid1" ] && [ -n "$_aid2" ] && [ "$_aid1" != "$_aid2" ]; then
+		ok "concurrent SMS delete commands each get a distinct task"
+	else
+		bad "concurrent SMS delete commands share a task ($_aid1 / $_aid2)"
+	fi
 	set_ubus ok 0
+	for _action_id in "$_aid1" "$_aid2"; do
+		[ -n "$_action_id" ] || continue
+		_i=0; _action_state=queued
+		while [ "$_i" -lt 80 ]; do
+			_action_state=$(rpcd_call qmodem_cache get_task "{\"task_id\":\"$_action_id\"}" | jsonfilter -e '@.state' 2>/dev/null)
+			case "$_action_state" in success|failed|missing) break ;; esac
+			sleep 0.25
+			_i=$(( _i + 1 ))
+		done
+		assert_eq "SMS action $_action_id completed" success "$_action_state"
+	done
+	_deleted=$(grep -c 'qmodem delete_sms ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "both SMS delete commands reached QModem" 2 "$_deleted"
 
 	# 未知方法 / 非法参数必须快速失败而不是挂住
 	assert_fast "unknown method returns fast" 500 \

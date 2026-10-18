@@ -399,6 +399,8 @@ return view.extend({
 		return controls.liveView(this, res, {
 			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
+			skipIfFocused: false,
+			wakeOn: res && res.section ? controls.smsReadInFlight(res.section) : null,
 			paint: this.paintContent,
 			collect: this.collect
 		});
