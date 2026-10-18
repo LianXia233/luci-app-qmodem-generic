@@ -10,7 +10,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.5.0
-PKG_RELEASE:=24
+PKG_RELEASE:=25
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -18,14 +18,10 @@ LUCI_TITLE:=Modem management (QModem beautified UI)
 LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem. \
 	Data is read through official QModem ubus interfaces, so it is not bound to a \
 	specific module model.
-# 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）。
-# 注意：OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法（package-metadata.pl
-# 会把 `(>=` / `25.12)` 当作不存在的包名，导致 make defconfig 失败），因此 25.12+
-# 基线由 CI 的 25.12 SDK 与文档约定，此处保持无版本约束写法。
-LUCI_DEPENDS:=+luci-base +qmodem
+# 兼容 23.05 / 24.10 的 opkg/IPK 与 25.12+ 的 apk；依赖由各版本 SDK 解析。
+# jq/jsonfilter 为支持库和缓存脚本直接使用，显式声明以兼容旧 QModem 的依赖列表。
+LUCI_DEPENDS:=+luci-base +qmodem +jq +jsonfilter
 LUCI_PKGARCH:=all
-
-include $(TOPDIR)/feeds/luci/luci.mk
 
 # 确保 rpcd 脚本、uci-defaults 钩子、MT5700 修复脚本/服务、模组支持库同步
 # 脚本/服务、流量统计采集服务具有执行权限并注册 ubus 服务。
@@ -85,5 +81,8 @@ rm -rf /tmp/luci-modulecache/
 /etc/init.d/qmodem-stats-collect start 2>/dev/null || true
 exit 0
 endef
+
+# 放在自定义 postinst 之后，确保旧版 luci.mk 在 BuildPackage 时使用本包安装钩子。
+include $(TOPDIR)/feeds/luci/luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature

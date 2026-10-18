@@ -752,7 +752,7 @@ return view.extend({
 			/* CBI Map 解析用户当前输入，提交到 UCI，然后持久化。 */
 			return self._apnMap.save(null, true);
 		}).then(function() {
-			return uci.commit('qmodem');
+			return controls.commitConfig('qmodem');
 		}).then(function() {
 			controls.notify(null, E('p', {},
 				_('APN 配置已写入 /etc/config/qmodem。重新拨号后生效。')), 'info');

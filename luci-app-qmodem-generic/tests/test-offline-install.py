@@ -15,6 +15,8 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 class OfflineInstallTests(unittest.TestCase):
+    package_format = "apk"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="qm offline test ")
         self.addCleanup(self.temp.cleanup)
@@ -31,7 +33,7 @@ class OfflineInstallTests(unittest.TestCase):
 import base64, json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
-record = {'args': args}
+record = {'args': args, 'tool': 'apk'}
 if 'add' in args:
     record['packages'] = {Path(p).name: base64.b64encode(Path(p).read_bytes()).decode()
                           for p in args if p.endswith('.apk')}
@@ -41,10 +43,34 @@ if 'info' in args and args[-1] == os.environ.get('QM_TEST_MISSING'):
     sys.exit(1)
 sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'add' in args else 0)
 """)
-        self.packages = {
+        self.write_tool("opkg", """#!/usr/bin/env python3
+import base64, json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+record = {'args': args, 'tool': 'opkg'}
+if 'install' in args:
+    record['packages'] = {Path(p).name: base64.b64encode(Path(p).read_bytes()).decode()
+                          for p in args if p.endswith('.ipk')}
+    conf_dir = os.environ.get('OPKG_CONF_DIR', '')
+    record['isolated'] = bool(conf_dir) and Path(conf_dir).is_dir() and not list(Path(conf_dir).glob('*.conf'))
+with open(os.environ['QM_TEST_LOG'], 'a') as log:
+    log.write(json.dumps(record) + '\\n')
+if args[0] == 'status':
+    if args[-1] == os.environ.get('QM_TEST_MISSING'):
+        print('Status: deinstall ok not-installed')
+    else:
+        print('Status: install ok installed')
+sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'install' in args else 0)
+""")
+        apk_packages = {
             "luci-app-qmodem-generic-2.5.0-r23.apk": b"test apk\x00\xff\n",
             "luci-i18n-qmodem-generic-zh-cn-2.5.0-r23.apk": b"translation payload\x00",
         }
+        ipk_packages = {
+            "luci-app-qmodem-generic_2.5.0-r25_all.ipk": b"test ipk\x00\xff\n",
+            "luci-i18n-qmodem-generic-zh-cn_git-26.291.12345-abcd123_all.ipk": b"translation payload\x00",
+        }
+        self.packages = ipk_packages if self.package_format == "ipk" else apk_packages
         for name, data in self.packages.items():
             (self.root / name).write_bytes(data)
         self.installer = self.root / "QModem offline.run"
@@ -62,24 +88,29 @@ sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'add' in args else 0)
                                 text=True, capture_output=True, timeout=15)
         self.calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         for call in self.calls:
-            self.assertEqual(call["args"][:3], ["--no-network", "--repositories-file", "/dev/null"])
+            self.assertEqual(call["tool"], self.package_format.replace("ipk", "opkg"))
+            if call["tool"] == "apk":
+                self.assertEqual(call["args"][:3], ["--no-network", "--repositories-file", "/dev/null"])
+            elif "install" in call["args"]:
+                self.assertEqual(call["args"][:3], ["--conf", "/dev/null", "install"])
+                self.assertTrue(call["isolated"], "opkg 必须同时隔离额外配置目录")
         self.assertEqual(list(self.scratch.iterdir()), [], "临时文件必须在成功/失败后清理")
         return result
 
     def test_installs_main_and_translation_without_sources(self):
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        additions = [call for call in self.calls if "add" in call["args"]]
+        additions = [call for call in self.calls if "packages" in call]
         self.assertEqual(len(additions), 1)
         self.assertEqual({name: base64.b64decode(data) for name, data in additions[0]["packages"].items()},
-                         self.packages, "嵌入的每个 APK 必须原样安装")
+                         self.packages, "嵌入的每个安装包必须原样安装")
         self.assertIn("安装完成", result.stdout)
 
     def test_missing_dependency_stops_before_install(self):
         result = self.install(QM_TEST_MISSING="qmodem")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("缺少已安装依赖：qmodem", result.stderr)
-        self.assertFalse(any("add" in call["args"] for call in self.calls))
+        self.assertFalse(any("packages" in call for call in self.calls))
 
     def test_corrupt_payload_stops_before_install(self):
         source = self.installer.read_text()
@@ -88,7 +119,7 @@ sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'add' in args else 0)
         result = self.install()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("安装包校验失败", result.stderr)
-        self.assertFalse(any("add" in call["args"] for call in self.calls))
+        self.assertFalse(any("packages" in call for call in self.calls))
 
     def test_apk_failure_is_not_reported_as_success(self):
         result = self.install(QM_TEST_ADD_STATUS="17")
@@ -96,11 +127,29 @@ sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'add' in args else 0)
         self.assertNotIn("安装完成", result.stdout)
 
     def test_builder_rejects_missing_main_and_unrelated_packages(self):
-        extra = self.root / "unrelated.apk"
+        extra = self.root / ("unrelated." + self.package_format)
         extra.write_bytes(b"not a QModem package")
         for names in [[str(extra)], [str(self.root / next(iter(self.packages))), str(extra)]]:
             result = subprocess.run(self.build + names, text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_builder_rejects_mixed_formats_and_duplicate_main(self):
+        other_name = ("luci-app-qmodem-generic_2.5.0-r25_all.ipk" if self.package_format == "apk"
+                      else "luci-app-qmodem-generic-2.5.0-r25.apk")
+        other = self.root / other_name
+        other.write_bytes(b"opposite format")
+        main = self.root / next(iter(self.packages))
+        for packages in [[str(main), str(other)], [str(main), str(main)]]:
+            result = subprocess.run(self.build + packages, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_missing_package_manager_stops_before_install(self):
+        manager = "opkg" if self.package_format == "ipk" else "apk"
+        (self.tools / manager).unlink()
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("需要使用", result.stderr)
+        self.assertFalse(self.calls)
 
     def test_postinst_reloads_rpcd_and_preserves_user_data(self):
         source = (REPO / "luci-app-qmodem-generic/Makefile").read_text()
@@ -132,6 +181,10 @@ sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'add' in args else 0)
         (stage / "etc/init.d/rpcd.log").unlink()
         subprocess.run(["sh", "-c", script], env=dict(self.env, IPKG_INSTROOT="/image-root"), check=True)
         self.assertFalse((stage / "etc/init.d/rpcd.log").exists())
+
+
+class IpkOfflineInstallTests(OfflineInstallTests):
+    package_format = "ipk"
 
 
 if __name__ == "__main__":
