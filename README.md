@@ -1,6 +1,6 @@
 # luci-app-qmodem-generic
 
-[![Build APK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
+[![Build APK and IPK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
@@ -89,22 +89,30 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 | 目标系统 | 包格式 | 状态 |
 | --- | --- | --- |
 | ImmortalWrt 25.12 | `.apk` | 支持 |
-| ImmortalWrt snapshot | `.apk` | 允许失败 |
+| OpenWrt / ImmortalWrt / iStoreOS 23.05、24.10 | `.ipk` | 支持使用 opkg 和 JavaScript LuCI 的固件 |
+| ImmortalWrt snapshot | `.apk` | 兼容，未单独构建 |
 
-**兼容基线**：OpenWrt / ImmortalWrt **25.12 及更新版本**，不支持 24.10 及更早。**前置依赖**：运行时依赖 [`qmodem`](https://github.com/FUjr/QModem) 后端，请先安装 QModem 再安装本包。本包是 `LUCI_PKGARCH:=all` 的纯前端包，一个架构编译出的产物可用于所有架构。
+**兼容基线**：23.05 起的 JavaScript LuCI。旧版使用 IPK，新版使用 APK，按设备包管理器选择，不能互换。**前置依赖**：`luci-base`、[`qmodem`](https://github.com/FUjr/QModem)、`jq`、`jsonfilter`。QModem stable 和 Next 共用本包的能力检测与降级逻辑，不要求升级后端。本包仅含 LuCI 资源和 Shell 脚本，`LUCI_PKGARCH:=all`，同一种格式适用于 ARM / x86 等架构。
+
+旧版 LuCI 的 APN 和设备参数保存使用官方 `uci.commit` ubus 接口，不依赖缺失的 JavaScript `uci.commit()` 方法。安装钩子在加载 `luci.mk` 前定义，确保旧版 SDK 打入本包的服务加载与会话保留逻辑。
 
 ## 安装
 
-**iStore 手动安装：优先上传 Releases 中的 `*-offline.run`。** 该文件自带主 APK 和翻译包，安装时禁用网络、不更新软件源；需已安装 `luci-base` 与 `qmodem`，缺少依赖会直接提示。
+**iStore 手动安装：旧版 opkg 系统上传 `*-ipk-offline.run`，新版 apk 系统上传 `*-apk-offline.run`。** 每个离线包自带对应格式的主包和翻译包，安装时隔离软件源、不更新索引；缺少依赖会直接提示，不强制安装，也不改动系统软件源。
 
 直接上传 `.apk` 时，iStore 自带的 APK 安装命令仍可能访问软件源。离线包通过 iStore 原生支持的 `.run` 入口安装，无需修改系统软件源或 iStore。
 
 ```sh
 # SSH 安装离线 RUN（ImmortalWrt 25.12 / snapshot）
-sh ./luci-app-qmodem-generic-*-offline.run
+sh ./luci-app-qmodem-generic-*-apk-offline.run
 
 # 或直接离线安装本地主 APK（需要的翻译 APK 也可加在命令末尾）
 apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk
+
+# 旧版 OpenWrt / ImmortalWrt / iStoreOS（opkg）
+sh ./luci-app-qmodem-generic_*-ipk-offline.run
+# 或在依赖齐全时安装本地 IPK，主包和翻译包一起安装
+opkg install ./luci-app-qmodem-generic_*_all.ipk ./luci-i18n-qmodem-generic-zh-cn_*_all.ipk
 ```
 
 > 若设备上此前安装过旧版 `luci-app-mt5700m`，请先 `opkg remove luci-app-mt5700m` 再安装本包，避免旧包残留的菜单与 ACL 条目干扰。
@@ -165,7 +173,7 @@ QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号，未收
 作为 feed 加入 OpenWrt / ImmortalWrt 源码树：
 
 ```sh
-echo 'src-git qmodem_generic https://github.com/LianXia233/luci-app-qmodem-generic.git' >> feeds.conf.default
+echo 'src-git qmodem_generic https://github.com/PEIT98/luci-app-qmodem-generic.git' >> feeds.conf.default
 ./scripts/feeds update qmodem_generic
 ./scripts/feeds install -a -p qmodem_generic
 make menuconfig   # LuCI -> Applications -> luci-app-qmodem-generic
@@ -174,13 +182,13 @@ make package/luci-app-qmodem-generic/compile V=s
 
 ## GitHub Actions 自动构建
 
-仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build APK → Run workflow）：
+仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build APK and IPK → Run workflow）：
 
 1. `lint` — JS 语法（`node --check`）、JSON 解析、`msgfmt` 校验、ACL/菜单一致性检查
-2. `build` — 只用 ImmortalWrt 25.12 SDK 编译一套 APK；包架构为 `all`，可用于对应环境的 ARM / x86 设备
-3. `release` — 编译成功后自动把 APK 和自带 APK 的离线 RUN 上传到 Release（tag 可在触发时指定，留空则自动生成）
+2. `build` — 分别用 ImmortalWrt 25.12 SDK 编译 APK、24.10 SDK 编译 IPK；每种格式生成主包、中文翻译包和独立离线 RUN，包架构均为 `all`
+3. `release` — 两种格式全部编译成功后上传同一个 Release，核验主包和对应离线包均齐全后才清理旧发布（tag 可在触发时指定，留空则自动生成）
 
-下载位置：运行摘要中的「下载本次安装包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的附件；iStore 安装选择 `*-offline.run`。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
+下载位置：运行摘要中的「下载本次安装包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的附件；iStore 安装按包管理器选择对应的离线 RUN。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
 
 ## 界面主题与响应式（QM UI v2）
 

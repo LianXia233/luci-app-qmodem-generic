@@ -19,6 +19,7 @@
 		"write": {
 			"uci": [ "qmodem" ],
 			"ubus": {
+				"uci": [ "commit" ],
 				"qmodem": [ "*" ],
 				"qmodem.sms": [ "send", "delete", "mark_read", "sync" ],
 				"qmodem_cache": [ "*" ],

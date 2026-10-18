@@ -3,6 +3,13 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [2.5.0-25] - 2026-10-18
+
+- 新增旧版 opkg 系统的 IPK 构建，与现有 APK 共用最新代码；Actions 同时提供两种格式的主包、中文翻译包和独立离线 RUN。
+- IPK 离线安装同时隔离 opkg 主配置与额外配置目录，缺少依赖或选错包管理器时直接提示，不更新软件源、不强制安装。
+- 修复旧版 LuCI 缺少 JavaScript `uci.commit()` 导致 APN / 设备参数无法保存，改用官方 UCI RPC；安装钩子提前到 `luci.mk` 之前定义，确保旧版 SDK 正确打包。
+- 显式声明 `jq` / `jsonfilter` 依赖，保留 QModem、现有配置及短信删除兼容修复。
+
 ## [2.5.0-24] - 2026-10-18
 
 - 修复西瓜皮 QModem stable 3.3.0 的模组短信删除：检测到官方 RPC 重复读取请求参数的缺陷时，改用官方旧短信页的 `modem_ctrl.sh` 删除链路；不改官方 QModem、插件或配置。

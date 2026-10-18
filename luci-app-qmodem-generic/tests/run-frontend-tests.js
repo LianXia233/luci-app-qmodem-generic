@@ -38,6 +38,7 @@ function makeRuntime() {
 	var smsApi = null;
 	var modemSmsApi = null;
 	var modemImeiApi = null;
+	var uciCommitError = null;
 	var dialResultStatus = '1';
 	var deleteResult = { result: { status: '1' } };
 	var imeiResult = { imei: '860000000000002', result: { status: '1' } };
@@ -121,7 +122,9 @@ function makeRuntime() {
 			calls.push({ object: object, method: method, params: p, t: Date.now() });
 
 			var body;
-			if (object === 'qmodem.sms') {
+			if (object === 'uci' && method === 'commit') {
+				body = uciCommitError ? { __rpcError: uciCommitError } : {};
+			} else if (object === 'qmodem.sms') {
 				body = smsApi ? smsApi(method, p) : { __rpcError: 'RPC call to qmodem.sms/config_get failed with ubus code 4: Not found' };
 			} else if (object === 'qmodem' && method === 'get_sms' && modemSmsApi) {
 				body = modemSmsApi(method, p);
@@ -443,6 +446,7 @@ function makeRuntime() {
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
 		setModemImeiApi: function(handler) { modemImeiApi = handler; },
+		setUciCommitError: function(error) { uciCommitError = error; },
 		setDeleteResult: function(result) { deleteResult = result; },
 		setImeiResult: function(result) { imeiResult = result; },
 		setDialResultStatus: function(value) { dialResultStatus = String(value); },
@@ -469,6 +473,19 @@ function makeRuntime() {
 
 function loadControls(rt) {
 	return rt.loadModule('qmodem-generic/controls.js');
+}
+
+async function testLegacyUciCommit() {
+	console.log('\n[0] 旧版 LuCI 没有 uci.commit 时仍能保存 QModem 配置');
+	var rt = makeRuntime(), controls = loadControls(rt);
+	await controls.commitConfig('qmodem');
+	assertEq('仅提交指定的 QModem 配置', JSON.stringify(rt.calls[0].params), '{"config":"qmodem"}');
+	assertEq('使用旧版共同支持的 UCI commit RPC', rt.countCalls('uci', 'commit'), 1);
+	assertEq('保存配置不调用全局 apply 或重拨', rt.calls.length, 1);
+	rt.setUciCommitError('Permission denied');
+	var rejected = false;
+	try { await controls.commitConfig('qmodem'); } catch (error) { rejected = /Permission denied/.test(error.message); }
+	ok('提交失败向页面传播错误', rejected);
 }
 
 function testBootstrap(rt) {
@@ -1160,7 +1177,7 @@ var watchdog = setTimeout(function() {
 
 var rt = makeRuntime();
 
-testBootstrap(rt)
+testLegacyUciCommit().then(function() { return testBootstrap(rt); })
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(testActionPayloads)
 	.then(testDialResults)

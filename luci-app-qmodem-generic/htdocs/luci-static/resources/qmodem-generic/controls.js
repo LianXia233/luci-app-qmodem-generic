@@ -147,6 +147,13 @@ function dataRow(label, value, rowClass, keyClass, valClass) {
 	]);
 }
 
+/* 23.05 / 24.10 的 uci.js 没有 commit()；使用各版本共有的官方 UCI RPC。
+ * 调用前仍由 CBI Map.save() 校验并保存当前表单，不应用其它配置。 */
+var callUciCommit = rpc.declare({ object: 'uci', method: 'commit', params: ['config'], expect: { }, reject: true, nobatch: true });
+function commitConfig(config) {
+	return callUciCommit(config);
+}
+
 var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { }, nobatch: true });
 var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { }, nobatch: true });
 var callInfo = rpc.declare({ object: 'qmodem', method: 'info', params: ['config_section'], expect: { }, nobatch: true });
@@ -2243,6 +2250,7 @@ return baseclass.extend({
 	liveView: liveView,
 	withTimeout: withTimeout,
 	withTimeoutReject: withTimeoutReject,
+	commitConfig: commitConfig,
 	mergeIfaceEntries: mergeIfaceEntries,
 	modemInfo: modemInfo,
 	getDeviceStatusCached: getDeviceStatusCached,

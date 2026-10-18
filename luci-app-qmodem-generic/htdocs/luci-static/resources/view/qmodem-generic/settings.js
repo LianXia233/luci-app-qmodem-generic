@@ -211,7 +211,7 @@ return view.extend({
 			saving = true;
 			button.disabled = true;
 			return Promise.resolve().then(function() { return m.save(null, true); }).then(function() {
-				return uci.commit('qmodem');
+				return controls.commitConfig('qmodem');
 			}).then(function() {
 				controls.notify(null, E('p', {},
 					_('设备参数已保存到 QModem 配置（/etc/config/qmodem），请重拨或重启模组使其生效。')));

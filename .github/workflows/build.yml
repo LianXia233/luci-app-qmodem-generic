@@ -1,6 +1,6 @@
-name: Build APK
+name: Build APK and IPK
 
-# 手动触发：只用一套 25.12 SDK，成功后同时保留 Actions 下载包和 Release 附件
+# 手动触发：25.12 SDK 构建 APK，24.10 SDK 构建旧版 IPK；每种格式附带独立离线包。
 on:
   workflow_dispatch:
     inputs:
@@ -28,8 +28,6 @@ permissions:
 
 env:
   PKG_DIR: luci-app-qmodem-generic
-  SDK_TAG: immortalwrt-25.12-apk
-  SDK_DIR: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
 
 jobs:
   # ---------------------------------------------------------------- 静态检查
@@ -64,6 +62,9 @@ jobs:
       - name: Legacy SMS deletion checks
         run: python3 "$PKG_DIR/tests/test-legacy-sms-delete.py"
 
+      - name: Frontend compatibility checks
+        run: node "$PKG_DIR/tests/run-frontend-tests.js"
+
       - name: PO sanity check
         run: |
           sudo apt-get update -qq
@@ -80,12 +81,24 @@ jobs:
           grep -q "\"$key\"" "$menu"
           echo "menu.d 的 depends.acl 与 acl.d 一致"
 
-  # ---------------------------------------------------------------- 单套 APK 构建
+  # ---------------------------------------------------------------- APK / IPK 构建
   build:
     # 包内只有 LuCI 资源和脚本，LUCI_PKGARCH=all；x86 SDK 不限制安装设备架构
-    name: Build APK (ImmortalWrt 25.12)
+    name: Build ${{ matrix.format }} (ImmortalWrt ${{ matrix.version }})
     needs: lint
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - format: apk
+            version: '25.12.1'
+          - format: ipk
+            version: '24.10.4'
+    env:
+      PACKAGE_FORMAT: ${{ matrix.format }}
+      SDK_TAG: immortalwrt-${{ matrix.version }}-${{ matrix.format }}
+      SDK_DIR: https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/x86/64
 
     steps:
       - uses: actions/checkout@v4
@@ -153,7 +166,7 @@ jobs:
       - name: Configure
         working-directory: sdk
         run: |
-          echo "CONFIG_PACKAGE_${PKG_DIR}=m" > .config
+          printf '%s\n' "CONFIG_PACKAGE_${PKG_DIR}=m" 'CONFIG_LUCI_LANG_zh_Hans=y' > .config
           make defconfig
           echo "--- 相关配置 ---"
           grep -E "^(CONFIG_PACKAGE_${PKG_DIR}|CONFIG_USE_APK)" .config || true
@@ -161,7 +174,10 @@ jobs:
       - name: Compile
         working-directory: sdk
         run: |
-          make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s
+          # 本包只有资源和脚本：先生成翻译工具，再打包 UI。
+          # 保留控制信息里的全部运行时依赖，避免把 QModem 后端及内核驱动一起重编。
+          make package/luci-base/host/compile -j"$(nproc)" V=s
+          make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s NO_DEPS=1
 
       - name: Collect artifacts
         run: |
@@ -172,11 +188,11 @@ jobs:
           while IFS= read -r -d '' f; do
             cp "$f" "$out/$(basename "$f")"
             found=$((found+1))
-          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f -name '*qmodem-generic*.apk' -print0)
+          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f -name "*qmodem-generic*.${PACKAGE_FORMAT}" -print0)
 
-          echo "共产出 $found 个 APK 包"
+          echo "共产出 $found 个 $PACKAGE_FORMAT 包"
           ls -lh "$out"
-          if [ -z "$(find "$out" -maxdepth 1 -type f -name "${PKG_DIR}-*.apk" -print -quit)" ]; then
+          if [ -z "$(find "$out" -maxdepth 1 -type f -name "${PKG_DIR}*.${PACKAGE_FORMAT}" -print -quit)" ]; then
             echo "::error::未找到 ${PKG_DIR} 主包，不能只上传翻译包或空目录"
             exit 1
           fi
@@ -184,35 +200,36 @@ jobs:
       - name: Build offline iStore installer
         run: |
           set -euo pipefail
-          main_apk=$(find output -maxdepth 1 -name 'luci-app-qmodem-generic-*.apk' -print -quit)
-          python3 scripts/build-offline-run.py "${main_apk%.apk}-offline.run" output/*.apk
+          main_pkg=$(find output -maxdepth 1 -name "${PKG_DIR}*.${PACKAGE_FORMAT}" -print -quit)
+          python3 scripts/build-offline-run.py "${main_pkg%.*}-${PACKAGE_FORMAT}-offline.run" output/*."$PACKAGE_FORMAT"
 
       - uses: actions/upload-artifact@v4
-        id: apk
+        id: packages
         with:
-          name: qmodem-generic-apk
+          name: qmodem-generic-${{ matrix.format }}
           path: |
             output/*.apk
+            output/*.ipk
             output/*.run
           if-no-files-found: error
           retention-days: 30
 
-      - name: Show APK download
+      - name: Show package download
         env:
-          ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+          ARTIFACT_URL: ${{ steps.packages.outputs.artifact-url }}
         run: |
           {
-            echo '## APK 已生成'
+            echo "## $PACKAGE_FORMAT 已生成"
             echo
             echo "[下载本次安装包]($ARTIFACT_URL)（解压后优先安装 offline.run）"
             echo
-            echo "[Releases 下载页]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)（发布步骤成功后可直接下载 APK）"
+            echo "[Releases 下载页]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)（发布步骤成功后可直接下载）"
             echo
-            echo '构建环境：ImmortalWrt 25.12 SDK；包架构：all。'
+            echo '构建环境：ImmortalWrt ${{ matrix.version }} SDK；包架构：all。'
             echo
             echo '离线安装：将 offline.run 上传到 iStore 手动安装页，不访问软件源。'
             echo
-            for f in output/*.apk output/*.run; do
+            for f in output/*."$PACKAGE_FORMAT" output/*.run; do
               echo "- $(basename "$f")"
             done
           } >> "$GITHUB_STEP_SUMMARY"
@@ -228,7 +245,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          name: qmodem-generic-apk
+          pattern: qmodem-generic-*
+          merge-multiple: true
 
       - name: Resolve tag & notes
         id: meta
@@ -270,12 +288,15 @@ jobs:
             echo "QModem 通用美化版 LuCI Web UI，适用于任意被 QModem 识别的模组。"
             echo
             echo "### 安装"
-            echo 'iStore 手动安装请上传 `*-offline.run`，内含 APK 和翻译包，安装时不访问软件源。'
-            echo '设备需已安装 `luci-base` 与 `qmodem`；缺少依赖会直接提示。'
+            echo '旧版 opkg 系统选择 IPK，新版 apk 系统选择 APK；两个格式均提供主包、翻译包和独立的离线 RUN。'
+            echo 'iStore 手动安装请按系统选择 `*-ipk-offline.run` 或 `*-apk-offline.run`，安装时不访问软件源。'
+            echo '设备需已安装 `luci-base`、`qmodem`、`jq` 与 `jsonfilter`；缺少依赖会直接提示。'
             echo
             echo '```sh'
             echo '# apk（ImmortalWrt 25.12 / 25.12-SNAPSHOT）'
             echo 'apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
+            echo '# opkg（OpenWrt / ImmortalWrt / iStoreOS 23.05 / 24.10）'
+            echo 'opkg install ./luci-app-qmodem-generic_*_all.ipk'
             echo '```'
             echo
             echo '> 运行时依赖 `qmodem`，请先安装 QModem。'
@@ -312,30 +333,33 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           files: |
             dist/*.apk
+            dist/*.ipk
             dist/*.run
           fail_on_unmatched_files: true
 
-      # Release Action 返回成功仍要校验附件，避免显示成功却没有可下载 APK。
-      - name: Verify published APK
+      # 每种格式都必须有主包和独立离线包，成功后才允许清理旧发布。
+      - name: Verify published packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CURRENT_TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
           release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CURRENT_TAG")
-          main_count=$(echo "$release_json" | jq '[.assets[].name | select(test("^luci-app-qmodem-generic-.*\\.apk$"))] | length')
-          offline_count=$(echo "$release_json" | jq '[.assets[].name | select(test("^luci-app-qmodem-generic-.*-offline\\.run$"))] | length')
-          if [ "$main_count" -lt 1 ] || [ "$offline_count" -lt 1 ]; then
-            echo "::error::Release $CURRENT_TAG 缺少主 APK 或离线 RUN 附件，停止后续清理"
-            exit 1
-          fi
+          for format in apk ipk; do
+            main_count=$(echo "$release_json" | jq --arg ext "$format" '[.assets[].name | select(test("^luci-app-qmodem-generic[-_].*\\." + $ext + "$"))] | length')
+            offline_count=$(echo "$release_json" | jq --arg ext "$format" '[.assets[].name | select(endswith("-" + $ext + "-offline.run"))] | length')
+            if [ "$main_count" -lt 1 ] || [ "$offline_count" -lt 1 ]; then
+              echo "::error::Release $CURRENT_TAG 缺少主 $format 或对应离线 RUN 附件，停止后续清理"
+              exit 1
+            fi
+          done
           release_url=$(echo "$release_json" | jq -r '.html_url')
-          echo "已校验 $CURRENT_TAG：$main_count 个主 APK 附件"
-          echo "APK 已发布：[$CURRENT_TAG]($release_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "已校验 $CURRENT_TAG：APK / IPK 主包与离线包均已上传"
+          echo "APK / IPK 已发布：[$CURRENT_TAG]($release_url)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show release download
         run: |
-          echo "APK 已发布：[打开 Releases 下载]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK / IPK 已发布：[打开 Releases 下载]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)" >> "$GITHUB_STEP_SUMMARY"
 
       # 清理时必须先锁定本次 Release，不可靠 GitHub API 的返回顺序：
       # API 排序可能按 tag 的 created_at，导致新发布的 Nightly 被误删。
