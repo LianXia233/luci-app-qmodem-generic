@@ -8,10 +8,10 @@
  *   1) 兼容 OpenWrt/ImmortalWrt 的任意 LuCI 主题（bootstrap / argon / material /
  *      openwrt-2020 / 各 fork 的暗色变体 …）——所有颜色一律走 CSS 变量：
  *      优先取主题自带的变量（--background-color-* / --border-color-* /
- *      --text-color-* / --primary-color / --success-color …），取不到才用内置
- *      fallback 调色板，因此主题换肤时本插件自动跟随。
+ *      --text-color-* / --success-color …），取不到才用内置 fallback 调色板。
+ *      主色默认蓝绿渐变，也可选择其它配色或跟随 LuCI 主色。
  *   2) 明/暗自适应：JS 探测主题底色亮度，给 body 加 qm-app / qm-dark，
- *      fallback 调色板随之切换（主题自带变量仍然优先）。
+ *      fallback 调色板随之切换；手动选择明暗时采用对应表面与文字令牌。
  *   3) 响应式：一套栅格 + 四个断点（1280 / 1024 / 820 / 560），卡片、表单、
  *      表格、SMS 会话、终端在手机上一律可用，触摸目标 ≥ 38px。
  *   4) 旧类适配：历史视图的 mt-* / qm-* / mtconn-* 等私有类名由本层统一"换肤"，
@@ -141,6 +141,91 @@ var CSS_BASE = [
 	'.qm-app [class*="bg-glow"]{display:none!important}'
 ].join('');
 
+/* 独立配色保留 LuCI 的明暗表面；只有手动选择明暗时才覆盖表面令牌。 */
+var PALETTES = [
+	{ id: 'ocean', name: '蓝绿渐变', sub: '默认 · 海蓝与翠绿', gradient: 'linear-gradient(115deg,#0866c4,#087f70)' },
+	{ id: 'blue', name: '清爽蓝', sub: '简洁明亮的蓝色', gradient: 'linear-gradient(115deg,#0755a8,#1678cc)' },
+	{ id: 'violet', name: '暮光紫', sub: '柔和的紫色渐变', gradient: 'linear-gradient(115deg,#6041ae,#8a4387)' },
+	{ id: 'forest', name: '森林绿', sub: '深绿与青绿', gradient: 'linear-gradient(115deg,#146b54,#119690)' },
+	{ id: 'sunset', name: '落日橙', sub: '琥珀与暖橙', gradient: 'linear-gradient(115deg,#b45d0a,#d07326)' },
+	{ id: 'rose', name: '莓果红', sub: '玫红与莓紫', gradient: 'linear-gradient(115deg,#ad3865,#894596)' },
+	{ id: 'custom', name: '自定义颜色', sub: '自行挑选渐变两端颜色', gradient: 'linear-gradient(115deg,var(--qm-custom-start,#0755a8),var(--qm-custom-end,#087f70))' },
+	{ id: 'follow', name: '跟随系统主题', sub: '使用 LuCI 的主色', gradient: 'linear-gradient(115deg,#64748b,#94a3b8)' }
+];
+var CSS_PALETTES = [
+	'.qm-app[data-qm-palette="ocean"]{--qm-accent:#0878cf;--qm-accent-2:#08a6ac;--qm-accent-3:#07856d;',
+	'--qm-accent-gradient:linear-gradient(115deg,#0866c4 0%,#087d9c 52%,#087f70 100%);',
+	'--qm-hero-gradient:linear-gradient(115deg,#0754a6 0%,#087d9c 52%,#087f70 100%)}',
+	'.qm-app[data-qm-palette="blue"]{--qm-accent:#096bd0;--qm-accent-2:#38a7df;--qm-accent-3:#2868bd;',
+	'--qm-accent-gradient:linear-gradient(115deg,#0755a8,#1678cc);--qm-hero-gradient:linear-gradient(115deg,#064b96,#126bb8)}',
+	'.qm-app[data-qm-palette="violet"]{--qm-accent:#7750c4;--qm-accent-2:#a574d6;--qm-accent-3:#b75c94;',
+	'--qm-accent-gradient:linear-gradient(115deg,#6041ae,#8a4387);--qm-hero-gradient:linear-gradient(115deg,#4f338f,#803c7d)}',
+	'.qm-app[data-qm-palette="forest"]{--qm-accent:#117c66;--qm-accent-2:#119690;--qm-accent-3:#146b54;',
+	'--qm-accent-gradient:linear-gradient(115deg,#146b54,#119690);--qm-hero-gradient:linear-gradient(115deg,#125d4e,#117d78)}',
+	'.qm-app[data-qm-palette="sunset"]{--qm-accent:#a95a0d;--qm-accent-2:#d07326;--qm-accent-3:#ad511f;',
+	'--qm-accent-gradient:linear-gradient(115deg,#b45d0a,#d07326);--qm-hero-gradient:linear-gradient(115deg,#96500a,#af5419)}',
+	'.qm-app[data-qm-palette="rose"]{--qm-accent:#b34072;--qm-accent-2:#a64eae;--qm-accent-3:#894596;',
+	'--qm-accent-gradient:linear-gradient(115deg,#ad3865,#894596);--qm-hero-gradient:linear-gradient(115deg,#932f5d,#763b88)}',
+	'.qm-app[data-qm-palette="custom"]{--qm-accent:var(--qm-custom-start);--qm-accent-2:var(--qm-custom-end);--qm-accent-3:var(--qm-custom-end);',
+	'--qm-accent-gradient:linear-gradient(115deg,var(--qm-custom-start),var(--qm-custom-end));',
+	'--qm-hero-gradient:linear-gradient(115deg,var(--qm-custom-start),var(--qm-custom-end))}',
+	'.qm-app[data-qm-tone="light"]{--qm-surface:#fff;--qm-surface-2:#f3f6f9;--qm-surface-3:#e9eef4;--qm-glass:#fff;',
+	'--qm-border:#d7e0e8;--qm-border-soft:#e6edf3;--qm-border-strong:#aabac9;',
+	'--qm-text:#162b3d;--qm-text-soft:#425669;--qm-text-muted:#65798b}',
+	'.qm-app[data-qm-tone="dark"]{--qm-surface:#161f29;--qm-surface-2:#1d2935;--qm-surface-3:#253443;--qm-glass:#161f29;',
+	'--qm-border:#344353;--qm-border-soft:#293847;--qm-border-strong:#62778b;',
+	'--qm-text:#e7f0f8;--qm-text-soft:#c1cfdd;--qm-text-muted:#98aabc}',
+	'.qm-app.qm-dark[data-qm-palette="ocean"]{--qm-accent:#54c6ec;--qm-accent-2:#59d6ce;--qm-accent-3:#5ad7b1}',
+	'.qm-app.qm-dark[data-qm-palette="blue"]{--qm-accent:#74b9ff;--qm-accent-2:#76d4ff}',
+	'.qm-app.qm-dark[data-qm-palette="violet"]{--qm-accent:#b7a1ff;--qm-accent-2:#d2a6ed}',
+	'.qm-app.qm-dark[data-qm-palette="forest"]{--qm-accent:#61d4b6;--qm-accent-2:#5bdfd1}',
+	'.qm-app.qm-dark[data-qm-palette="sunset"]{--qm-accent:#f4b65e;--qm-accent-2:#ffc78d}',
+	'.qm-app.qm-dark[data-qm-palette="rose"]{--qm-accent:#f39abc;--qm-accent-2:#d3a2ed}'
+].join('');
+
+var CSS_APPEARANCE = [
+	'.qm-app .qm-appearance-card{margin-bottom:16px}',
+	'.qm-app .qm-btn-primary,.qm-app .mt-sys-btn-primary,.qm-app .mtconn-btn-primary,.qm-app .mt-sms-btn-primary,',
+	'.qm-app .cbi-button-apply,.qm-app .cbi-button-action{background:var(--qm-accent-gradient);border-color:transparent;color:var(--qm-on-accent)}',
+	'.qm-app .qm-appearance-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px;margin:14px 0}',
+	'.qm-app .qm-palette-option{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0;padding:12px;',
+	'border:1px solid var(--qm-border);border-radius:12px;background:var(--qm-surface);color:var(--qm-text);text-align:left;cursor:pointer}',
+	'.qm-app .qm-palette-option.is-selected{border-color:var(--qm-accent);box-shadow:0 0 0 2px var(--qm-accent-soft);background:var(--qm-surface-2)}',
+	'.qm-app .qm-palette-swatch{display:block;height:38px;border-radius:8px;margin-bottom:3px;background:var(--qm-preview-gradient)}',
+	'.qm-app .qm-palette-option strong{font-size:13px;line-height:1.5;white-space:normal}',
+	'.qm-app .qm-palette-option small{font-size:11.5px;color:var(--qm-text-muted);line-height:1.5}',
+	'.qm-app .qm-custom-colors{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:12px 0 14px}',
+	'.qm-app .qm-custom-colors label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--qm-text-soft)}',
+	'.qm-app .qm-custom-colors input[type="color"]{width:52px;height:38px;border:1px solid var(--qm-border);border-radius:8px;padding:3px;background:var(--qm-surface);cursor:pointer}',
+	'.qm-app .qm-appearance-status{font-size:12px;color:var(--qm-text-muted);line-height:1.6;margin-top:10px}',
+	'.qm-app .qm-topology{display:grid;grid-template-columns:minmax(0,1fr) 54px minmax(0,1fr) 54px minmax(0,1fr);align-items:center;padding:18px 0 6px;width:100%;min-width:0}',
+	'.qm-app .qm-topology-node{display:flex;align-items:center;gap:13px;min-width:0;min-height:92px;padding:16px;',
+	'border:1px solid var(--qm-border);border-radius:14px;background:var(--qm-surface-2)}',
+	'.qm-app .qm-topology-number{display:flex;align-items:center;justify-content:center;flex:0 0 34px;height:34px;border-radius:11px;',
+	'background:var(--qm-accent-gradient);color:#fff;font-size:12px;font-weight:750}',
+	'.qm-app .qm-topology-copy{display:flex;flex-direction:column;gap:5px;min-width:0}',
+	'.qm-app .qm-topology-title{font-size:14px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}',
+	'.qm-app .qm-topology-sub{font-size:12px;line-height:1.6;color:var(--qm-text-muted);white-space:normal;overflow-wrap:anywhere}',
+	'.qm-app .qm-topology-node.is-ok{border-color:var(--qm-ok-border)}',
+	'.qm-app .qm-topology-node.is-ok .qm-topology-sub{color:var(--qm-ok)}',
+	'.qm-app .qm-topology-link{position:relative;min-width:0;height:24px;color:var(--qm-accent)}',
+	'.qm-app .qm-topology-link::before{content:"";position:absolute;top:11px;left:0;width:100%;height:2px;',
+	'background:repeating-linear-gradient(90deg,currentColor 0 6px,transparent 6px 11px);background-size:22px 2px;animation:qmTopologyDash 1.3s linear infinite}',
+	'.qm-app .qm-topology-link::after{content:"";position:absolute;left:0;top:8px;width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 9px var(--qm-accent-soft);animation:qmTopologyFlow 1.8s ease-in-out infinite}',
+	'.qm-app .qm-topology-link.is-idle{color:var(--qm-text-muted);opacity:.55}',
+	'.qm-app .qm-topology-link.is-idle::before{animation:none}',
+	'.qm-app .qm-topology-link.is-idle::after{display:none}',
+	'@keyframes qmTopologyDash{to{background-position:22px 0}}',
+	'@keyframes qmTopologyFlow{0%{left:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:calc(100% - 8px);opacity:0}}',
+	'@keyframes qmTopologyDashDown{to{background-position:0 22px}}',
+	'@keyframes qmTopologyFlowDown{0%{top:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{top:calc(100% - 8px);opacity:0}}',
+	'@media(max-width:680px){.qm-app .qm-topology{grid-template-columns:minmax(0,1fr);padding-top:10px}',
+	'.qm-app .qm-topology-node{min-height:78px;padding:14px}',
+	'.qm-app .qm-topology-link{height:30px;width:24px;justify-self:center}',
+	'.qm-app .qm-topology-link::before{left:11px;top:0;height:100%;width:2px;background:repeating-linear-gradient(180deg,currentColor 0 6px,transparent 6px 11px);background-size:2px 22px;animation-name:qmTopologyDashDown}',
+	'.qm-app .qm-topology-link::after{left:8px;top:0;animation-name:qmTopologyFlowDown}}'
+].join('');
+
 /* ------------------------------------------------------------------ */
 /* 3) 新组件类（QM UI v2 标准件，新代码优先使用）                        */
 /* ------------------------------------------------------------------ */
@@ -227,13 +312,13 @@ var CARD_CLASSES = [
 	'mt-system-temp-box', 'mt-terminal-card', 'mt-ui-card', 'mtconn-card', 'mtconn-config-card',
 	'mtconn-fact-card', 'mtconn-topo-card', 'qm-glass-card', 'qm-stat-card', 'qm-cc-card',
 	'qm-address-card', 'qm-ip-box', 'qm-carrier-topo-box', 'qm-signal-dial-box', 'qm-traffic-chart-box',
-	'qm-mini-item', 'qm-cc-metrics', 'mt-locksum-chip', 'mt-band-option', 'mt-diag-card-head'
+	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option'
 ];
 /* Hero 容器类（带背景渐变的整块区域）与其内部元素类分开：
  * 背景/圆角只给容器，文字反色给容器的后代。 */
 var HERO_CLASSES = [
 	'qm-hero', 'mt-ui-hero', 'mt-system-hero', 'mtconn-hero', 'mt-diag-hero', 'mt-net-hero',
-	'mt-sms-hero', 'mt-terminal-hero'
+	'mt-sms-hero', 'mt-terminal-hero', 'mt-hardware-head'
 ];
 var HERO_INNER_CLASSES = [
 	'qm-hero-title', 'qm-hero-sub', 'qm-hero-meta', 'qm-hero-actions', 'mt-sms-hero-actions'
@@ -252,7 +337,7 @@ var BADGE_CLASSES = [
 ];
 var GRID_CLASSES = [
 	'mt-control-grid', 'mt-info-grid-all', 'mt-lock-cell-grid', 'mt-net-grid', 'mt-system-grid',
-	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid', 'mt-locksum-chips', 'mt-hardware-caps',
+	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid',
 	/* 视图内原本写死的 4 列 / 3 列栅格，统一交给自适应网格 */
 	'mt-net-metrics', 'mtconn-facts', 'qm-grid-2', 'qm-grid-3', 'qm-shortcuts', 'qm-traffic-layout',
 	'mt-hardware-bands', 'mt-system-thermal-form'
@@ -319,7 +404,13 @@ var CSS_LEGACY = [
 
 	/* 栅格：统一为自适应网格（原固定 2 列在窄屏会挤） */
 	sel(GRID_CLASSES) + '{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}',
-	'.qm-app .mt-locksum-chips,.qm-app .mt-hardware-caps{grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr))}',
+	'.qm-app .mt-hardware-caps{display:flex;flex-wrap:wrap}',
+	'.qm-app .mt-net-row.mt-net-row-block{display:block}',
+	'.qm-app .mt-net-row-block>span:first-child{display:block;margin-bottom:8px}',
+	'.qm-app .mt-locksum{min-width:0;width:100%;padding:10px;box-sizing:border-box}',
+	'.qm-app .mt-locksum-group{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:6px 0}',
+	'.qm-app .mt-locksum-chips{display:flex;flex-wrap:wrap;gap:5px;min-width:0;max-width:100%}',
+	'.qm-app .mt-locksum-chip{flex:0 0 auto;padding:2px 7px;min-width:26px;box-shadow:none}',
 
 	/* 键值行 */
 	sel(ROW_CLASSES) + '{display:flex;align-items:baseline;justify-content:space-between;gap:12px;',
@@ -334,11 +425,12 @@ var CSS_LEGACY = [
 	'background:var(--qm-surface);color:var(--qm-text);font-size:12.5px;font-weight:650;cursor:pointer;',
 	'transition:background-color .16s ease,border-color .16s ease,filter .16s ease}',
 	selDesc(BTN_CLASSES, ':hover') + '{background:var(--qm-surface-2);border-color:var(--qm-border-strong)}',
+	'.qm-app .mtconn-btn-primary,.qm-app .mt-sys-btn-primary,.qm-app .mt-sms-btn-primary',
+	'{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
+	'.qm-app .mtconn-btn-danger,.qm-app .mt-sys-btn-danger',
+	'{background:var(--qm-danger-soft);border-color:var(--qm-danger-border);color:var(--qm-danger)}',
 	sel(BTN_CLASSES.filter(function(c) { return /primary|save/.test(c); })) +
 		'{background:var(--qm-accent);border-color:var(--qm-accent);color:var(--qm-on-accent)}',
-	sel(BTN_CLASSES.filter(function(c) { return /danger/.test(c); })) +
-		'{background:var(--qm-danger);border-color:var(--qm-danger);color:#fff}',
-
 	/* 等宽输出块 */
 	sel(MONO_CLASSES) + '{font-family:var(--qm-font-mono);font-size:12px;line-height:1.55;',
 	'white-space:pre-wrap;word-break:break-all;background:var(--qm-surface-2);color:var(--qm-text);',
@@ -353,6 +445,16 @@ var CSS_LEGACY = [
 	selDesc(HERO_CLASSES.concat(HERO_INNER_CLASSES), ' svg') + '{stroke:var(--qm-on-hero)!important}',
 	selDesc(HERO_CLASSES, ' [class*="badge"]') + ',' + selDesc(HERO_CLASSES, ' [class*="-dot"]') +
 		'{background:rgba(255,255,255,.18)!important}',
+	/* Hero 内的白底按钮/温度卡必须使用深色字，不能继承白色强制规则。 */
+	selDesc(HERO_CLASSES, ' button') + ',' + selDesc(HERO_CLASSES, ' a.btn') +
+		'{background:var(--qm-surface)!important;color:var(--qm-text)!important;-webkit-text-fill-color:var(--qm-text)!important}',
+	selDesc(HERO_CLASSES, ' button *') + ',' + selDesc(HERO_CLASSES, ' a.btn *') +
+		'{color:var(--qm-text)!important;-webkit-text-fill-color:var(--qm-text)!important}',
+	selDesc(HERO_CLASSES, ' button svg') + ',' + selDesc(HERO_CLASSES, ' a.btn svg') +
+		'{stroke:var(--qm-text)!important}',
+	'.qm-app .mt-system-hero .mt-system-temp-box{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.28);box-shadow:none}',
+	'.qm-app .qm-hero-op,.qm-app .qm-hero .qm-pill-tag,.qm-app .mtconn-hero .mtconn-state',
+	'{background:rgba(255,255,255,.16)!important;border-color:rgba(255,255,255,.28)!important}',
 
 	/* 进度条 / 条形图轨道 */
 	'.qm-app .qm-mini-bar,.qm-app .mt-sbar-track,.qm-app .mt-sbar{background:var(--qm-surface-3);border-radius:999px;overflow:hidden}',
@@ -363,7 +465,18 @@ var CSS_LEGACY = [
 	'.qm-app .cbi-input-text,.qm-app .cbi-input-select,.qm-app .cbi-input-textarea,',
 	'.qm-app input[type="text"],.qm-app input[type="password"],.qm-app select,.qm-app textarea',
 	'{background:var(--qm-surface);color:var(--qm-text);border:1px solid var(--qm-border);',
-	'border-radius:var(--qm-radius-xs);padding:6px 9px;max-width:100%}',
+	'border-radius:var(--qm-radius-xs);padding:6px 9px;max-width:100%;min-width:0;box-sizing:border-box}',
+	'.qm-app .mt-control-row{grid-template-columns:minmax(0,120px) minmax(0,1fr)}',
+	'.qm-app .mt-control-row>*,.qm-app .cbi-value>*,.qm-app .cbi-value-field>*,.qm-app .mt-sms-compose-row>*{min-width:0;max-width:100%}',
+	'.qm-app .mtconn-config-card .cbi-value,.qm-app .mt-diag-card .cbi-value{grid-template-columns:minmax(0,160px) minmax(0,1fr);gap:12px}',
+	'.qm-app .mtconn-config-card .cbi-value-title,.qm-app .mt-diag-card .cbi-value-title{float:none;width:auto;padding:0;text-align:left}',
+	'.qm-app .mtconn-config-card .cbi-value-field,.qm-app .mt-diag-card .cbi-value-field{margin:0;padding:0;min-width:0;width:100%}',
+	'.qm-app .mtconn-address-grid{grid-template-columns:1fr}',
+	'.qm-app .mtconn-inbound-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px;padding-top:14px}',
+	'.qm-app .qm-ip-val,.qm-app .mtconn-kv-val,.qm-app .mt-system-row strong,.qm-app .mt-net-row strong,.qm-app .qm-list-row strong',
+	'{min-width:0;overflow-wrap:anywhere;word-break:normal}',
+	'.qm-app .qm-list-row>span:first-child,.qm-app .mt-net-row>span:first-child,.qm-app .mt-system-row>span:first-child{flex:0 1 45%;min-width:0}',
+	'.qm-app .mt-hardware-head h2{background:none;-webkit-text-fill-color:currentColor;color:var(--qm-text)}',
 	'.qm-app .cbi-button:focus,.qm-app .btn:focus{outline:2px solid var(--qm-accent);outline-offset:2px}',
 	/* 分区标题（设置/高级/网络等表单页） */
 	'.qm-app .mt-control-section{margin-top:18px}',
@@ -464,21 +577,80 @@ var CSS_RESPONSIVE = [
 	'.qm-app .mt-sms-shell{grid-template-columns:1fr!important}',
 	'.qm-app .mt-sms-sidebar,.qm-app .mt-sms-contacts-scroll{max-height:220px}',
 	'.qm-app [class*="-hero"] [class*="-title"]{font-size:18px}',
-	'.qm-app .qm-kv-val,.qm-app ' + sel(VAL_CLASSES) + '{text-align:right}',
+	'.qm-app .qm-kv-val,' + sel(VAL_CLASSES) + '{text-align:right}',
 	'}',
 
 	/* 无障碍：尊重"减少动态效果" */
 	'@media (prefers-reduced-motion:reduce){.qm-app *{animation-duration:.001ms!important;',
-	'animation-iteration-count:1!important;transition-duration:.001ms!important}}'
+	'animation-iteration-count:1!important;transition-duration:.001ms!important}',
+	'.qm-app .qm-topology-link::before,.qm-app .qm-topology-link::after{animation:none!important}}'
 ].join('');
 
-var QM_CSS = [ CSS_TOKENS, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_RESPONSIVE ].join('\n');
+/* QModem 主标签：SVG 随文字着色，保持 LuCI 原生点击与选中状态。 */
+var CSS_NAV_TABS = [
+  '.qm-app #tabmenu a.qm-tab-link{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;text-decoration:none;transition:color .18s ease,background-color .18s ease}',
+  '.qm-app #tabmenu a.qm-tab-link .qm-tab-icon{display:block;width:16px;height:16px;flex:none;opacity:.86;pointer-events:none}',
+  '.qm-app #tabmenu a.qm-tab-link:hover .qm-tab-icon,.qm-app #tabmenu li.active a.qm-tab-link .qm-tab-icon{opacity:1}',
+  '.qm-app #tabmenu a.qm-tab-link:hover{background:var(--qm-accent-soft);border-radius:8px;text-decoration:none}',
+  '@media(max-width:680px){.qm-app #tabmenu{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}.qm-app #tabmenu ul.tabs{display:flex;flex-wrap:nowrap;min-width:max-content}.qm-app #tabmenu a.qm-tab-link{gap:6px;min-height:40px}}'
+].join('');
+
+/* 显式重置主题给 h2 加的缩进/伪元素，图标与文字只保留一个固定间距。 */
+var CSS_PAGE_TITLES = [
+	'.qm-app h2.qm-page-title{display:flex;align-items:center;gap:10px;min-width:0;max-width:100%;',
+	'margin:0 0 6px!important;padding:0!important;border:0!important;text-indent:0!important;',
+	'font-size:24px!important;font-weight:800;line-height:1.35;letter-spacing:-.02em;',
+	'white-space:normal;overflow:visible;text-overflow:clip;background:none!important;',
+	'-webkit-text-fill-color:currentColor!important}',
+	'.qm-app h2.qm-page-title::before,.qm-app h2.qm-page-title::after{content:none!important;display:none!important}',
+	'.qm-app h2.qm-page-title>.qm-page-title-icon{display:block;width:24px;height:24px;flex:0 0 24px;',
+	'margin:0!important;padding:0!important;stroke:currentColor;pointer-events:none}',
+	'.qm-app .qm-page-title-text{min-width:0;overflow-wrap:anywhere}',
+	'.qm-app .qm-page-title-text img{display:inline-block;vertical-align:middle;margin:0 8px 0 0}',
+	'@media(max-width:560px){.qm-app h2.qm-page-title{font-size:21px!important;gap:8px}',
+	'.qm-app h2.qm-page-title>.qm-page-title-icon{width:22px;height:22px;flex-basis:22px}}'
+].join('');
+
+var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS, CSS_PAGE_TITLES ].join('\n');
 
 /* ------------------------------------------------------------------ */
 /* 6) 运行时：注入 + 明暗探测                                            */
 /* ------------------------------------------------------------------ */
 
 var STYLE_ID = 'qm-ui-theme';
+var APPEARANCE_KEY = 'qmodem-generic-appearance';
+var appearanceCache = null;
+
+function normalizeAppearance(value) {
+	value = value && typeof value === 'object' ? value : {};
+	function hex(v, fallback) { return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : fallback; }
+	return {
+		palette: PALETTES.some(function(p) { return p.id === value.palette; }) ? value.palette : 'ocean',
+		tone: [ 'auto', 'light', 'dark' ].indexOf(value.tone) !== -1 ? value.tone : 'auto',
+		customStart: hex(value.customStart, '#0755a8'),
+		customEnd: hex(value.customEnd, '#087f70')
+	};
+}
+
+function getAppearance() {
+	if (!appearanceCache) {
+		var saved;
+		try { saved = JSON.parse(window.localStorage.getItem(APPEARANCE_KEY)); } catch (e) { /* 浏览器禁用存储时使用默认配色 */ }
+		appearanceCache = normalizeAppearance(saved);
+	}
+	return Object.assign({}, appearanceCache);
+}
+
+function setAppearance(value) {
+	appearanceCache = normalizeAppearance(value);
+	var persisted = false;
+	try {
+		window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearanceCache));
+		persisted = true;
+	} catch (e) { /* 当前页面仍可立即应用 */ }
+	apply();
+	return persisted;
+}
 
 function injectOnce() {
 	if (typeof document === 'undefined' || !document.createElement)
@@ -542,17 +714,90 @@ function detectTone() {
 
 /* 整体的 try/catch 兜底：极简 DOM 替身（单元测试）或异常环境下一律静默跳过，
  * 绝不让"注入皮肤"这件事本身把页面/测试搞崩。 */
+/* 固定 SVG 轮廓，不加载第三方图标库、不改菜单地址或事件。 */
+var ICON_PATHS = {
+  status: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
+  connection: 'M7 3v14m-4-4 4 4 4-4M17 21V7m-4 4 4-4 4 4',
+  network: 'M12 21V10m-4 11h8M10 14l2-5 2 5M5 7a10 10 0 0 1 14 0M2 4a14 14 0 0 1 20 0',
+  sms: 'M20 11.5a8 8 0 0 1-8 8c-1.4 0-2.7-.3-3.9-.9L3 21l1.7-5.1A8 8 0 1 1 20 11.5zM8 11h8m-8 3h5',
+  system: 'M8 2h6l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a3 3 0 0 1 3-3zM9 12h6v6H9zM12 12v6',
+  advanced: 'M3 6h10m4 0h4M3 18h4m4 0h10M13 6a2 2 0 1 0 4 0 2 2 0 1 0-4 0M7 18a2 2 0 1 0 4 0 2 2 0 1 0-4 0',
+  settings: 'M4 5h16v14H4zM8 9h8M8 15h8M10 7v4M14 13v4',
+  terminal: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM7 8l4 4-4 4M13 16h4'
+};
+var tabIconObserver = null, tabIconReadyListener = false;
+
+function icon(kind, className) {
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	var attrs = { 'class': className, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+		'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+		'aria-hidden': 'true', focusable: 'false' };
+	Object.keys(attrs).forEach(function(key) { svg.setAttribute(key, attrs[key]); });
+	var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	path.setAttribute('d', ICON_PATHS[kind] || ICON_PATHS.status);
+	svg.appendChild(path);
+	return svg;
+}
+
+/* 标题内容只按文本/DOM 节点追加，模组名称不能作为 HTML 解析。 */
+function pageTitle(kind, label, className) {
+	var title = document.createElement('h2');
+	title.setAttribute('class', 'qm-page-title' + (className ? ' ' + className : ''));
+	title.appendChild(icon(kind, 'qm-page-title-icon'));
+	var text = document.createElement('span');
+	text.setAttribute('class', 'qm-page-title-text');
+	(Array.isArray(label) ? label : [ label ]).forEach(function(value) {
+		if (value != null) text.appendChild(value.nodeType ? value : document.createTextNode(String(value)));
+	});
+	title.appendChild(text);
+	return title;
+}
+
+function decorateNavTabs() {
+  if (!document.querySelectorAll || !document.createElementNS) return;
+  var links = document.querySelectorAll('#tabmenu a[href]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i], href = a.getAttribute('href') || '';
+    var match = href.match(/\/admin\/modem\/qmodem-generic\/(status|connection|network|sms|system|advanced)\/?(?:[?#]|$)/);
+    if (!match || (a.querySelector && a.querySelector('svg.qm-tab-icon'))) continue;
+    a.insertBefore(icon(match[1], 'qm-tab-icon'), a.firstChild);
+    if (a.classList) a.classList.add('qm-tab-link');
+  }
+}
+function ensureNavTabIcons() {
+  if (!document.querySelectorAll || !document.createElementNS) return;
+  decorateNavTabs();
+  /* 仅观察 LuCI 标签栏，支持异步重建，避免监视整页数据轮询。 */
+  var tabmenu = document.getElementById('tabmenu');
+  if (tabmenu && !tabIconObserver && typeof MutationObserver !== 'undefined') {
+    tabIconObserver = new MutationObserver(function() { decorateNavTabs(); });
+    tabIconObserver.observe(tabmenu, { childList: true, subtree: true });
+  } else if (!tabmenu && !tabIconReadyListener && document.addEventListener && document.readyState === 'loading') {
+    tabIconReadyListener = true;
+    document.addEventListener('DOMContentLoaded', ensureNavTabIcons, { once: true });
+  }
+}
+
 function apply() {
 	try {
 		if (typeof document === 'undefined' || !document.createElement)
 			return null;
 		injectOnce();
+		ensureNavTabIcons();
 		var body = document.body || document.documentElement;
 		if (body && body.classList) {
+			var appearance = getAppearance();
+			var tone = appearance.tone === 'auto' ? detectTone() : appearance.tone;
 			body.classList.add('qm-app');
 			body.classList.remove('qm-light');
 			body.classList.remove('qm-dark');
-			body.classList.add('qm-' + detectTone());
+			body.classList.add('qm-' + tone);
+			body.setAttribute('data-qm-palette', appearance.palette);
+			body.setAttribute('data-qm-tone', appearance.tone);
+			if (body.style && body.style.setProperty) {
+				body.style.setProperty('--qm-custom-start', appearance.customStart);
+				body.style.setProperty('--qm-custom-end', appearance.customEnd);
+			}
 		}
 	} catch (e) { /* 忽略 */ }
 	return null;
@@ -646,6 +891,22 @@ function progress(pct, tone) {
 	return bar;
 }
 
+/* 文案使用普通文本节点，型号和卡槽值不会拼入 SVG/HTML。 */
+function topology(nodes, links) {
+	var children = [];
+	(nodes || []).forEach(function(node, i) {
+		if (i) children.push(el('div', 'qm-topology-link' + (links && links[i - 1] === false ? ' is-idle' : ''), null, { 'aria-hidden': 'true' }));
+		children.push(el('div', 'qm-topology-node' + (node.ok ? ' is-ok' : ''), [
+			el('span', 'qm-topology-number', [ String(i + 1).padStart(2, '0') ], { 'aria-hidden': 'true' }),
+			el('div', 'qm-topology-copy', [
+				el('strong', 'qm-topology-title', [ node.title ]),
+				el('span', 'qm-topology-sub', [ node.sub ])
+			])
+		]));
+	});
+	return el('div', 'qm-topology', children, { 'role': 'group' });
+}
+
 /* 模块被 require 时立即注入一次：任何视图只要依赖 controls（本包所有视图都依赖），
  * 皮肤就会先于内容渲染生效，无需逐个视图改写。 */
 try {
@@ -657,6 +918,11 @@ var API = {
 	css: function() { return QM_CSS; },
 	apply: apply,
 	stylesheet: stylesheet,
+	getAppearance: getAppearance,
+	setAppearance: setAppearance,
+	palettes: function() { return PALETTES.map(function(p) { return Object.assign({}, p); }); },
+	topology: topology,
+	pageTitle: pageTitle,
 	detectTone: detectTone,
 	card: card,
 	kv: kv,

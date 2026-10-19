@@ -1,6 +1,6 @@
-name: Build IPK & APK
+name: Build APK and IPK
 
-# 手动触发：编译完成后把 IPK / APK 一并上传到 Release
+# 手动触发：25.12 SDK 构建 APK，24.10 SDK 构建旧版 IPK；每种格式附带独立离线包。
 on:
   workflow_dispatch:
     inputs:
@@ -8,11 +8,6 @@ on:
         description: 'Release tag（留空则自动使用 v<版本>-build<运行号>）'
         required: false
         default: ''
-      publish_release:
-        description: '编译成功后创建/更新 Release'
-        type: boolean
-        required: false
-        default: true
       prerelease:
         description: '标记为预发布(pre-release)'
         type: boolean
@@ -51,9 +46,24 @@ jobs:
           # 使用 xargs 提高效率，且完美处理特殊文件名
           find "$PKG_DIR/htdocs" -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
+      - name: Shell syntax check
+        run: |
+          find "$PKG_DIR/root" "$PKG_DIR/tests" -type f \( -name '*.sh' -o -name 'qmodem-support-custom' -o -name 'qmodem-modem-support' -o -name 'qmodem_support' \) -print0 | xargs -0 -r -n1 sh -n
+
       - name: JSON syntax check
         run: |
           find "$PKG_DIR/root" -name '*.json' -print0 | xargs -0 -r -n1 python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8'))"
+
+      - name: Offline installer checks
+        run: |
+          sh -n scripts/offline-install.sh.in
+          python3 "$PKG_DIR/tests/test-offline-install.py"
+
+      - name: Legacy SMS deletion checks
+        run: python3 "$PKG_DIR/tests/test-legacy-sms-delete.py"
+
+      - name: Frontend compatibility checks
+        run: node "$PKG_DIR/tests/run-frontend-tests.js"
 
       - name: PO sanity check
         run: |
@@ -71,23 +81,24 @@ jobs:
           grep -q "\"$key\"" "$menu"
           echo "menu.d 的 depends.acl 与 acl.d 一致"
 
-  # ---------------------------------------------------------------- 编译矩阵
+  # ---------------------------------------------------------------- APK / IPK 构建
   build:
-    name: ${{ matrix.tag }}
+    # 包内只有 LuCI 资源和脚本，LUCI_PKGARCH=all；x86 SDK 不限制安装设备架构
+    name: Build ${{ matrix.format }} (ImmortalWrt ${{ matrix.version }})
     needs: lint
     runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ImmortalWrt 25.12 及更新版本使用 apk → 产物为 .apk（兼容基线 25.12+，不再构建 24.10 及更早）
-          - tag: immortalwrt-25.12-apk
-            sdk_dir: https://downloads.immortalwrt.org/releases/25.12.1/targets/x86/64
-            optional: false
-          - tag: immortalwrt-snapshot-apk
-            sdk_dir: https://downloads.immortalwrt.org/snapshots/targets/x86/64
-            optional: true
+          - format: apk
+            version: '25.12.1'
+          - format: ipk
+            version: '24.10.4'
+    env:
+      PACKAGE_FORMAT: ${{ matrix.format }}
+      SDK_TAG: immortalwrt-${{ matrix.version }}-${{ matrix.format }}
+      SDK_DIR: https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/x86/64
 
     steps:
       - uses: actions/checkout@v4
@@ -105,10 +116,10 @@ jobs:
         id: sdk-info
         run: |
           mkdir -p "$GITHUB_WORKSPACE/sdk"
-          curl -fsSL "${{ matrix.sdk_dir }}/sha256sums" -o sha256sums
+          curl -fsSL "$SDK_DIR/sha256sums" -o sha256sums
           SDK_FILE=$(grep -oE 'immortalwrt-sdk-[^ ]*\.tar\.(zst|xz)' sha256sums | head -n1)
           if [ -z "$SDK_FILE" ]; then
-            echo "::error::未能在 ${{ matrix.sdk_dir }}/sha256sums 中找到 SDK"
+            echo "::error::未能在 $SDK_DIR/sha256sums 中找到 SDK"
             exit 1
           fi
           SDK_HASH=$(grep " \*\?$SDK_FILE\$" sha256sums | awk '{print $1}')
@@ -120,12 +131,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.sdk-info.outputs.file }}
-          key: sdk-archive-${{ matrix.tag }}-${{ steps.sdk-info.outputs.hash }}
+          key: sdk-archive-${{ env.SDK_TAG }}-${{ steps.sdk-info.outputs.hash }}
 
       - name: Download & Verify SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
-          curl -fSL --retry 3 "${{ matrix.sdk_dir }}/${{ steps.sdk-info.outputs.file }}" -o "${{ steps.sdk-info.outputs.file }}"
+          curl -fSL --retry 3 "$SDK_DIR/${{ steps.sdk-info.outputs.file }}" -o "${{ steps.sdk-info.outputs.file }}"
           grep " \*\?${{ steps.sdk-info.outputs.file }}\$" sha256sums | sha256sum -c -
 
       - name: Extract SDK
@@ -155,7 +166,7 @@ jobs:
       - name: Configure
         working-directory: sdk
         run: |
-          echo "CONFIG_PACKAGE_${PKG_DIR}=m" > .config
+          printf '%s\n' "CONFIG_PACKAGE_${PKG_DIR}=m" 'CONFIG_LUCI_LANG_zh_Hans=y' > .config
           make defconfig
           echo "--- 相关配置 ---"
           grep -E "^(CONFIG_PACKAGE_${PKG_DIR}|CONFIG_USE_APK)" .config || true
@@ -163,37 +174,70 @@ jobs:
       - name: Compile
         working-directory: sdk
         run: |
-          make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s
+          # 本包只有资源和脚本：先生成翻译工具，再打包 UI。
+          # 保留控制信息里的全部运行时依赖，避免把 QModem 后端及内核驱动一起重编。
+          make package/luci-base/host/compile -j"$(nproc)" V=s
+          make "package/${PKG_DIR}/compile" -j"$(nproc)" V=s NO_DEPS=1
 
       - name: Collect artifacts
         run: |
+          set -euo pipefail
           out="$GITHUB_WORKSPACE/output"
           mkdir -p "$out"
           found=0
-          while IFS= read -r f; do
-            cp "$f" "$out/${{ matrix.tag }}__$(basename "$f")"
+          while IFS= read -r -d '' f; do
+            cp "$f" "$out/$(basename "$f")"
             found=$((found+1))
-          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f \( -name '*qmodem-generic*.ipk' -o -name '*qmodem-generic*.apk' \))
-          
-          echo "共产出 $found 个包"
+          done < <(find "$GITHUB_WORKSPACE/sdk/bin" -type f -name "*qmodem-generic*.${PACKAGE_FORMAT}" -print0)
+
+          echo "共产出 $found 个 $PACKAGE_FORMAT 包"
           ls -lh "$out"
-          if [ "$found" -eq 0 ]; then
-            echo "::error::未找到任何 ipk/apk 产物"
+          if [ -z "$(find "$out" -maxdepth 1 -type f -name "${PKG_DIR}*.${PACKAGE_FORMAT}" -print -quit)" ]; then
+            echo "::error::未找到 ${PKG_DIR} 主包，不能只上传翻译包或空目录"
             exit 1
           fi
 
+      - name: Build offline iStore installer
+        run: |
+          set -euo pipefail
+          main_pkg=$(find output -maxdepth 1 -name "${PKG_DIR}*.${PACKAGE_FORMAT}" -print -quit)
+          python3 scripts/build-offline-run.py "${main_pkg%.*}-${PACKAGE_FORMAT}-offline.run" output/*."$PACKAGE_FORMAT"
+
       - uses: actions/upload-artifact@v4
+        id: packages
         with:
-          name: packages-${{ matrix.tag }}
-          path: output/*
+          name: qmodem-generic-${{ matrix.format }}
+          path: |
+            output/*.apk
+            output/*.ipk
+            output/*.run
           if-no-files-found: error
           retention-days: 30
+
+      - name: Show package download
+        env:
+          ARTIFACT_URL: ${{ steps.packages.outputs.artifact-url }}
+        run: |
+          {
+            echo "## $PACKAGE_FORMAT 已生成"
+            echo
+            echo "[下载本次安装包]($ARTIFACT_URL)（解压后优先安装 offline.run）"
+            echo
+            echo "[Releases 下载页]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)（发布步骤成功后可直接下载）"
+            echo
+            echo '构建环境：ImmortalWrt ${{ matrix.version }} SDK；包架构：all。'
+            echo
+            echo '离线安装：将 offline.run 上传到 iStore 手动安装页，不访问软件源。'
+            echo
+            for f in output/*."$PACKAGE_FORMAT" output/*.run; do
+              echo "- $(basename "$f")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------- 发布
   release:
     name: Publish release
     needs: build
-    if: ${{ inputs.publish_release }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -201,7 +245,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: packages-*
+          pattern: qmodem-generic-*
           merge-multiple: true
 
       - name: Resolve tag & notes
@@ -244,9 +288,15 @@ jobs:
             echo "QModem 通用美化版 LuCI Web UI，适用于任意被 QModem 识别的模组。"
             echo
             echo "### 安装"
+            echo '旧版 opkg 系统选择 IPK，新版 apk 系统选择 APK；两个格式均提供主包、翻译包和独立的离线 RUN。'
+            echo 'iStore 手动安装请按系统选择 `*-ipk-offline.run` 或 `*-apk-offline.run`，安装时不访问软件源。'
+            echo '设备需已安装 `luci-base`、`qmodem`、`jq` 与 `jsonfilter`；缺少依赖会直接提示。'
+            echo
             echo '```sh'
-            echo '# apk（ImmortalWrt 25.12 / snapshot）'
-            echo 'apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
+            echo '# apk（ImmortalWrt 25.12 / 25.12-SNAPSHOT）'
+            echo 'apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk'
+            echo '# opkg（OpenWrt / ImmortalWrt / iStoreOS 23.05 / 24.10）'
+            echo 'opkg install ./luci-app-qmodem-generic_*_all.ipk'
             echo '```'
             echo
             echo '> 运行时依赖 `qmodem`，请先安装 QModem。'
@@ -281,42 +331,84 @@ jobs:
           name: ${{ steps.meta.outputs.name }}
           body_path: release-notes.md
           prerelease: ${{ inputs.prerelease }}
-          files: dist/*
+          files: |
+            dist/*.apk
+            dist/*.ipk
+            dist/*.run
           fail_on_unmatched_files: true
 
-      # 发布后清理历史 Release，避免长期累积。
-      # releases 接口按创建时间倒序返回，跳过前 KEEP 个即可保留最新。
-      - name: Clean up old releases
-        if: ${{ inputs.publish_release }}
+      # 每种格式都必须有主包和独立离线包，成功后才允许清理旧发布。
+      - name: Verify published packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          set -e
-          KEEP="${{ inputs.keep_releases }}"
+          set -euo pipefail
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CURRENT_TAG")
+          for format in apk ipk; do
+            main_count=$(echo "$release_json" | jq --arg ext "$format" '[.assets[].name | select(test("^luci-app-qmodem-generic[-_].*\\." + $ext + "$"))] | length')
+            offline_count=$(echo "$release_json" | jq --arg ext "$format" '[.assets[].name | select(endswith("-" + $ext + "-offline.run"))] | length')
+            if [ "$main_count" -lt 1 ] || [ "$offline_count" -lt 1 ]; then
+              echo "::error::Release $CURRENT_TAG 缺少主 $format 或对应离线 RUN 附件，停止后续清理"
+              exit 1
+            fi
+          done
+          release_url=$(echo "$release_json" | jq -r '.html_url')
+          echo "已校验 $CURRENT_TAG：APK / IPK 主包与离线包均已上传"
+          echo "APK / IPK 已发布：[$CURRENT_TAG]($release_url)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show release download
+        run: |
+          echo "APK / IPK 已发布：[打开 Releases 下载]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases)" >> "$GITHUB_STEP_SUMMARY"
+
+      # 清理时必须先锁定本次 Release，不可靠 GitHub API 的返回顺序：
+      # API 排序可能按 tag 的 created_at，导致新发布的 Nightly 被误删。
+      - name: Clean up old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ steps.meta.outputs.tag }}
+          KEEP_INPUT: ${{ inputs.keep_releases }}
+        run: |
+          set -euo pipefail
+          KEEP="$KEEP_INPUT"
           case "$KEEP" in
             ''|*[!0-9]*) echo "::warning::keep_releases 取值非法，跳过清理"; exit 0 ;;
           esac
-          # 兜底：至少保留 1 个，避免误填 0 导致 Release 被清空
           if [ "$KEEP" -lt 1 ]; then
-            echo "::warning::keep_releases < 1，已按 1 处理"
+            echo "::warning::至少保留本次 Release，已将保留数设为 1"
             KEEP=1
           fi
-          echo "策略：保留最新 $KEEP 个 Release"
 
-          mapfile -t IDS < <(gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '.[].id')
-          total=${#IDS[@]}
-          echo "当前共 $total 个 Release"
-
-          if [ "$total" -le "$KEEP" ]; then
-            echo "数量未超过保留阈值，无需清理"
-            exit 0
+          # 确认本次发布的 tag 和 Release 实际存在；失败时绝不清理。
+          CURRENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CURRENT_TAG" --jq '.id')
+          if [ -z "$CURRENT_ID" ] || [ "$CURRENT_ID" = "null" ]; then
+            echo "::error::无法确认本次 Release，禁止执行清理"
+            exit 1
           fi
+          echo "保护本次发布：$CURRENT_TAG (id=$CURRENT_ID)，保留最近 $KEEP 个 Release"
 
-          for id in "${IDS[@]:$KEEP}"; do
-            tag=$(gh api "repos/${{ github.repository }}/releases/$id" --jq '.tag_name')
-            echo "删除 Release id=$id tag=$tag"
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$id" \
-              || echo "::warning::删除 release $id 失败"
-            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag" \
-              || echo "::warning::删除 tag $tag 失败"
-          done
+          # 按实际发布时间排序，再将本次 Release 固定计入保留名额。
+          # 先取得完整列表；API 调用失败时不得误删已有 Release。
+          RELEASE_LIST=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq 'sort_by(.published_at // .created_at) | reverse | .[] | [.id, .tag_name] | @tsv')
+          kept=1
+          while IFS=$'\t' read -r id tag; do
+            [ -n "$id" ] || continue
+            if [ "$id" = "$CURRENT_ID" ]; then
+              echo "保留本次发布：$tag"
+              continue
+            fi
+            if [ "$kept" -lt "$KEEP" ]; then
+              echo "保留历史发布：$tag"
+              kept=$((kept + 1))
+              continue
+            fi
+            echo "清理旧 Release：$tag (id=$id)"
+            if gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" \
+                || echo "::warning::已删除旧 Release，但删除 tag $tag 失败"
+            else
+              echo "::warning::删除旧 Release $tag 失败，保留对应 tag"
+            fi
+          done <<< "$RELEASE_LIST"
+          echo "清理完成，本次 Release $CURRENT_TAG 已保留"

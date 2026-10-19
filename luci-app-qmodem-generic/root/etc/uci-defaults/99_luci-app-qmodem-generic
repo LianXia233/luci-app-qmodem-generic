@@ -18,6 +18,7 @@ for f in \
 	/usr/bin/qmodem-task \
 	/usr/sbin/qmodem-mt5700-fix \
 	/usr/sbin/qmodem-modem-support \
+	/usr/sbin/qmodem-support-custom \
 	/usr/sbin/qmodem-worker \
 	/usr/lib/qmodem/qmodem-at-probe \
 	/etc/init.d/qmodem-mt5700-fix \

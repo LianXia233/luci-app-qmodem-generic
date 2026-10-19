@@ -5,6 +5,8 @@
 'require ui';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 移动数据（Mobile Data）— 现代白色毛玻璃 (Glassmorphism) + 动态数据通路 SVG 重构
  * 数据源全部来自 QModem 的 ubus 对象及 UCI 配置：
@@ -54,7 +56,7 @@ function joinAddresses(list) {
 }
 
 function cleanDns(v) {
-	return String(v == null ? '' : v).split(/\s+/)[0] || '';
+	return controls.valueText(v).trim().split(/\s+/)[0] || '';
 }
 
 // 安全渲染 SVG 节点 helper
@@ -123,7 +125,7 @@ return view.extend({
 	styleNode: function() {
 		return E('style', {}, [
 			/* 全局毛玻璃与流动渐变底蕴 */
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mtconn-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境氛围光球 */
 			'.mtconn-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -171,6 +173,7 @@ return view.extend({
 
 			/* 双列地址与会话面板 */
 			'.mtconn-session-grid{display:grid;grid-template-columns:1.28fr 0.92fr;gap:16px;margin-bottom:16px}',
+			'.mtconn-session-stack{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}.mtconn-session-stack>.mtconn-card{min-width:0}.mtconn-session-stack>.mtconn-dial-summary{order:-1}.mtconn-dial-summary{padding:16px 20px}.mtconn-dial-summary .mtconn-sec-head{align-items:center;margin-bottom:10px}.mtconn-runtime-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.mtconn-runtime-item{background:var(--qm-surface-2);border:1px solid var(--qm-border-soft);border-radius:12px;padding:11px 14px;min-width:0}.mtconn-runtime-label{color:var(--qm-text-muted);font-size:11px;margin-bottom:5px}.mtconn-runtime-value{font-size:14px;font-weight:750;color:var(--qm-text);word-break:break-word}.mtconn-runtime-value.online{color:var(--qm-ok)}.mtconn-runtime-value.offline{color:var(--qm-danger)}.mtconn-dial-extra{margin-top:9px;font-size:12px;color:var(--qm-text-muted)}.mtconn-dial-extra summary{cursor:pointer;padding:6px 0}.mtconn-dial-extra .mtconn-dial-list{margin-top:5px;max-height:180px}',
 			'.mtconn-sec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px}',
 			'.mtconn-sec-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px}',
 			'.mtconn-sec-sub{font-size:11px;color:var(--qm-text-muted);margin-top:2px}',
@@ -223,12 +226,13 @@ return view.extend({
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.mtconn-facts{grid-template-columns:repeat(2,1fr)}.mtconn-session-grid{grid-template-columns:1fr}.mtconn-address-grid{grid-template-columns:1fr}}',
-			'@media(max-width:680px){.mtconn-hero{flex-direction:column;align-items:flex-start}.mtconn-facts{grid-template-columns:1fr}.mtconn-config-card .cbi-value{grid-template-columns:1fr;gap:6px}}'
+			'@media(max-width:680px){.mtconn-hero{flex-direction:column;align-items:flex-start}.mtconn-facts{grid-template-columns:1fr}.mtconn-runtime-grid{grid-template-columns:1fr}.mtconn-config-card .cbi-value{grid-template-columns:1fr;gap:6px}}'
 		].join(''));
 	},
 
 	/* 顶部 4 栏关键信息卡片 */
 	renderFactCard: function(iconSvg, label, value) {
+		if (!controls.hasValue(value)) return null;
 		return E('div', { 'class': 'mtconn-card mtconn-fact-card' }, [
 			E('div', { 'class': 'mtconn-fact-icon' }, [ svgNode(iconSvg) ]),
 			E('div', {}, [
@@ -239,10 +243,7 @@ return view.extend({
 	},
 
 	sessionRow: function(label, value) {
-		return E('div', { 'class': 'mtconn-kv-row' }, [
-			E('span', { 'class': 'mtconn-kv-label' }, label),
-			E('strong', { 'class': 'mtconn-kv-val' }, value || '--')
-		]);
+		return controls.dataRow(label, value, 'mtconn-kv-row', 'mtconn-kv-label', 'mtconn-kv-val');
 	},
 
 	/* 动态 SVG 网络数据通路与拨号隧道图 */
@@ -311,17 +312,26 @@ return view.extend({
 			dns4 = ifstat['dns-server'].map(cleanDns).filter(Boolean).join(', ');
 
 		var dialStatus = plainObject(res.dial, 'dial_status');
+		var running = dialStatus.running;
+		var serviceOn = running === true || running === 1 ||
+			/^(?:true|1|running)$/i.test(String(running));
+		var serviceKnown = running !== null && running !== undefined && String(running) !== '';
 		var dialRows = Object.keys(dialStatus || {}).filter(function(k) {
-			var v = dialStatus[k];
-			return v == null || typeof v !== 'object';
-		}).slice(0, 14).map(function(k) {
+			return k !== 'running' && controls.hasValue(dialStatus[k]) && typeof dialStatus[k] !== 'object';
+		}).slice(0, 12).map(function(k) {
 			return E('div', { 'class': 'mtconn-dial-item' }, [
 				E('span', { 'class': 'mtconn-dial-key' }, k),
-				E('strong', { 'class': 'mtconn-dial-val' }, dialStatus[k] == null ? '--' : String(dialStatus[k]))
+				E('strong', { 'class': 'mtconn-dial-val' }, String(dialStatus[k]))
 			]);
 		});
+		function runtimeItem(label, value, kind) {
+			return E('div', { 'class': 'mtconn-runtime-item' }, [
+				E('div', { 'class': 'mtconn-runtime-label' }, label),
+				E('div', { 'class': 'mtconn-runtime-value' + (kind ? ' ' + kind : '') }, value)
+			]);
+		}
 
-		return E('div', { 'class': 'mtconn-session-grid' }, [
+		return E('div', { 'class': 'mtconn-session-stack' }, [
 			/* 地址与网络会话 */
 			E('section', { 'class': 'mtconn-card' }, [
 				E('div', { 'class': 'mtconn-sec-head' }, [
@@ -345,34 +355,75 @@ return view.extend({
 					self.sessionRow(_('已连接时长'), ifstat.uptime != null ? controls.formatDuration(ifstat.uptime) : '--')
 				])
 			]),
-			/* 拨号状态原始上报 */
-			E('section', { 'class': 'mtconn-card' }, [
+			/* 紧凑的连接状态带：服务运行不等于移动数据已经连接。 */
+			E('section', { 'class': 'mtconn-card mtconn-dial-summary' }, [
 				E('div', { 'class': 'mtconn-sec-head' }, [
 					E('div', {}, [
 						E('div', { 'class': 'mtconn-sec-title' }, [
 							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>'),
-							_('拨号状态')
+							_('连接与拨号状态')
 						]),
-						E('div', { 'class': 'mtconn-sec-sub' }, _('QModem dial_status 实时状态上报'))
+						E('div', { 'class': 'mtconn-sec-sub' }, _('拨号服务状态与实际联网状态分别展示'))
 					]),
-					E('span', { 'class': 'mtconn-badge online' }, 'ubus')
+					E('span', { 'class': 'mtconn-badge' + (connected ? ' online' : ' offline') },
+						connected ? _('网络已连接') : _('网络未连接'))
 				]),
-				dialRows.length ? E('div', { 'class': 'mtconn-dial-list' }, dialRows) :
-					E('div', { 'style': 'color:var(--qm-text-muted);font-size:12px;padding:20px 0;text-align:center' }, _('暂无拨号状态数据'))
+				E('div', { 'class': 'mtconn-runtime-grid' }, [
+					runtimeItem(_('拨号服务'), serviceKnown ?
+						(serviceOn ? _('正在运行') : _('已停止')) : _('等待 QModem 上报'),
+						serviceKnown ? (serviceOn ? 'online' : 'offline') : ''),
+					runtimeItem(_('移动网络'), connected ? _('已连接') : _('未连接'),
+						connected ? 'online' : 'offline'),
+					runtimeItem(_('网络接口'), res.iface || '--')
+				]),
+				dialRows.length ? E('details', { 'class': 'mtconn-dial-extra' }, [
+					E('summary', {}, _('查看 %d 项拨号诊断信息').format(dialRows.length)),
+					E('div', { 'class': 'mtconn-dial-list' }, dialRows)
+				]) : null
 			])
 		]);
 	},
 
-	runAction: function(fn, success) {
-		ui.showModal(_('请稍候…'), [ E('p', { 'class': 'spinning' }, _('正在下发连接操作…')) ]);
-		return Promise.resolve(fn()).then(function() {
+	runAction: function(fn, label) {
+		var self = this;
+		if (this.connectionBusy)
+			return Promise.resolve(null);
+		this.connectionBusy = true;
+		ui.showModal(_('正在执行%s…').format(label), [
+			E('p', { 'class': 'spinning' }, _('操作已经交给 QModem，请等待模组返回结果。'))
+		]);
+		return Promise.resolve().then(fn).then(function() {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {}, success));
-			window.setTimeout(function() { window.location.reload(); }, 1200);
-		}).catch(function(err) {
+			controls.notify(null, E('p', {},
+				_('%s命令已被 QModem 接受，实际连接状态将在刷新后更新。').format(label)), 'info');
+			/* 不直接把“命令成功”当作“网络已经连通”。 */
+			window.setTimeout(function() { window.location.reload(); }, 1300);
+		}, function(err) {
 			ui.hideModal();
-			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			controls.notify(null, E('p', {}, _('%s失败：%s').format(label,
+				(err && err.message) || String(err))), 'danger');
+		}).then(function() { self.connectionBusy = false; }, function(err) {
+			self.connectionBusy = false;
+			controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 		});
+	},
+
+	confirmConnectionAction: function(title, message, fn) {
+		var self = this;
+		if (this.connectionBusy) return;
+		ui.showModal(title, [
+			E('p', {}, message),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('取消')),
+				' ',
+				E('button', { 'type': 'button', 'class': 'btn cbi-button-negative',
+					'click': function() {
+						ui.hideModal();
+						return self.runAction(fn, title);
+					}
+				}, _('确定执行'))
+			])
+		]);
 	},
 
 	loadLog: function(details, output, section) {
@@ -430,10 +481,10 @@ return view.extend({
 		}).connected;
 		var mode = plainObject(res.mode, 'mode');
 		var modeName = Object.keys(mode || {}).filter(function(k) {
-			return String(mode[k]) === '1';
+			return controls.isEnabled(mode[k]);
 		}).join(' / ').toUpperCase();
 		var configuredApn = uci.get('qmodem', section, 'apn') || _('自动');
-		var configuredPdp = { IPV4V6: 'IPv4 / IPv6', IPV4: 'IPv4', IPV6: 'IPv6' }[String(uci.get('qmodem', section, 'pdp_type') || '').toUpperCase()] || 'IPv4 / IPv6';
+		var configuredPdp = { IPV4V6: 'IPv4 / IPv6', IPV4: 'IPv4', IP: 'IPv4', IPV6: 'IPv6', ETHERNET: 'Ethernet' }[String(uci.get('qmodem', section, 'pdp_type') || '').toUpperCase()] || 'IPv4 / IPv6';
 
 		res.connected = connected;
 
@@ -463,7 +514,7 @@ return view.extend({
 		]);
 
 		/* 入站路由与数据通路面板 */
-		var inboundPanel = E('div', { 'style': 'padding-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:14px' }, [
+		var inboundPanel = E('div', { 'class': 'mtconn-inbound-grid' }, [
 			controls.card(_('数据通路'), _('由 QModem 上报的模组数据通路信息。'), [
 				controls.state(_('网络接口'), res.iface),
 				controls.state(_('拨号模式'), modeName || '--'),
@@ -492,7 +543,7 @@ return view.extend({
 				/* 顶部 Hero 玻璃卡片 */
 				E('section', { 'class': 'mtconn-card mtconn-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mtconn-title' }, _('移动数据')),
+						controls.pageTitle('connection', _('移动数据'), 'mtconn-title'),
 						E('div', { 'class': 'mtconn-sub' }, _('管理移动网络连接会话、配置 APN 及拨号策略。'))
 					]),
 					E('div', { 'class': 'mtconn-state' + (connected ? ' online' : '') }, [
@@ -538,32 +589,34 @@ return view.extend({
 				/* 地址面板与拨号状态 */
 				self.addressPanel(res),
 
-				/* 快捷操作动作按钮条 (带 SVG 矢量图标) */
+				/* 手动拨号控制：显式 button 类型，避免 LuCI CBI 表单误提交。 */
 				E('div', { 'class': 'mtconn-actions-bar' }, [
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-primary',
-						'click': function() { return self.runAction(function() { return controls.modemDial(section); }, _('已开始拨号。')); }
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-primary',
+						'click': function() {
+							return self.runAction(function() { return controls.modemDial(section); }, _('开始拨号'));
+						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>'),
 						_('开始拨号')
 					]),
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-danger',
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-danger',
 						'click': function() {
-							return controls.confirmModal(_('挂断移动数据'), _('确认现在断开移动数据连接？'), function() {
-								return controls.modemHang(section);
-							});
+							return self.confirmConnectionAction(_('挂断连接'),
+								_('确定断开当前移动数据连接？'),
+								function() { return controls.modemHang(section); });
 						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'),
 						_('挂断连接')
 					]),
 					E('button', {
-						'class': 'mtconn-btn mtconn-btn-secondary',
+						'type': 'button', 'class': 'mtconn-btn mtconn-btn-secondary',
 						'click': function() {
-							return controls.confirmModal(_('重新拨号'), _('重拨期间移动数据将短暂中断。是否继续？'), function() {
-								return controls.modemRedial(section);
-							});
+							return self.confirmConnectionAction(_('重新拨号'),
+								_('将短暂断开并重新建立移动网络连接，确定继续？'),
+								function() { return controls.modemRedial(section); });
 						}
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'),
@@ -587,7 +640,7 @@ return view.extend({
 						E('button', {
 							'type': 'button',
 							'class': 'mtconn-btn mtconn-btn-primary',
-							'click': ui.createHandlerFn(self, function() { return self.saveApn(); })
+							'click': function(ev) { return self.saveApn(ev && ev.currentTarget); }
 						}, [
 							svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'),
 							_('保存 APN 设置')
@@ -637,28 +690,37 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
-		o.value('IPV4V6', 'IPv4 / IPv6');
-		o.value('IPV4', 'IPv4');
-		o.value('IPV6', 'IPv6');
-		o.default = 'IPV4V6';
+		/* 兼容旧版 UI 写入的大写值；保存时规范为 QModem 官方小写枚举。 */
+		o.value('ipv4v6', 'IPv4 / IPv6');
+		o.value('ip', 'IPv4');
+		o.value('ipv6', 'IPv6');
+		o.value('ethernet', 'Ethernet');
+		o.default = 'ipv4v6';
 		o.rmempty = false;
+		o.cfgvalue = function(sectionId) {
+			var raw = String(uci.get('qmodem', sectionId, 'pdp_type') || 'ipv4v6');
+			return { IPV4: 'ip', IPV6: 'ipv6', IPV4V6: 'ipv4v6' }[raw.toUpperCase()] || raw.toLowerCase();
+		};
 
 		o = s.option(form.ListValue, 'auth', _('认证方式'));
 		o.value('none', _('无'));
 		o.value('pap', 'PAP');
 		o.value('chap', 'CHAP');
+		o.value('MsChapV2', 'MSCHAPv2');
 		o.default = 'none';
 		o.rmempty = false;
 
 		o = s.option(form.Value, 'username', _('用户名'));
 		o.depends('auth', 'pap');
 		o.depends('auth', 'chap');
+		o.depends('auth', 'MsChapV2');
 		o.rmempty = true;
 
 		o = s.option(form.Value, 'password', _('密码'));
 		o.password = true;
 		o.depends('auth', 'pap');
 		o.depends('auth', 'chap');
+		o.depends('auth', 'MsChapV2');
 		o.rmempty = true;
 
 		o = s.option(form.DynamicList, 'dns_list', _('自定义 DNS'));
@@ -670,22 +732,37 @@ return view.extend({
 			self._apnFormNode = formNode;
 			return formNode;
 		}).catch(function(err) {
+			self._apnMap = null;
 			self._apnFormNode = E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger)' },
 				_('拨号设置渲染失败：') + ((err && err.message) || String(err)));
 			return self._apnFormNode;
 		});
 	},
 
-	saveApn: function() {
+	saveApn: function(button) {
 		var self = this;
-		if (!self._apnMap)
+		if (this._apnSaving) return Promise.resolve();
+		if (!this._apnMap) {
+			controls.notify(null, E('p', {}, _('APN 配置表单尚未正常加载，无法保存。')), 'danger');
 			return Promise.resolve();
-		return self._apnMap.save(null, true).then(function() {
-			return uci.commit('qmodem');
+		}
+		this._apnSaving = true;
+		if (button) button.disabled = true;
+		return Promise.resolve().then(function() {
+			/* CBI Map 解析用户当前输入，提交到 UCI，然后持久化。 */
+			return self._apnMap.save(null, true);
 		}).then(function() {
-			ui.addNotification(null, E('p', {}, _('APN 设置已保存到 QModem 配置（qmodem），请重拨以生效。')));
+			return controls.commitConfig('qmodem');
+		}).then(function() {
+			controls.notify(null, E('p', {},
+				_('APN 配置已写入 /etc/config/qmodem。重新拨号后生效。')), 'info');
+			window.setTimeout(function() { window.location.reload(); }, 1100);
 		}).catch(function(err) {
-			ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			controls.notify(null, E('p', {},
+				_('APN 保存失败：%s').format((err && err.message) || String(err))), 'danger');
+		}).then(function() {
+			self._apnSaving = false;
+			if (button) button.disabled = false;
 		});
 	},
 

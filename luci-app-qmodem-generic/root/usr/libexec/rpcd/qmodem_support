@@ -31,6 +31,7 @@
 SYNC_BIN="$QMODEM_SBIN_DIR/qmodem-modem-support"
 SUPPORT_LIB="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
 TASK_BIN="$QMODEM_BIN_DIR/qmodem-task"
+CUSTOM_BIN="$QMODEM_SBIN_DIR/qmodem-support-custom"
 # 纯文件操作的上限：远小于 LuCI 的 20 秒 RPC 超时，卡住也能快速失败
 SUPPORT_TIMEOUT="${QMODEM_SUPPORT_TIMEOUT:-10}"
 SUPPORT_TTL="${QMODEM_SUPPORT_TTL:-120}"
@@ -102,14 +103,31 @@ refresh_support_cache() {
 	printf '%s' "$_out"
 }
 
+run_custom() {
+	[ -f "$CUSTOM_BIN" ] || { printf '{"success":false,"error":"自定义模组工具缺失，请重新安装插件"}\n'; return; }
+	if command -v timeout >/dev/null 2>&1; then
+		_out=$(printf '%s\n' "$input" | timeout 12 sh "$CUSTOM_BIN" "$1" 2>/dev/null)
+	else
+		_out=$(printf '%s\n' "$input" | sh "$CUSTOM_BIN" "$1" 2>/dev/null)
+	fi
+	case "$_out" in \{*) printf '%s\n' "$_out" ;; *) printf '{"success":false,"error":"自定义模组操作失败或超时"}\n' ;; esac
+}
+
 case "$1" in
 	list)
-		echo '{"status":{},"sync":{},"sync_async":{"config_section":"string"}}'
+		echo '{"status":{},"sync":{},"sync_async":{"config_section":"string"},"ports":{},"custom_list":{},"custom_save":{"model":"string","bus":"string","manufacturer":"string","manufacturer_id":"string","platform":"string","modes":"string","pdp_index":"string","wcdma_band":"string","lte_band":"string","nsa_band":"string","sa_band":"string","edit":"string"},"custom_delete":{"model":"string","bus":"string"},"probe_port":{"port":"string"}}'
 		;;
 	call)
 		read -r input
 		[ -n "$input" ] || input='{}'
 		qm_init_dirs
+		case "$2" in
+			ports) run_custom ports; exit 0 ;;
+			custom_list) run_custom list; exit 0 ;;
+			custom_save) run_custom save; exit 0 ;;
+			custom_delete) run_custom delete; exit 0 ;;
+			probe_port) run_custom probe; exit 0 ;;
+		esac
 
 		if [ ! -f "$SYNC_BIN" ]; then
 			unavailable "同步脚本缺失：$SYNC_BIN（请重新安装 luci-app-qmodem-generic）"

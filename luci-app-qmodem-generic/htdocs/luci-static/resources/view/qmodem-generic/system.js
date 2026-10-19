@@ -2,9 +2,12 @@
 'require view';
 'require ui';
 'require qmodem-generic.controls as controls';
+'require qmodem-generic.theme as theme';
+
+var E = controls.element;
 
 /*
- * 模组与 SIM（Module & SIM）— 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 芯片拓扑重构
+ * 模组与 SIM — 响应式信息卡、连接示意与模组维护。
  * 数据与动作全部经 QModem 的 `qmodem` ubus 对象。
  */
 
@@ -62,7 +65,8 @@ return view.extend({
 			guard(controls.getImei(section), {}, 'IMEI'),
 			guard(controls.getSimSlot(section), {}, _('SIM 卡槽')),
 			guard(controls.getSimSwitchCapabilities(section), {}, _('SIM 卡槽切换')),
-			guard(controls.getAtCfg(section), {}, _('AT 串口'))
+			guard(controls.getAtCfg(section), {}, _('AT 串口')),
+			guard(controls.getRebootCaps(section), {}, _('重启能力'))
 		]).then(function(results) {
 			return {
 				section: section,
@@ -72,6 +76,7 @@ return view.extend({
 				slot: results[3] || {},
 				caps: results[4] || {},
 				atCfg: results[5] || {},
+				rebootCaps: results[6] || {},
 				errors: errors
 			};
 		});
@@ -79,7 +84,7 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-system{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
 			'.mt-sys-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -99,14 +104,10 @@ return view.extend({
 			'.mt-system-temp-val{font-size:24px;font-weight:800;color:var(--qm-text);letter-spacing:-.02em;font-variant-numeric:tabular-nums}',
 			'.mt-system-temp-desc{font-size:11px;color:var(--qm-text-muted)}',
 
-			/* 芯片与 SIM 动态 SVG 架构拓扑 */
+			/* 拓扑与摘要信息分开排版，缺少温度不会留下空列。 */
 			'.mt-sys-topo-card{padding:20px 24px;margin-bottom:16px}',
-			'.mt-sys-topo-svg{width:100%;height:100px;display:block}',
-			'@keyframes qmPulseChip{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}',
-			'.qm-chip-glow{animation:qmPulseChip 2.2s infinite ease-in-out}',
+			'.qm-system-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;margin-bottom:16px}',
 
-			/* 2 列信息网格 */
-			'.mt-system-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}',
 			'.mt-card-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px;margin-bottom:14px}',
 			'.mt-system-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12px}',
 			'.mt-system-row:last-child{border-bottom:0}',
@@ -143,61 +144,47 @@ return view.extend({
 	},
 
 	row: function(label, value) {
-		return E('div', { 'class': 'mt-system-row' }, [
-			E('span', {}, label),
-			E('strong', {}, value || '--')
-		]);
+		return controls.dataRow(label, value, 'mt-system-row');
 	},
 
-	/* 动态 SVG 模组 SoC 与 SIM 物理拓扑链路 */
-	renderSvgChipTopo: function(slot, slotSupported, simOk) {
-		var activeSlot = slot !== '' ? slot : '0';
-		var simColor = simOk ? '#10b981' : '#f59e0b';
-		var simText = simOk ? _('SIM 在位 · 就绪') : _('SIM 异常 / 未就绪');
+	renderChipTopo: function(slot, switchCapability, simState) {
+		var ready = /^(?:SIM )?(?:READY|正常|OK)$/i.test(String(simState || '').trim());
+		var switchText = controls.hasValue(switchCapability)
+			? (controls.isEnabled(switchCapability) ? _('支持卡槽切换') : _('不支持卡槽切换'))
+			: _('切换能力未上报');
+		return theme.topology([
+			{ title: _('模组基带'), sub: _('蜂窝通信核心') },
+			{ title: _('SIM 卡槽管理'), sub: switchText },
+			{ title: controls.hasValue(slot) ? _('SIM 卡槽 %s').format(slot) : _('SIM 卡槽'),
+			  sub: controls.hasValue(simState) ? simStatusText(simState) : _('等待 SIM 状态'), ok: ready }
+		], [ ready, ready ]);
+	},
 
-		var svgStr = [
-			'<svg class="mt-sys-topo-svg" viewBox="0 0 540 86">',
-			'  <!-- 节点 1: 蜂窝通信基带芯片 (Modem SoC) -->',
-			'  <g transform="translate(20, 14)">',
-			'    <rect x="0" y="0" width="130" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <rect x="14" y="16" width="24" height="24" rx="5" fill="#0072f5" class="qm-chip-glow"/>',
-			'    <text x="46" y="27" font-size="12" font-weight="750" fill="#0f172a">基带 SoC</text>',
-			'    <text x="46" y="42" font-size="10" fill="#64748b">射频核心 RF</text>',
-			'  </g>',
-			'  <!-- 通信总线链路 -->',
-			'  <line x1="150" y1="42" x2="225" y2="42" stroke="#0072f5" stroke-width="2.4" stroke-dasharray="6,4" class="qm-stream-line"/>',
-			'  <!-- 节点 2: 卡槽复用切换开关 (SIM Multiplexer) -->',
-			'  <g transform="translate(225, 14)">',
-			'    <rect x="0" y="0" width="115" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="22" cy="28" r="5.5" fill="#0072f5"/>',
-			'    <text x="36" y="27" font-size="12" font-weight="750" fill="#0f172a">SIM 切换开关</text>',
-			'    <text x="36" y="42" font-size="10" fill="#64748b">' + (slotSupported ? _('支持双槽切换') : _('单卡槽架构')) + '</text>',
-			'  </g>',
-			'  <!-- 通信链路到活动卡槽 -->',
-			'  <line x1="340" y1="42" x2="400" y2="42" stroke="' + simColor + '" stroke-width="2.4" stroke-linecap="round"/>',
-			'  <!-- 节点 3: 活动 SIM 卡槽 -->',
-			'  <g transform="translate(400, 14)">',
-			'    <rect x="0" y="0" width="125" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="20" cy="28" r="5.5" fill="' + simColor + '"/>',
-			'    <text x="34" y="27" font-size="12" font-weight="750" fill="#0f172a">' + _('SIM 卡槽 %s').format(activeSlot) + '</text>',
-			'    <text x="34" y="42" font-size="10" fill="' + simColor + '">' + simText + '</text>',
-			'  </g>',
-			'</svg>'
-		].join('');
-		return svgNode(svgStr);
+	rebootButton: function(method, label) {
+		var self = this;
+		return E('button', { 'type': 'button', 'class': 'mt-sys-btn mt-sys-btn-secondary', 'click': function() {
+			controls.confirmModal(label, method === 'hard'
+				? _('模组将断电复位，移动连接和 USB / PCIe 链路会短暂中断。')
+				: _('将重启模组并短暂中断移动连接。'), function() {
+				return controls.doReboot(self.section, method).catch(function(err) {
+					controls.notify(null, E('p', {}, _('模组重启失败：%s').format((err && err.message) || String(err))), 'danger');
+					throw err;
+				});
+			}, true);
+		} }, label);
 	},
 
 	atRun: function(command, okMessage) {
 		return controls.sendAt(this.section, this.atPort, command).then(function(res) {
 			var text = (res && (res.result || res.response || res.at_response)) || '';
 			if (/ERROR/i.test(String(text))) {
-				ui.addNotification(null, E('p', {}, _('模组拒绝了 AT 透传指令 %s：%s').format(command, String(text).trim())), 'warning');
+				controls.notify(null, E('p', {}, _('模组拒绝了 AT 透传指令 %s：%s').format(command, String(text).trim())), 'warning');
 				return Promise.reject(new Error(String(text).trim()));
 			}
-			ui.addNotification(null, E('p', {}, (okMessage || _('模组已接受该指令。')) + ' [' + command + ']'));
+			controls.notify(null, E('p', {}, (okMessage || _('模组已接受该指令。')) + ' [' + command + ']'));
 			return res;
 		}, function(err) {
-			ui.addNotification(null, E('p', {}, _('模组不支持通过 QModem 执行 AT 透传指令 %s：%s').format(command, (err && err.message) || String(err))), 'warning');
+			controls.notify(null, E('p', {}, _('模组不支持通过 QModem 执行 AT 透传指令 %s：%s').format(command, (err && err.message) || String(err))), 'warning');
 			return Promise.reject(err);
 		});
 	},
@@ -229,7 +216,7 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var firstValue = first.value.trim(), secondValue = second.value.trim();
 				if ((operation.value === 'unblock' ? !/^\d{8}$/.test(firstValue) : !/^\d{4,8}$/.test(firstValue)) || ((operation.value === 'change' || operation.value === 'unblock') && !/^\d{4,8}$/.test(secondValue)))
-					return ui.addNotification(null, E('p', {}, _('PIN 需为 4–8 位数字；PUK 必须恰好 8 位数字。')), 'warning');
+					return controls.notify(null, E('p', {}, _('PIN 需为 4–8 位数字；PUK 必须恰好 8 位数字。')), 'warning');
 				var command;
 				switch (operation.value) {
 				case 'change':  command = 'AT+CPWD="SC","' + firstValue + '","' + secondValue + '"'; break;
@@ -266,9 +253,9 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var next = inputs.map(function(input) { return String(input.value || ''); });
 				if (next.some(function(value) { return !/^\d+$/.test(value) || Number(value) > 150; }))
-					return ui.addNotification(null, E('p', {}, _('每个阈值必须是 0–150°C 之间的温度。')), 'warning');
+					return controls.notify(null, E('p', {}, _('每个阈值必须是 0–150°C 之间的温度。')), 'warning');
 				if (!(Number(next[1]) > Number(next[0]) && Number(next[3]) > Number(next[1]) && Number(next[5]) > Number(next[3]) && Number(next[7]) > Number(next[5]) && Number(next[2]) < Number(next[1]) && Number(next[4]) < Number(next[3]) && Number(next[6]) < Number(next[5]) && Number(next[8]) < Number(next[7])))
-					return ui.addNotification(null, E('p', {}, _('触发温度须逐级升高，且每个恢复温度必须低于对应触发值。')), 'warning');
+					return controls.notify(null, E('p', {}, _('触发温度须逐级升高，且每个恢复温度必须低于对应触发值。')), 'warning');
 				ui.hideModal();
 				self.atRun('AT^THERMLDAUTOPARA=' + next.join(','), _('热保护设置已保存。')).then(function() {
 					return self.atRun('AT^THERMLDLOGSW=' + serialLog.value + ',' + fileLog.value, _('温度日志设置已更新。'));
@@ -289,36 +276,39 @@ return view.extend({
 			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
 				var value = input.value.trim();
 				if (!/^\d{15}$/.test(value) || value === currentImei)
-					return ui.addNotification(null, E('p', {}, _('请输入一个不同的 15 位 IMEI。')), 'warning');
+					return controls.notify(null, E('p', {}, _('请输入一个不同的 15 位 IMEI。')), 'warning');
 				ui.hideModal();
-				controls.confirmModal(_('写入设备标识'), _('该操作可能导致无法入网，仅在恢复模组标签所印标识时继续。'), function() {
-					return controls.setImei(self.section, value).catch(function(err) {
-						ui.addNotification(null, E('p', {}, _('IMEI 写入失败：%s').format((err && err.message) || String(err))), 'danger');
-						throw err;
+				var pending = false;
+				var apply = E('button', { 'type':'button', 'class':'btn cbi-button-negative', 'click':function() {
+					if (pending) return;
+					pending = true; apply.disabled = true; apply.textContent = _('写入并核对中…');
+					controls.setImei(self.section, value).then(function(fresh) {
+						self.verifiedImei = { section: self.section, value: fresh.imei };
+						var displayed = document.querySelector('.mt-sys-imei-value');
+						if (displayed) displayed.textContent = fresh.imei;
+						ui.hideModal();
+						controls.notify(null, E('p', {}, _('IMEI 已写入，并从模组回读确认。')), 'info');
+					}, function(err) {
+						controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+						pending = false; apply.disabled = false; apply.textContent = _('确认写入');
 					});
-				}, true);
+				} }, _('确认写入'));
+				ui.showModal(_('写入设备标识'), [
+					E('p', {}, _('该操作可能导致无法入网，仅在恢复模组标签所印标识时继续。')),
+					E('div', { 'class':'alert-message warning' }, _('部分模组需要重启或切换飞行模式后才会生效。')),
+					E('div', { 'class':'right' }, [ E('button', { 'type':'button', 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', apply ])
+				]);
 			} }, _('确认修改')) ])
 		]);
 	},
 
 	showFactoryReset: function() {
-		var self = this;
-		var confirm = E('input', { 'class':'cbi-input-text', 'placeholder':'RESET', 'autocomplete':'off' });
 		return ui.showModal(_('恢复模组出厂设置'), [
-			E('div', { 'class':'alert-message warning' }, _('该操作将清除模组的 APN、射频、SIM、接口和热保护设置并重启模组，不会影响 OpenWrt 设置。')),
-			controls.row(_('输入 RESET 以确认'), confirm),
-			E('div', { 'class':'right' }, [ E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ', E('button', { 'class':'btn cbi-button-negative', 'click':function() {
-				if (confirm.value !== 'RESET') return ui.addNotification(null, E('p', {}, _('确认文本不匹配。')), 'warning');
-				ui.hideModal();
-				controls.confirmModal(_('恢复出厂设置'), _('模组将重置自身配置并重启。'), function() {
-					return controls.sendAt(self.section, self.atPort, 'AT+CFUN=1').catch(function() {
-						return controls.doReboot(self.section, 'hard');
-					}).catch(function(err) {
-						ui.addNotification(null, E('p', {}, _('恢复出厂设置失败：%s').format((err && err.message) || String(err))), 'danger');
-						throw err;
-					});
-				}, true);
-			} }, _('恢复出厂设置')) ])
+			E('p', {}, _('QModem 未提供通用的出厂重置接口。请按当前模组的官方手册，在 AT 控制台执行对应指令。')),
+			E('div', { 'class':'right' }, [
+				E('button', { 'class':'btn', 'click':ui.hideModal }, _('取消')), ' ',
+				E('a', { 'class':'btn cbi-button-action', 'href':L.url('admin/modem/qmodem-generic/terminal') }, _('AT 控制台'))
+			])
 		]);
 	},
 
@@ -351,6 +341,7 @@ return view.extend({
 
 		var baseMap = controls.entryMap(res.base);
 		var simMap = controls.entryMap(res.sim);
+		var privateAt = controls.supportsTdTechAt(res.section, res.base);
 
 		var model = baseMap['name'] || _('模组');
 		var manufacturer = baseMap['manufacturer'] || '--';
@@ -359,15 +350,22 @@ return view.extend({
 
 		var simStatusRaw = simMap['SIM Status'] || '';
 		var simStatus = simStatusText(simStatusRaw);
-		var simOk = /READY|正常|OK/i.test(simStatusRaw);
-		var simNumber = simMap['SIM Number'] || _('SIM 卡中未存储');
+		var simNumber = simMap['SIM Number'] || '';
+		var iccid = controls.findEntry(res.sim, 'ICCID') || controls.findEntry(res.base, 'ICCID') || '';
 		var imsi = simMap['IMSI'] || '--';
 		var imei = (res.imei && res.imei.imei) || controls.findEntry(res.sim, 'IMEI') || '--';
+		var verified = this.verifiedImei;
+		if (verified && verified.section === res.section) {
+			if (imei === verified.value) this.verifiedImei = null;
+			else imei = verified.value;
+		}
 		var currentSlot = (res.slot && res.slot.sim_slot != null) ? String(res.slot.sim_slot) : (simMap['SIM Slot'] != null ? String(simMap['SIM Slot']) : '');
 
+		var rebootCaps = (res.rebootCaps && res.rebootCaps.reboot_caps) || res.rebootCaps || {};
+		var hardReboot = controls.isEnabled(rebootCaps.hard_reboot_caps != null ? rebootCaps.hard_reboot_caps : rebootCaps.hard);
 		var caps = res.caps || {};
 		var slotList = Array.isArray(caps.simSlots) && caps.simSlots.length ? caps.simSlots : [ '0', '1' ];
-		var slotSupported = String(caps.supportSwitch) === '1';
+		var slotSupported = controls.isEnabled(caps.supportSwitch);
 		var simSlot = controls.select(slotList.map(function(slot) {
 			return [ String(slot), _('SIM 卡槽 %s').format(slot) ];
 		}), currentSlot || String(slotList[0]));
@@ -383,7 +381,8 @@ return view.extend({
 			imei: res.imei,
 			sim_slot: res.slot,
 			sim_switch_capabilities: res.caps,
-			at_cfg: atCfg
+			at_cfg: atCfg,
+			reboot_caps: res.rebootCaps
 		}, null, 2);
 
 		var modems = controls.getModemSectionsSync();
@@ -406,29 +405,29 @@ return view.extend({
 			E('section', { 'class': 'mt-system-card mt-system-hero' }, [
 				E('div', {}, [
 					E('div', { 'class': 'mt-system-kicker' }, _('模组系统与 SIM 卡')),
-					E('h2', { 'class': 'mt-system-title' }, model),
+					controls.pageTitle('system', model, 'mt-system-title'),
 					E('div', { 'class': 'mt-system-sub' }, revision || _('硬件标识与订阅卡管理'))
 				]),
-				E('div', { 'class': 'mt-system-temp-box' }, [
+				temperature ? E('div', { 'class': 'mt-system-temp-box' }, [
 					svgNode('<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>'),
 					E('div', {}, [
 						E('div', { 'class': 'mt-system-temp-val' }, temperature || '--'),
 						E('div', { 'class': 'mt-system-temp-desc' }, _('模组温度'))
 					])
-				])
+				]) : null
 			]),
 
 			/* 动态 SVG 芯片与 SIM 卡槽物理链路拓扑 */
 			E('section', { 'class': 'mt-system-card mt-sys-topo-card' }, [
 				E('div', { 'class': 'mt-card-title' }, [
 					svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>'),
-					_('模组基带与卡槽架构拓扑')
+					_('模组与 SIM 卡连接')
 				]),
-				this.renderSvgChipTopo(currentSlot, slotSupported, simOk)
+				this.renderChipTopo(currentSlot, caps.supportSwitch, simStatusRaw)
 			]),
 
-			/* 2x2 信息卡片网格 */
-			E('div', { 'class': 'mt-system-grid' }, [
+			/* 三张摘要卡片独占网格，始终铺满当前行。 */
+			E('div', { 'class': 'qm-system-info-grid' }, [
 				E('section', { 'class': 'mt-system-card' }, [
 					E('div', { 'class': 'mt-card-title' }, [
 						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'),
@@ -437,7 +436,7 @@ return view.extend({
 					this.row(_('型号'), model),
 					this.row(_('制造商'), manufacturer),
 					this.row(_('固件版本'), revision),
-					this.row('IMEI', imei),
+					this.row('IMEI', imei !== '--' ? E('strong', { 'class':'mt-sys-imei-value' }, imei) : ''),
 					this.row(_('AT 串口'), atPortLabel)
 				]),
 				E('section', { 'class': 'mt-system-card' }, [
@@ -446,10 +445,9 @@ return view.extend({
 						_('SIM 与订阅')
 					]),
 					this.row(_('手机号码'), simNumber),
-					this.row('ICCID', '--'),
+					this.row('ICCID', iccid),
 					this.row('IMSI', imsi),
-					this.row(_('SIM 卡槽'), currentSlot !== '' ? currentSlot : '--'),
-					E('div', { 'class':'mt-control-note', 'style': 'margin-top:8px' }, _('QModem 未向此模组暴露 ICCID。'))
+					this.row(_('SIM 卡槽'), currentSlot)
 				]),
 				E('section', { 'class': 'mt-system-card' }, [
 					E('div', { 'class': 'mt-card-title' }, [
@@ -457,81 +455,73 @@ return view.extend({
 						_('运行状态')
 					]),
 					this.row(_('SIM 状态'), simStatus),
-					this.row(_('连接状态'), baseMap['connect_status'] || '--'),
-					this.row(_('SIM 卡槽切换'), slotSupported ? _('支持') : _('不支持')),
+					this.row(_('连接状态'), baseMap['connect_status']),
+					this.row(_('SIM 卡槽切换'), controls.hasValue(caps.supportSwitch) ? (slotSupported ? _('支持') : _('不支持')) : ''),
 					this.row(_('模组温度'), temperature || '--')
 				]),
-				E('section', { 'class': 'mt-system-card' }, [
-					E('div', { 'class': 'mt-card-title' }, [
-						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'),
-						_('热保护状态')
-					]),
-					this.row(_('当前温度'), temperature || '--'),
-					this.row(_('保护等级'), '--'),
-					this.row(_('已配置阈值'), '--'),
-					E('div', { 'class':'mt-control-note', 'style': 'margin-top:8px' }, _('阈值写入使用 AT 透传指令。'))
-				]),
+			]),
 
-				/* 宽卡片：SIM 与射频高级控制 */
-				E('section', { 'class': 'mt-system-card wide' }, [
-					E('div', { 'class': 'mt-card-title' }, [
-						svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'),
-						_('SIM 与射频控制')
+			/* 通栏控制区：SIM 与射频 */
+			E('section', { 'class': 'mt-system-card', 'style': 'margin-bottom:16px' }, [
+				E('div', { 'class': 'mt-card-title' }, [
+					svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'),
+					_('SIM 与射频控制')
+				]),
+				E('div', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin-bottom:12px' }, _('日常 SIM 与射频控制，经由 QModem ubus 接口执行。')),
+				controls.state(_('当前 SIM 状态'), simStatus),
+				E('div', { 'class': 'mt-sys-actions-bar' }, [
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click': function() {
+						controls.confirmModal(_('变更射频功能'), _('飞行模式将立即断开移动数据与语音服务。'), function() {
+							return controls.sendAt(self.section, self.atPort, 'AT+CFUN=0').catch(function(err) {
+								controls.notify(null, E('p', {}, _('Airplane mode failed: %s').format((err && err.message) || String(err))), 'danger');
+								throw err;
+							});
+						}, false);
+					} }, [
+						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>'),
+						_('进入飞行模式')
 					]),
-					E('div', { 'style': 'font-size:12px;color:var(--qm-text-muted);margin-bottom:12px' }, _('日常 SIM 与射频控制，经由 QModem ubus 接口执行。')),
-					controls.state(_('当前 SIM 状态'), simStatus),
-					E('div', { 'class': 'mt-sys-actions-bar' }, [
-						E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click': function() {
-							controls.confirmModal(_('变更射频功能'), _('飞行模式将立即断开移动数据与语音服务。'), function() {
-								return controls.sendAt(self.section, self.atPort, 'AT+CFUN=0').catch(function(err) {
-									ui.addNotification(null, E('p', {}, _('Airplane mode failed: %s').format((err && err.message) || String(err))), 'danger');
-									throw err;
-								});
-							}, false);
-						} }, [
-							svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>'),
-							_('进入飞行模式')
-						]),
-						E('button', { 'class':'mt-sys-btn mt-sys-btn-primary', 'click': function() {
-							controls.confirmModal(_('变更射频功能'), _('恢复移动网络注册与数据服务？'), function() {
-								return controls.sendAt(self.section, self.atPort, 'AT+CFUN=1,1').catch(function() {
-									return controls.doReboot(self.section, 'soft');
-								}).catch(function(err) {
-									ui.addNotification(null, E('p', {}, _('恢复射频失败：%s').format((err && err.message) || String(err))), 'danger');
-									throw err;
-								});
-							}, true);
-						} }, [
-							svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49"/></svg>'),
-							_('恢复移动射频')
-						])
-					]),
-					controls.row(_('模组状态 LED'), ledSelect),
-					controls.action(_('应用 LED 设置'), function() {
-						controls.confirmModal(_('模组状态 LED'), _('QModem 没有通用 LED 方法，该设置将以模组专用 AT 指令下发，重启后生效。'), function() {
-							return self.atRun('AT^LEDSWITCH=' + ledSelect.value, _('LED 设置已接受。'));
-						}, true);
-					}),
-					controls.action(_('管理 SIM PIN'), function() { self.showPinManager(simStatusRaw); }),
-					controls.row(_('SIM 卡启用'), simEnabled),
-					controls.action(_('应用 SIM 启用'), function() {
-						controls.confirmModal(_('SIM 卡启用'), simEnabled.value === '1' ? _('启用物理 SIM 卡以进行网络注册？') : _('停用 SIM 卡将立即移除移动服务。'), function() {
-							return self.atRun('AT^HVSST=' + simEnabled.value, _('SIM 启用指令已接受。'));
-						}, simEnabled.value === '0');
-					}),
-					controls.row(_('当前 SIM 卡槽'), simSlot),
-					controls.action(_('切换 SIM 卡槽'), function() {
-						if (!slotSupported)
-							return ui.addNotification(null, E('p', {}, _('QModem 未报告此模组支持 SIM 卡槽切换。')), 'warning');
-						controls.confirmModal(_('切换 SIM 卡槽'), _('切换物理 SIM 通路时模组将短暂脱离网络。'), function() {
-							return controls.setSimSlot(self.section, simSlot.value).catch(function(err) {
-								ui.addNotification(null, E('p', {}, _('SIM 卡槽切换失败：%s').format((err && err.message) || String(err))), 'danger');
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-primary', 'click': function() {
+						controls.confirmModal(_('变更射频功能'), _('恢复移动网络注册与数据服务？'), function() {
+							return controls.sendAt(self.section, self.atPort, 'AT+CFUN=1,1').catch(function() {
+								return controls.doReboot(self.section, 'soft');
+							}).catch(function(err) {
+								controls.notify(null, E('p', {}, _('恢复射频失败：%s').format((err && err.message) || String(err))), 'danger');
 								throw err;
 							});
 						}, true);
-					}),
-					caps.ExtraInfo ? E('div', { 'class':'mt-control-note', 'style': 'margin-top:10px' }, caps.ExtraInfo) : null
-				])
+					} }, [
+						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49"/></svg>'),
+						_('恢复移动射频')
+					])
+				]),
+				privateAt ? E('div', {}, [
+				controls.row(_('模组状态 LED'), ledSelect),
+				controls.action(_('应用 LED 设置'), function() {
+					controls.confirmModal(_('模组状态 LED'), _('QModem 没有通用 LED 方法，该设置将以模组专用 AT 指令下发，重启后生效。'), function() {
+						return self.atRun('AT^LEDSWITCH=' + ledSelect.value, _('LED 设置已接受。'));
+					}, true);
+				}),
+				controls.row(_('SIM 卡启用'), simEnabled),
+				controls.action(_('应用 SIM 启用'), function() {
+					controls.confirmModal(_('SIM 卡启用'), simEnabled.value === '1' ? _('启用物理 SIM 卡以进行网络注册？') : _('停用 SIM 卡将立即移除移动服务。'), function() {
+						return self.atRun('AT^HVSST=' + simEnabled.value, _('SIM 启用指令已接受。'));
+					}, simEnabled.value === '0');
+				})
+				]) : null,
+				controls.action(_('管理 SIM PIN'), function() { self.showPinManager(simStatusRaw); }),
+				controls.row(_('当前 SIM 卡槽'), simSlot),
+				controls.action(_('切换 SIM 卡槽'), function() {
+					if (!slotSupported)
+						return controls.notify(null, E('p', {}, _('QModem 未报告此模组支持 SIM 卡槽切换。')), 'warning');
+					controls.confirmModal(_('切换 SIM 卡槽'), _('切换物理 SIM 通路时模组将短暂脱离网络。'), function() {
+						return controls.setSimSlot(self.section, simSlot.value).catch(function(err) {
+							controls.notify(null, E('p', {}, _('SIM 卡槽切换失败：%s').format((err && err.message) || String(err))), 'danger');
+							throw err;
+						});
+					}, true);
+				}),
+				caps.ExtraInfo ? E('div', { 'class':'mt-control-note', 'style': 'margin-top:10px' }, caps.ExtraInfo) : null
 			]),
 
 			/* 维护与安全工具箱 */
@@ -545,17 +535,11 @@ return view.extend({
 				]),
 				E('div', { 'class':'mt-system-maint-tools' }, [
 					E('a', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'href':L.url('admin/modem/qmodem-generic/settings') }, _('诊断')),
-					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showThermalManager(temperature); } }, _('热保护阈值')),
-					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('标识实验室')),
+					privateAt ? E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showThermalManager(temperature); } }, _('热保护阈值')) : null,
+					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click':function() { self.showIdentityLab(imei !== '--' ? imei : ''); } }, _('设置IMEI')),
 					E('button', { 'class':'mt-sys-btn mt-sys-btn-danger', 'click':function() { self.showFactoryReset(); } }, _('恢复出厂设置')),
-					E('button', { 'class':'mt-sys-btn mt-sys-btn-secondary', 'click': function() {
-						controls.confirmModal(_('重启模组'), _('将重启模组并短暂中断移动连接。'), function() {
-							return controls.doReboot(self.section, 'soft').catch(function(err) {
-								ui.addNotification(null, E('p', {}, _('模组重启失败：%s').format((err && err.message) || String(err))), 'danger');
-								throw err;
-							});
-						}, true);
-					} }, _('重启模组'))
+					this.rebootButton('soft', _('重启模组')),
+					hardReboot ? this.rebootButton('hard', _('硬重启模组')) : null
 				])
 			]),
 

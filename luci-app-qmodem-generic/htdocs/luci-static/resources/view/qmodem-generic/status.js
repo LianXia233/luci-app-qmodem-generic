@@ -3,6 +3,8 @@
 'require uci';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
  * 通用模组概览页 — 现代白色毛玻璃 (Glassmorphism) + 动态 SVG 仪表盘重构
  * 数据来自 QModem ubus 状态缓存，经 controls.js 适配层处理。
@@ -196,9 +198,9 @@ return view.extend({
 		data.at_port = find(base, 'at_port') || '';
 		data.temperature = String(controls.normalizeTemperature(find(base, 'temperature')) || '').replace(/[^0-9.\-]/g, '');
 
-		data.rsrp = find(cell, 'RSRP') || '';
-		data.rsrq = find(cell, 'RSRQ') || '';
-		data.sinr = find(cell, 'SINR') || '';
+		data.rsrp = controls.valueText(find(cell, 'RSRP'));
+		data.rsrq = controls.valueText(find(cell, 'RSRQ'));
+		data.sinr = controls.valueText(find(cell, 'SINR'));
 		data.sysmode_detail = this.cleanText(
 			find(cell, 'network_mode') ||
 			find(cell, 'Network Type') ||
@@ -206,8 +208,8 @@ return view.extend({
 			find(conn, 'Network Type') ||
 			find(cell, 'Radio Access Technology') ||
 			find(net, 'Radio Access Technology') || '');
-		data.mcc = find(cell, 'MCC') || '';
-		data.mnc = find(cell, 'MNC') || '';
+		data.mcc = controls.valueText(find(cell, 'MCC'));
+		data.mnc = controls.valueText(find(cell, 'MNC'));
 
 		data.sim = find(sim, 'SIM Status') || '';
 		data.imei = find(sim, 'IMEI') || find(base, 'IMEI') || '';
@@ -237,12 +239,12 @@ return view.extend({
 	},
 
 	cleanText: function(raw) {
-		if (raw == null) return '';
+		if (!controls.hasValue(raw)) return '';
 		return String(raw).replace(/[\x00-\x1f\x7f]+/g, '').trim();
 	},
 
 	cleanDns: function(raw) {
-		if (!raw) return '';
+		if (!controls.hasValue(raw)) return '';
 		var str = String(raw);
 		var parts = str.split(/[\x00-\x1f\x7f]+/);
 		for (var i = 0; i < parts.length; i++) {
@@ -283,7 +285,7 @@ return view.extend({
 	styleNode: function() {
 		return E('style', {}, [
 			/* 全局毛玻璃与流动渐变底蕴 */
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.qmodem-glass-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:30px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境氛围光球，烘托白色毛玻璃透光感 */
 			'.qmodem-glass-bg-glow{position:absolute;top:-40px;left:5%;width:420px;height:420px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
@@ -378,11 +380,17 @@ return view.extend({
 			'.qm-traffic-chart-svg{width:100%;height:115px;display:block}',
 
 			/* 快捷导航 */
-			'.qm-shortcuts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}',
-			'.qm-shortcut-item{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;color:inherit;text-decoration:none}',
-			'.qm-shortcut-item strong{display:block;font-size:13px;color:var(--qm-text)}',
-			'.qm-shortcut-item span{display:block;font-size:11px;color:var(--qm-text-muted);margin-top:3px}',
-			'.qm-shortcut-item i{font-style:normal;font-size:18px;color:var(--qm-accent);font-weight:700}',
+			'.qm-app .qm-shortcuts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}',
+			'.qm-app .qm-shortcut-item{position:relative;display:flex;align-items:center;gap:14px;min-width:0;min-height:102px;padding:18px 20px;overflow:hidden;color:var(--qm-text);text-decoration:none;background:linear-gradient(115deg,var(--qm-surface),var(--qm-surface-2));transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}',
+			'.qm-app .qm-shortcut-item::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--qm-accent-gradient)}',
+			'.qm-app .qm-shortcut-item:hover,.qm-app .qm-shortcut-item:focus-visible{transform:translateY(-2px);border-color:var(--qm-accent-border);box-shadow:var(--qm-shadow-md);text-decoration:none}',
+			'.qm-app .qm-shortcut-icon{display:flex;align-items:center;justify-content:center;flex:0 0 42px;height:42px;border-radius:13px;background:var(--qm-accent-soft);color:var(--qm-accent)}',
+			'.qm-app .qm-shortcut-icon svg{width:23px;height:23px;stroke:currentColor}',
+			'.qm-app .qm-shortcut-copy{flex:1;min-width:0}.qm-app .qm-shortcut-copy strong{display:block;font-size:14px;color:var(--qm-text);line-height:1.5}',
+			'.qm-app .qm-shortcut-copy span{display:block;font-size:12px;color:var(--qm-text-muted);margin-top:4px;line-height:1.6;white-space:normal}',
+			'.qm-app .qm-shortcut-arrow{display:flex;align-items:center;justify-content:center;flex:0 0 26px;height:26px;color:var(--qm-accent)}',
+			'.qm-app .qm-shortcut-arrow svg{width:18px;height:18px}',
+			'@media(max-width:820px){.qm-app .qm-shortcuts{grid-template-columns:1fr}.qm-app .qm-shortcut-item{min-height:88px;padding:16px}}',
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.qm-grid-3{grid-template-columns:1fr 1fr}.qm-address-card{grid-column:1/-1}.qm-traffic-layout{grid-template-columns:repeat(3,1fr)}.qm-traffic-chart-box{grid-column:1/-1}}',
@@ -435,12 +443,12 @@ return view.extend({
 				role: item.role || '',
 				radio: item.rat || '',
 				band: item.band_name || item.band || '',
-				arfcn: item.channel || '',
+				arfcn: controls.valueText(item.channel),
 				channelType: item.channel_type || '',
-				pci: item.pci || '',
-				scs: item.scs || '',
-				dlBandwidth: item.dl_bandwidth || '',
-				ulBandwidth: item.ul_bandwidth || ''
+				pci: controls.valueText(item.pci),
+				scs: controls.valueText(item.scs),
+				dlBandwidth: controls.valueText(item.dl_bandwidth),
+				ulBandwidth: controls.valueText(item.ul_bandwidth)
 			};
 		}).filter(function(item) { return item.band || item.arfcn; });
 
@@ -451,8 +459,8 @@ return view.extend({
 				band: find(cell, 'Band') || '',
 				arfcn: find(cell, 'EARFCN') || find(cell, 'ARFCN') || '',
 				channelType: find(cell, 'EARFCN') ? 'EARFCN' : (find(cell, 'ARFCN') ? 'ARFCN' : ''),
-				pci: find(cell, 'Physical Cell ID') || '',
-				scs: find(cell, 'SCS') || '',
+				pci: controls.valueText(find(cell, 'Physical Cell ID')),
+				scs: controls.valueText(find(cell, 'SCS')),
 				dlBandwidth: find(cell, 'DL Bandwidth') || '',
 				ulBandwidth: find(cell, 'UL Bandwidth') || ''
 			};
@@ -515,6 +523,7 @@ return view.extend({
 
 	metricGauge: function(label, kind, rawValue, unit) {
 		var num = parseFloat(rawValue), has = !isNaN(num), pct = 0, color = 'var(--qm-text-muted)';
+		if (!has) return null;
 		if (has) {
 			if (kind === 'rsrq') { pct = (num + 25) * 4; color = num >= -10 ? 'var(--qm-ok)' : num >= -15 ? 'var(--qm-accent)' : num >= -20 ? 'var(--qm-warn)' : 'var(--qm-danger)'; }
 			else if (kind === 'sinr') { pct = (num + 10) * 2.5; color = num >= 20 ? 'var(--qm-ok)' : num >= 13 ? 'var(--qm-accent)' : num >= 0 ? 'var(--qm-warn)' : 'var(--qm-danger)'; }
@@ -532,6 +541,7 @@ return view.extend({
 
 	signalCard: function(data) {
 		var rsrp = parseFloat(data.rsrp);
+		if ([ data.rsrp, data.rsrq, data.sinr, data.temperature ].every(function(v) { return !controls.hasValue(v); })) return null;
 		var quality = this.signalQuality('rsrp', rsrp);
 		return E('section', { 'class': 'qm-glass-card' }, [
 			E('div', { 'class': 'qm-card-head' }, [
@@ -544,7 +554,7 @@ return view.extend({
 				]),
 				E('span', { 'class': 'qm-badge ' + quality.cls }, quality.label)
 			]),
-			this.renderSvgSignalDial(quality, data.rsrp),
+			!isNaN(rsrp) ? this.renderSvgSignalDial(quality, data.rsrp) : null,
 			E('div', { 'class': 'qm-mini-grid' }, [
 				this.metricGauge('RSRQ', 'rsrq', data.rsrq, ' dB'),
 				this.metricGauge('SINR', 'sinr', data.sinr, ' dB'),
@@ -591,6 +601,10 @@ return view.extend({
 	},
 
 	carrierCard: function(info, devStatus) {
+		if (!info.available) return E('section', { 'class': 'qm-glass-card' }, [
+			E('div', { 'class': 'qm-card-title' }, _('载波聚合状态')),
+			E('p', { 'class': 'qm-card-sub' }, _('QModem 暂未提供载波数据。'))
+		]);
 		var active = info.active || info.dual;
 		var badge = !info.available ? _('不可用') : info.active ? _('载波聚合中') : info.dual ? _('双连接') : _('单载波');
 
@@ -602,9 +616,9 @@ return view.extend({
 					E('span', { 'class': 'qm-cc-band' }, joinValues(item.radio, item.band).replace(', ', ' · ') || '--')
 				]),
 				E('div', { 'class': 'qm-cc-metrics' }, [
-					item.pci ? E('span', {}, 'PCI ' + item.pci) : null,
-					E('span', {}, 'DL ' + (mhz(item.dlBandwidth) || '--')),
-					E('span', {}, 'UL ' + (mhz(item.ulBandwidth) || '--'))
+					controls.hasValue(item.pci) ? E('span', {}, 'PCI ' + item.pci) : null,
+					mhz(item.dlBandwidth) ? E('span', {}, 'DL ' + mhz(item.dlBandwidth)) : null,
+					mhz(item.ulBandwidth) ? E('span', {}, 'UL ' + mhz(item.ulBandwidth)) : null
 				].filter(Boolean))
 			]);
 		});
@@ -636,8 +650,8 @@ return view.extend({
 			E('div', { 'class': 'qm-carrier-topo-box' }, [ this.renderSvgCarrierTopo(info) ]),
 			E('div', { 'class': 'qm-cc-container' }, ccElements),
 			E('div', { 'class': 'qm-mini-grid', 'style': 'grid-template-columns:1fr 1fr' }, [
-				E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('下行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.dlBandwidth) || '--') ]),
-				E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('上行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.ulBandwidth) || '--') ]),
+				mhz(info.dlBandwidth) ? E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('下行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.dlBandwidth)) ]) : null,
+				mhz(info.ulBandwidth) ? E('div', { 'class': 'qm-mini-item' }, [ E('div', { 'class': 'qm-mini-label' }, _('上行带宽')), E('div', { 'class': 'qm-mini-val' }, mhz(info.ulBandwidth)) ]) : null,
 				speedItem
 			].filter(Boolean)),
 			E('a', { 'class': 'qm-ip-link', 'href': L.url('admin/modem/qmodem-generic/network') }, [ _('射频与小区详情'), ' →' ])
@@ -658,21 +672,21 @@ return view.extend({
 				E('span', { 'class': 'qm-badge' + (active ? ' excellent' : ' weak') }, active ? _('已激活') : _('已断开'))
 			]),
 			E('div', { 'class': 'qm-ip-box' }, [
-				E('div', { 'class': 'qm-ip-row' }, [
+				session.ipv4Address ? E('div', { 'class': 'qm-ip-row' }, [
 					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'IPv4'), E('span', { 'style': 'color:' + (session.ipv4Connected ? 'var(--qm-ok)' : 'var(--qm-text-muted)') }, session.ipv4Connected ? _('已连接') : _('未分配')) ]),
 					E('div', { 'class': 'qm-ip-val' }, session.ipv4Address || '--')
-				]),
-				E('div', { 'class': 'qm-ip-row' }, [
+				]) : null,
+				session.ipv6Address ? E('div', { 'class': 'qm-ip-row' }, [
 					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'IPv6'), E('span', { 'style': 'color:' + (session.ipv6Connected ? 'var(--qm-ok)' : 'var(--qm-text-muted)') }, session.ipv6Connected ? _('已连接') : _('未分配')) ]),
 					E('div', { 'class': 'qm-ip-val' }, session.ipv6Address || '--')
-				]),
-				E('div', { 'class': 'qm-ip-row' }, [
+				]) : null,
+				joinValues(session.dns4, session.dns6) ? E('div', { 'class': 'qm-ip-row' }, [
 					E('div', { 'class': 'qm-ip-header' }, [ E('span', {}, 'DNS 服务器') ]),
 					E('div', { 'class': 'qm-ip-val' }, joinValues(session.dns4, session.dns6) || '--')
-				])
+				]) : null
 			]),
 			E('div', { 'style': 'display:flex;justify-content:space-between;margin-top:10px;font-size:11px;color:var(--qm-text-muted)' }, [
-				E('span', {}, 'MTU: ' + (session.mtu || '--')),
+				session.mtu ? E('span', {}, 'MTU: ' + session.mtu) : null,
 				E('span', {}, session.up ? '接口已启用' : '接口已停用')
 			]),
 			E('a', { 'class': 'qm-ip-link', 'href': L.url('admin/modem/qmodem-generic/connection') }, [ _('连接详情'), ' →' ])
@@ -747,9 +761,7 @@ return view.extend({
 	},
 
 	infoRow: function(label, value) {
-		var valNode = (value && typeof value === 'object' && (value instanceof HTMLElement || value.nodeType === 1))
-			? value : E('strong', {}, (value == null || value === '') ? '--' : String(value));
-		return E('div', { 'class': 'qm-list-row' }, [ E('span', {}, label), valNode ]);
+		return controls.dataRow(label, value, 'qm-list-row');
 	},
 
 	moduleCard: function(data) {
@@ -776,7 +788,7 @@ return view.extend({
 
 	simCard: function(data) {
 		var simState = data.sim || '';
-		var simOk = /READY|正常|OK/i.test(simState);
+		var simOk = /^(?:SIM )?(?:READY|正常|OK)$/i.test(String(simState).trim());
 		var subRate = this.subscriptionRate(data.qosInfo);
 		var qosLvl = this.qosExplain(data.qosInfo);
 		return E('section', { 'class': 'qm-glass-card' }, [
@@ -794,14 +806,14 @@ return view.extend({
 				this.infoRow(_('运营商'), data.operator),
 				this.infoRow(_('接入技术'), data.sysmode_detail),
 				this.infoRow(_('接入点'), data.active_apn),
-				this.infoRow(_('签约速率'), subRate || '--'),
-				E('div', { 'class': 'qm-list-row' }, [
+				this.infoRow(_('签约速率'), subRate),
+				qosLvl.label ? E('div', { 'class': 'qm-list-row' }, [
 					E('span', {}, _('QoS 等级')),
 					qosLvl.label ? E('div', {}, [
 						E('strong', { 'style': 'color:var(--qm-accent)' }, qosLvl.label),
 						E('span', { 'style': 'font-weight:400;margin-left:6px;font-size:10px' }, qosLvl.desc)
 					]) : E('strong', {}, '--')
-				]),
+				]) : null,
 				this.infoRow('ICCID', data.iccid),
 				this.infoRow('IMSI', data.imsi)
 			])
@@ -971,12 +983,19 @@ return view.extend({
 	},
 
 	shortcut: function(title, description, path) {
+		var kind = path.split('/').pop();
+		var paths = {
+			connection: '<path d="M7 3v14m-4-4 4 4 4-4M17 21V7m-4 4 4-4 4 4"/>',
+			network: '<path d="M3 17h2v4H3zm5-5h2v9H8zm5-5h2v14h-2zm5-4h2v18h-2z"/>',
+			system: '<path d="M7 2h7l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><rect x="9" y="11" width="6" height="7" rx="1"/>'
+		};
 		return E('a', { 'class': 'qm-glass-card qm-shortcut-item', 'href': L.url(path) }, [
-			E('div', {}, [
+			E('span', { 'class': 'qm-shortcut-icon', 'aria-hidden': 'true' }, svgNode('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (paths[kind] || paths.connection) + '</svg>')),
+			E('div', { 'class': 'qm-shortcut-copy' }, [
 				E('strong', {}, title),
 				E('span', {}, description)
 			]),
-			E('i', {}, '→')
+			E('span', { 'class': 'qm-shortcut-arrow', 'aria-hidden': 'true' }, svgNode('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>'))
 		]);
 	},
 
@@ -1032,18 +1051,18 @@ return view.extend({
 			/* 顶部 Hero 玻璃卡片 */
 			E('section', { 'class': 'qm-glass-card qm-hero' }, [
 				E('div', {}, [
-					E('h2', { 'class': 'qm-hero-title' }, data.model || _('移动模组')),
+					controls.pageTitle('status', data.model || _('移动模组'), 'qm-hero-title'),
 					E('div', { 'class': 'qm-hero-sub' }, !reachable
 						? _('模组未响应，请检查模组连接。')
 						: connected ? _('移动网络已连接并正常运行。')
 						: _('模组在线，但移动数据会话已断开。')),
 					E('div', { 'class': 'qm-hero-meta' }, [
-						E('span', { 'class': 'qm-hero-op' }, [
+						data.operator ? E('span', { 'class': 'qm-hero-op' }, [
 							opInfo.logo ? E('img', { 'src': opInfo.logo, 'alt': operator }) : null,
 							operator || '--'
-						]),
-						E('span', { 'class': 'qm-pill-tag' }, [ _('模式:'), E('strong', {}, data.sysmode_detail || '--') ]),
-						E('span', { 'class': 'qm-pill-tag' }, [ _('接口:'), E('strong', {}, data.network_interface || '--') ])
+						]) : null,
+						data.sysmode_detail ? E('span', { 'class': 'qm-pill-tag' }, [ _('模式:'), E('strong', {}, data.sysmode_detail) ]) : null,
+						data.network_interface ? E('span', { 'class': 'qm-pill-tag' }, [ _('接口:'), E('strong', {}, data.network_interface) ]) : null
 					])
 				]),
 				E('div', { 'class': 'qm-hero-actions' }, [
@@ -1051,7 +1070,9 @@ return view.extend({
 						E('span', { 'class': 'qm-pulse-circle' }),
 						connected ? _('已连接') : reachable ? _('在线') : _('不可用')
 					]),
-					E('button', { 'class': 'qm-refresh-btn', 'click': function() { window.location.reload(); } }, _('刷新'))
+				E('button', { 'type': 'button', 'class': 'qm-refresh-btn',
+					'click': function(ev) { return controls.refreshPage(res.section, [ 'status', 'signal', 'sim', 'stats', 'qos', 'radio' ], ev.currentTarget); }
+				}, _('刷新'))
 				])
 			]),
 
@@ -1075,10 +1096,10 @@ return view.extend({
 			isTrafficAvailable(res.usage) ? this.trafficScheduleCard(res.trafficResetSchedule, res.section) : null,
 
 			/* 快捷跳转 */
-			E('div', { 'class': 'qm-shortcuts' }, [
-				this.shortcut(_('移动数据'), _('APN、拨号、IP 详情与会话计数'), 'admin/modem/qmodem-generic/connection'),
-				this.shortcut(_('射频与小区'), _('频段、小区、射频策略与诊断'), 'admin/modem/qmodem-generic/network'),
-				this.shortcut(_('模组与 SIM'), _('模组身份、SIM 信息与维护'), 'admin/modem/qmodem-generic/system')
+			E('nav', { 'class': 'qm-shortcuts', 'aria-label': _('常用功能') }, [
+				this.shortcut(_('移动数据'), _('APN 与拨号，查看 IP 和连接状态'), 'admin/modem/qmodem-generic/connection'),
+				this.shortcut(_('无线与小区'), _('信号、小区和频段设置'), 'admin/modem/qmodem-generic/network'),
+				this.shortcut(_('模组与 SIM 卡'), _('设备信息、SIM 卡与维护'), 'admin/modem/qmodem-generic/system')
 			]),
 
 			/* 原始底层完整信息 */

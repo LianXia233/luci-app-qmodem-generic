@@ -80,7 +80,7 @@ setup() {
 	mkdir -p "$BIN" "$SBIN" "$LIB" "$CACHE" "$STATS" "$WORK/etc/config"
 
 	# 被测脚本（软链，保证测的是仓库里的真实文件）
-	for f in qmodem-worker qmodem-modem-support qmodem-mt5700-fix; do
+	for f in qmodem-worker qmodem-modem-support qmodem-support-custom qmodem-mt5700-fix; do
 		ln -sf "$ROOT/usr/sbin/$f" "$SBIN/$f"
 	done
 	for f in qmodem-task qmodem-stats-collect qmodem-stats-loop; do
@@ -133,6 +133,7 @@ EOF
 	export QMODEM_STATS_DIR="$STATS"
 	export QMODEM_SUPPORT_FILE="$WORK/modem_support.json"
 	export QMODEM_EXTRA_SUPPORT_FILE="$ROOT/usr/share/qmodem-generic/extra_modem_support.json"
+	export QMODEM_CUSTOM_SUPPORT_DIR="$WORK/custom-modems"
 	export QMODEM_SUPPORT_LOCKDIR="$WORK/support.lock"
 	export MOCK_UBUS_STATE="$WORK/ubus-state.json"
 	export MOCK_UBUS_LOG="$WORK/ubus.log"
@@ -311,7 +312,51 @@ t_tasks() {
 
 	_r3=$(rpcd_call qmodem_cache get_tasks '{"config_section":"modem0"}')
 	assert_json "get_tasks lists the task" "$_r3" '@.tasks[0].id' "$_id"
+
+	# 写操作即使属于同一模组，也不得复用上一个命令的 task_id。
+	# 否则一次删除会读到其它 action 的结果，命令本身根本没有执行。
+	_a1=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"delete_sms","args":{"config_section":"modem0","index":"1"}}')
+	_a2=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"delete_sms","args":{"config_section":"modem0","index":"2"}}')
+	_aid1=$(jsonfilter -s "$_a1" -e '@.task_id' 2>/dev/null)
+	_aid2=$(jsonfilter -s "$_a2" -e '@.task_id' 2>/dev/null)
+	if [ -n "$_aid1" ] && [ -n "$_aid2" ] && [ "$_aid1" != "$_aid2" ]; then
+		ok "concurrent SMS delete commands each get a distinct task"
+	else
+		bad "concurrent SMS delete commands share a task ($_aid1 / $_aid2)"
+	fi
 	set_ubus ok 0
+	for _action_id in "$_aid1" "$_aid2"; do
+		[ -n "$_action_id" ] || continue
+		_i=0; _action_state=queued
+		while [ "$_i" -lt 80 ]; do
+			_action_state=$(rpcd_call qmodem_cache get_task "{\"task_id\":\"$_action_id\"}" | jsonfilter -e '@.state' 2>/dev/null)
+			case "$_action_state" in success|failed|missing) break ;; esac
+			sleep 0.25
+			_i=$(( _i + 1 ))
+		done
+		assert_eq "SMS action $_action_id completed" success "$_action_state"
+	done
+	_deleted=$(grep -c 'qmodem delete_sms ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "both SMS delete commands reached QModem" 2 "$_deleted"
+
+	# IMEI 写入不应等待状态、网络、注册等无关域采集完才完成任务。
+	: > "$MOCK_UBUS_LOG"
+	_imei=$(rpcd_call qmodem_cache action '{"config_section":"modem0","object":"qmodem","method":"set_imei","args":{"config_section":"modem0","imei":"860000000000002"}}')
+	_imei_id=$(jsonfilter -s "$_imei" -e '@.task_id' 2>/dev/null)
+	_i=0; _imei_state=queued
+	while [ "$_i" -lt 80 ]; do
+		_imei_task=$(rpcd_call qmodem_cache get_task "{\"task_id\":\"$_imei_id\"}")
+		_imei_state=$(printf '%s' "$_imei_task" | jsonfilter -e '@.state' 2>/dev/null)
+		case "$_imei_state" in success|failed|missing) break ;; esac
+		sleep 0.25
+		_i=$(( _i + 1 ))
+	done
+	assert_eq "IMEI action completed" success "$_imei_state"
+	assert_json "IMEI action returns official echoed value" "$_imei_task" '@.result.imei' '860000000000002'
+	_imei_calls=$(grep -c 'qmodem set_imei ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "IMEI action reached QModem once" 1 "$_imei_calls"
+	_unrelated=$(grep -Ec 'qmodem (base_info|network_info|get_connect_status|dial_status) ' "$MOCK_UBUS_LOG" 2>/dev/null || true)
+	assert_eq "IMEI action does not block on unrelated collection" 0 "$_unrelated"
 
 	# 未知方法 / 非法参数必须快速失败而不是挂住
 	assert_fast "unknown method returns fast" 500 \
@@ -420,13 +465,101 @@ t_support() {
 	assert_fast "support sync bounded" 15000 "rpcd_call qmodem_support sync '{}'"
 	_out="$LAST_OUT"
 	assert_json "support sync added rg520n-cn" "$_out" '@.added[0]' rg520n-cn
+	assert_true "built-in RG502Q-EA usb and PCIe added" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg502q-ea\" in d[b] for b in (\"usb\",\"pcie\"))'"
+	assert_true "official RG650V-EU fallback added" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg650v-eu\" in d[b] for b in (\"usb\",\"pcie\"))'"
+}
+
+t_custom_support() {
+	hdr "未知型号自定义与串口映射"
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"../../evil","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi","pdp_index":"1"}')
+	assert_json "reject path traversal in custom model" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"pcie","model":"rg-future","manufacturer":"quectel","manufacturer_id":"","platform":"qualcomm","modes":"ecm","pdp_index":"1"}')
+	assert_json "reject USB mode on PCIe" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg502q-ea","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi","pdp_index":"1"}')
+	assert_json "do not shadow built-in model" "$_out" '@.success' false
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1"}')
+	assert_json "save USB custom model" "$_out" '@.success' true
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"pcie","model":"rg-future","manufacturer":"quectel","manufacturer_id":"","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1"}')
+	assert_json "save PCIe custom model" "$_out" '@.success' true
+	_out=$(rpcd_call qmodem_support custom_list '{}')
+	assert_json "list custom USB model" "$_out" '@.entries[0].model' rg-future
+	_out=$($TEST_SH "$SBIN/qmodem-modem-support" --json)
+	assert_true "custom model injected into both buses" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert all(\"rg-future\" in d[b] for b in (\"usb\",\"pcie\"))'"
+	# 编辑自定义型号时同时更新用户 JSON 与 QModem JSON，保留备份与其它定义
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim,ncm","pdp_index":"1","wcdma_band":"1/5/8","lte_band":"3/8/41","nsa_band":"41/78","sa_band":"41/78/79"}')
+	assert_json "edit own USB custom definition" "$_out" '@.success' true
+	assert_true "edit updates both custom and QModem without losing unrelated models" \
+		"python3 -c 'import json; import os; c=json.load(open(\"$WORK/custom-modems/usb/rg-future.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; q=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert c == q[\"usb\"][\"rg-future\"]; assert c[\"lte_band\"] == \"3/8/41\"; assert c[\"modes\"] == [\"qmi\",\"mbim\",\"ncm\"]; assert \"rg502q-ea\" in q[\"usb\"]'"
+	assert_true "QModem and custom JSON backups created" \
+		"test -f '$WORK/modem_support.json.bak' && test -f '$WORK/custom-modems/usb/rg-future.json.bak'"
+	_out=$(rpcd_call qmodem_support custom_list '{}')
+	assert_json "edited custom entry reports synchronized" "$_out" '@.entries[0].state' synced
+
+	# 模拟第三方更改 QModem 条目；自定义编辑不得覆盖外部更改
+	jq --indent 4 '.modem_support.usb["rg-future"].lte_band="9"' \
+		"$WORK/modem_support.json" > "$WORK/other-change.json"
+	cp "$WORK/other-change.json" "$WORK/modem_support.json"
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg-future","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,mbim","pdp_index":"1","lte_band":"1/3/5"}')
+	assert_json "reject overwrite of external QModem changes" "$_out" '@.success' false
+	assert_true "rejected conflict preserves both existing definitions" \
+		"python3 -c 'import json; c=json.load(open(\"$WORK/custom-modems/usb/rg-future.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; q=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg-future\"]; assert c[\"lte_band\"] == \"3/8/41\"; assert q[\"lte_band\"] == \"9\"'"
+	# 恢复模拟的外部改动，后续测试沿用正常支持库
+	cp "$WORK/modem_support.json.bak" "$WORK/modem_support.json"
+	# 备份为编辑前版本，重新同步到最新用户定义后继续执行其他测试
+	jq --indent 4 --slurpfile custom "$WORK/custom-modems/usb/rg-future.json" \
+		'.modem_support.usb["rg-future"] = $custom[0].modem_support.usb["rg-future"]' \
+		"$WORK/modem_support.json" > "$WORK/final.json"
+	cp "$WORK/final.json" "$WORK/modem_support.json"
+
+	# 插件自带的预设 JSON 可通过编辑创建持久化覆盖文件，官方源定义不修改
+	_out=$(rpcd_call qmodem_support custom_save '{"bus":"usb","model":"rg502q-ea","edit":"1","manufacturer":"quectel","manufacturer_id":"2c7c","platform":"qualcomm","modes":"qmi,gobinet,mbim","pdp_index":"1","wcdma_band":"1/3/5","lte_band":"3/8/41","nsa_band":"41/78","sa_band":"41/78"}')
+	assert_json "edit built-in custom profile by creating persistent JSON override" "$_out" '@.success' true
+	assert_true "custom override and QModem have same builtin-edited definition" \
+		"python3 -c 'import json; a=json.load(open(\"$WORK/custom-modems/usb/rg502q-ea.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; b=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; assert a == b; assert b[\"lte_band\"] == \"3/8/41\"'"
+	_out=$($TEST_SH "$SBIN/qmodem-modem-support" --status)
+	assert_json "legacy merge/status still reads QModem after jq 4-space edit" "$_out" '@.available' 1
+	assert_true "package-provided immutable extra JSON remains intact" \
+		"python3 -c 'import json; a=json.load(open(\"$ROOT/usr/share/qmodem-generic/extra_modem_support.json\"))[\"modem_support\"][\"usb\"][\"rg502q-ea\"]; assert a[\"lte_band\"] != \"3/8/41\"'"
+
+	_out=$(rpcd_call qmodem_support custom_delete '{"bus":"pcie","model":"rg-future"}')
+	assert_json "remove PCIe custom source" "$_out" '@.success' true
+	assert_true "removing source keeps official support entries" "python3 -c 'import json; d=json.load(open(\"$WORK/modem_support.json\"))[\"modem_support\"]; assert \"rg-future\" in d[\"pcie\"]'"
+
+	mkdir -p "$WORK/sys/class/tty/ttyUSB77" "$WORK/sys/devices/usb/2-1" "$WORK/dev"
+	printf '2c7c\n' > "$WORK/sys/devices/usb/2-1/idVendor"
+	printf '0801\n' > "$WORK/sys/devices/usb/2-1/idProduct"
+	printf 'RG502Q-EA\n' > "$WORK/sys/devices/usb/2-1/product"
+	ln -s "$WORK/sys/devices/usb/2-1" "$WORK/sys/class/tty/ttyUSB77/device"
+	ln -s /dev/null "$WORK/dev/ttyUSB77"
+	export QMODEM_SYS_TTY_DIR="$WORK/sys/class/tty"
+	export QMODEM_SYS_WWAN_DIR="$WORK/sys/class/wwan"
+	export QMODEM_DEV_DIR="$WORK/dev"
+	_out=$(rpcd_call qmodem_support ports '{}')
+	assert_json "candidate port maps model from USB device" "$_out" '@.ports[0].model' RG502Q-EA
+	assert_json "candidate port maps VID:PID" "$_out" '@.ports[0].id' '2c7c:0801'
+	assert_json "unprobed port is not confirmed AT" "$_out" '@.ports[0].confirmed' 0
+	_out=$(rpcd_call qmodem_support probe_port '{"port":"/dev/ttyUSB77;rm -rf /"}')
+	assert_json "reject unlisted probe port" "$_out" '@.success' false
+	cat > "$BIN/tom_modem" <<'EOF'
+#!/bin/sh
+printf 'AT+CGMM\r\n+CGMM: RG502Q-EA\r\nOK\r\n'
+EOF
+	chmod 755 "$BIN/tom_modem"
+	_out=$(rpcd_call qmodem_support probe_port "{\"port\":\"$WORK/dev/ttyUSB77\"}")
+	assert_json "user-initiated AT probe reads model" "$_out" '@.model' RG502Q-EA
+	python3 -c 'import json,os; p=os.environ["MOCK_UCI_CONFIG"]; d=json.load(open(p)); d["qmodem"]["modem0"]["at_port"]=os.environ["QMODEM_DEV_DIR"]+"/ttyUSB77"; json.dump(d,open(p,"w"))'
+	_out=$(rpcd_call qmodem_support ports '{}')
+	assert_json "QModem configured AT port confirmed" "$_out" '@.ports[0].confirmed' 1
+	_out=$(rpcd_call qmodem_support probe_port "{\"port\":\"$WORK/dev/ttyUSB77\"}")
+	assert_json "probe refuses QModem-owned serial" "$_out" '@.success' false
 }
 
 t_no_orphans() {
 	hdr "进程与锁清理"
 	_left=$(find "$CACHE/locks" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no lock dirs left behind" 0 "$_left"
-	_orphans=$(pgrep -f "qmodem-task _run" 2>/dev/null | wc -l | tr -d ' ')
+	# 避免测试命令自身的 shell 命令行被 pgrep -f 匹配。
+	_orphans=$(pgrep -f "[q]modem-task _run" 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no orphaned task runners" 0 "$_orphans"
 	_tmp=$(find "$CACHE" -name '*.tmp.*' 2>/dev/null | wc -l | tr -d ' ')
 	assert_eq "no leftover temp files (atomic writes cleaned up)" 0 "$_tmp"
@@ -483,6 +616,7 @@ t_task_timeout
 t_at_serialisation
 t_stats_background
 t_support
+t_custom_support
 t_worker_daemon
 t_no_orphans
 

@@ -1,12 +1,20 @@
 # luci-app-qmodem-generic
 
-[![Build IPK & APK](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml)
+[![Build APK and IPK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
-> **QModem 的通用美化版 LuCI Web UI。** 界面数据全部经由 QModem 的 `qmodem` ubus 对象读取，不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
+> **QModem 的通用美化版 LuCI Web UI。** 界面数据经由 QModem 官方 ubus 接口读取，不绑定任何具体模组型号 —— QModem 识别到什么模组、返回什么字段，界面就显示什么。
 >
-> 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已完全去除私有文本后端，改为纯 `qmodem` ubus 链路。
+> 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已去除私有文本后端，使用官方 `qmodem` 与可选 `qmodem.sms` 接口。
+
+未获取到的数据自动隐藏对应行。网络模式按 QModem 实际上报展示；MT5700 专有设置仅向对应型号显示，其它模组可使用通用 AT 控制台。
+
+AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗口独立显示状态、响应正文和错误信息。常用指令使用通用查询，专有指令按模组型号显示。
+
+短信自动适配 QModem 数据库模式和旧版模组存储。开启“读取后从 SIM 删除”后，已保存到路由器的短信仍可在这里查看；数据库模式与原 QModem 界面共用收发记录，不要求安装 Next 界面。读取错误会明确提示。
+
+西瓜皮等 QModem stable 3.3.0 固件的短信 RPC 若存在重复读取参数的缺陷，删除时自动复用官方旧界面的 `modem_ctrl.sh`，并回读模组确认。正常 RPC 和新版数据库模式沿用各自接口，无需修改或升级官方 QModem。
 
 ## 目录
 
@@ -35,18 +43,18 @@
 | 总览 Overview | 实际型号标题、信号/流量卡片、按 `class` 分组铺开 QModem 上报的**全部字段** |
 | 移动数据 Mobile Data | APN、拨号、IP 详情与会话计数 |
 | 射频与小区 Radio and Cells | 频段、邻区、锁频锁小区、诊断 |
-| 短信 Messages | 基于 SIM 的收发与会话视图 |
+| 短信 Messages | 数据库／模组存储自动识别，收发、未读状态与会话视图 |
 | 模组与 SIM | 模组身份、SIM 信息与维护操作 |
-| 高级 Advanced | 模组支持库同步、诊断控制台、IP 透传 / Post-Route / DMZ 等 |
+| 高级 Advanced | 外观主题、串口与模组映射、自定义型号、支持库同步及能力诊断 |
 | AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入） |
 | 设备参数设置 | QModem `modem-device` 配置节（从「高级 / 模组与 SIM」页进入） |
 
 **亮点**
 
-- 纯 `qmodem` ubus 链路，无私有后端，全模组通用；动态字段自适应，内置字段使用中文标签映射。
+- 使用 QModem 官方 ubus 接口，全模组通用；动态字段自适应，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
 - MT5700 系列海思模组 SIM 卡槽上电自动初始化（开机服务 + 首次安装脚本）。
-- 内置模组定义自动注入 QModem 支持库（当前含 Quectel RG520N-CN），替代手工编辑 `modem_support.json`。
+- 内置 RG520N-CN、RG502Q-EA、RG650E-EU、RG650V-EU 定义；高级页可查看 USB/PCIe 串口和硬件 ID，并添加其它型号。
 
 ## 文件布局
 
@@ -81,20 +89,37 @@
 | 目标系统 | 包格式 | 状态 |
 | --- | --- | --- |
 | ImmortalWrt 25.12 | `.apk` | 支持 |
-| ImmortalWrt snapshot | `.apk` | 允许失败 |
+| OpenWrt / ImmortalWrt / iStoreOS 23.05、24.10 | `.ipk` | 支持使用 opkg 和 JavaScript LuCI 的固件 |
+| ImmortalWrt snapshot | `.apk` | 兼容，未单独构建 |
 
-**兼容基线**：OpenWrt / ImmortalWrt **25.12 及更新版本**，不支持 24.10 及更早。**前置依赖**：运行时依赖 [`qmodem`](https://github.com/FUjr/QModem) 后端，请先安装 QModem 再安装本包。本包是 `LUCI_PKGARCH:=all` 的纯前端包，一个架构编译出的产物可用于所有架构。
+**兼容基线**：23.05 起的 JavaScript LuCI。旧版使用 IPK，新版使用 APK，按设备包管理器选择，不能互换。**前置依赖**：`luci-base`、[`qmodem`](https://github.com/FUjr/QModem)、`jq`、`jsonfilter`。QModem stable 和 Next 共用本包的能力检测与降级逻辑，不要求升级后端。本包仅含 LuCI 资源和 Shell 脚本，`LUCI_PKGARCH:=all`，同一种格式适用于 ARM / x86 等架构。
+
+旧版 LuCI 的 APN 和设备参数保存使用官方 `uci.commit` ubus 接口，不依赖缺失的 JavaScript `uci.commit()` 方法。安装钩子在加载 `luci.mk` 前定义，确保旧版 SDK 打入本包的服务加载与会话保留逻辑。
 
 ## 安装
 
+**iStore 手动安装：旧版 opkg 系统上传 `*-ipk-offline.run`，新版 apk 系统上传 `*-apk-offline.run`。** 每个离线包自带对应格式的主包和翻译包，安装时隔离软件源、不更新索引；缺少依赖会直接提示，不强制安装，也不改动系统软件源。
+
+直接上传 `.apk` 时，iStore 自带的 APK 安装命令仍可能访问软件源。离线包通过 iStore 原生支持的 `.run` 入口安装，无需修改系统软件源或 iStore。
+
 ```sh
-# apk（ImmortalWrt 25.12 / snapshot）
-apk add --allow-untrusted ./luci-app-qmodem-generic-*.apk
+# SSH 安装离线 RUN（ImmortalWrt 25.12 / snapshot）
+sh ./luci-app-qmodem-generic-*-apk-offline.run
+
+# 或直接离线安装本地主 APK（需要的翻译 APK 也可加在命令末尾）
+apk --no-network --repositories-file /dev/null add --allow-untrusted ./luci-app-qmodem-generic-*.apk
+
+# 旧版 OpenWrt / ImmortalWrt / iStoreOS（opkg）
+sh ./luci-app-qmodem-generic_*-ipk-offline.run
+# 或在依赖齐全时安装本地 IPK，主包和翻译包一起安装
+opkg install ./luci-app-qmodem-generic_*_all.ipk ./luci-i18n-qmodem-generic-zh-cn_*_all.ipk
 ```
 
 > 若设备上此前安装过旧版 `luci-app-mt5700m`，请先 `opkg remove luci-app-mt5700m` 再安装本包，避免旧包残留的菜单与 ACL 条目干扰。
 
 安装后在 LuCI 菜单 **移动网络 → 模组管理** 下使用。
+
+自 `2.5.0-r22` 起，安装钩子使用 `rpcd reload` 保留 LuCI 会话；更新后刷新页面即可。`r23` 同时清理 LuCI 页面缓存，保留已有配置、短信与流量记录。
 
 ## 流量统计
 
@@ -137,7 +162,9 @@ QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号，未收
 | 校验 | 写入后按 JSON 解析校验，失败自动回滚备份 |
 | 兼容 | QModem 未安装时直接退出；用目录锁避免并发改写；按分组（`usb`/`pcie`）查找不误判 |
 
-**生效条件**：QModem 只在启动 / 重扫时读取支持库，注入后需 `/etc/init.d/qmodem restart` 或重启设备。追加其它型号：编辑 `/usr/share/qmodem-generic/extra_modem_support.json`（结构同 QModem 支持库），再执行 `/usr/sbin/qmodem-modem-support`。
+**生效条件**：QModem 只在启动 / 重扫时读取支持库，注入后需 `/etc/init.d/qmodem restart` 或重启设备。已有的官方型号会跳过，不覆盖原定义。RG650V-EU 已在新版官方 QModem 中收录，这里保留给旧版作兼容。
+
+高级页的「串口与模组对应关系」从系统设备树读取 USB VID:PID 或 PCI 厂商/设备 ID；QModem 配置过的 AT 口标为已确认，其余仅是候选串口，可手动点「读取型号」。自定义配置按 USB/PCIe 和型号分别保存到 `/etc/qmodem-generic/modems/`，点「保存并同步支持库」后重启 QModem 生效。USB 配置填写厂商 VID，PCIe 硬件 ID 仅用于设备识别；拨号驱动及型号专属能力仍须由 QModem 和固件提供。移除自定义配置不会删除已经注入的官方支持库条目。
 
 相关文件：`/usr/share/qmodem-generic/extra_modem_support.json`、`/usr/sbin/qmodem-modem-support`（`--status` 只查询，`--json` 机器可读）、`/etc/init.d/qmodem-modem-support`、`/usr/libexec/rpcd/qmodem_support`。
 
@@ -146,7 +173,7 @@ QModem 通过 `/usr/share/qmodem/modem_support.json` 识别模组型号，未收
 作为 feed 加入 OpenWrt / ImmortalWrt 源码树：
 
 ```sh
-echo 'src-git qmodem_generic https://github.com/LianXia233/luci-app-qmodem-generic.git' >> feeds.conf.default
+echo 'src-git qmodem_generic https://github.com/PEIT98/luci-app-qmodem-generic.git' >> feeds.conf.default
 ./scripts/feeds update qmodem_generic
 ./scripts/feeds install -a -p qmodem_generic
 make menuconfig   # LuCI -> Applications -> luci-app-qmodem-generic
@@ -155,21 +182,24 @@ make package/luci-app-qmodem-generic/compile V=s
 
 ## GitHub Actions 自动构建
 
-仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build IPK & APK → Run workflow）：
+仓库内置 [`.github/workflows/build.yml`](.github/workflows/build.yml)，**手动触发**（Actions → Build APK and IPK → Run workflow）：
 
 1. `lint` — JS 语法（`node --check`）、JSON 解析、`msgfmt` 校验、ACL/菜单一致性检查
-2. `build` — ImmortalWrt SDK 矩阵编译：`immortalwrt-25.12-apk`（必需）、`immortalwrt-snapshot-apk`（允许失败）
-3. `release` — 把所有产物上传到 Release（tag 可在触发时指定，留空则自动生成）
+2. `build` — 分别用 ImmortalWrt 25.12 SDK 编译 APK、24.10 SDK 编译 IPK；每种格式生成主包、中文翻译包和独立离线 RUN，包架构均为 `all`
+3. `release` — 两种格式全部编译成功后上传同一个 Release，核验主包和对应离线包均齐全后才清理旧发布（tag 可在触发时指定，留空则自动生成）
+
+下载位置：运行摘要中的「下载本次安装包」，或仓库 [Releases](https://github.com/PEIT98/luci-app-qmodem-generic/releases) 的附件；iStore 安装按包管理器选择对应的离线 RUN。Actions 下载包保留 30 天；即使发布步骤失败，已上传的下载包仍可使用。`Static check` 只检查源码，不生成安装包；必须等 `build` 的编译和上传步骤成功。
 
 ## 界面主题与响应式（QM UI v2）
+
+在 **高级 → 外观主题** 中切换配色，默认使用蓝绿渐变；提供清爽蓝、暮光紫和跟随系统主题，以及自动 / 浅色 / 深色模式。选择立即生效并保存到当前浏览器，所有移动网络页面共用，不需要重启模组。
+
+高级页只保留外观、支持库、能力诊断和专有硬件设置；网络模式、网络优选与锁频统一在「无线与小区」，重启统一在「模组与 SIM 卡」，AT 调试统一在「AT 终端」。连接示意图使用可换行的中文节点，手机上纵向排列；SIM 未就绪或状态未知时不显示活动连接动画，系统要求减少动态效果时保留静态连接线。
 
 前端视觉层统一由 `htdocs/luci-static/resources/qmodem-generic/theme.js` 提供，只改前端、
 不动任何数据链路：
 
-- **兼容任意 LuCI 主题**：所有颜色走 `--qm-*` 令牌，令牌优先取主题自带变量
-  （`--background-color-*` / `--border-color-*` / `--text-color-*` / `--primary-color` /
-  `--success-color` …），取不到才用内置调色板；支持 `color-mix()` 的浏览器还会从主题
-  主色实时派生强调色，主题换肤本插件自动跟随。
+- **兼容任意 LuCI 主题**：颜色走 `--qm-*` 令牌；自动明暗时表面与文字跟随 LuCI，主色使用所选配色。选择「跟随系统主题」后，主色也跟随 LuCI；支持 `color-mix()` 的浏览器会同步派生柔和背景与边框。
 - **明暗自适应**：探测主题底色亮度 → `body` 加 `qm-dark`，内置调色板随之切换；
   老主题（无 CSS 变量）与系统深色偏好同样生效。
 - **响应式**：栅格 `auto-fit` + 断点 1280 / 1024 / 820 / 560，手机端表单上下堆叠、
@@ -206,11 +236,13 @@ python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 - **字段未上报时的降级显示**：部分模组不会上报全部字段，QModem 会以占位值回填（如 FM350-GL 温度回 `"0°C"`、带宽回 `"M"`）。本包对占位值做归一化，未上报字段统一显示 `--`。
 - **上下行调制**：来自 `qos` 对象的 `radio_info`；模组/固件不支持时返回 `{"status":"unavailable"}`，页面显示 `--` 属预期降级。
 - **LuCI 26.x（Master 26.246+）**：移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失才注入，不覆盖已有实现）。
-- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重启，前端会在 60 s 冷却窗口内退回直连 QModem。升级后请执行 `/etc/init.d/rpcd restart` 与 `/etc/init.d/qmodem-worker restart`。
+- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重新加载，前端会在 60 s 冷却窗口内退回直连 QModem。升级时安装钩子会自动执行 `/etc/init.d/rpcd reload`；需要手动补加载时也使用 `reload`，保留登录会话。
 - **短信列表按需采集**：读短信在部分模组上极慢，`sms` 域不进周期采集；进入「短信」页时后台排队，数据到位后自动补上。
 - **`settings` 与 `terminal` 页不做轮询重绘**：避免把用户未保存的表单内容 / AT 会话日志冲掉。
 
 ## 相关文档
+
+- [逐页修复与验证范围（2.5.0-3）](docs/QMODEM_PAGE_REVIEW.md)
 
 - [异步化架构（后端任务不阻塞页面加载）](docs/QMODEM_ASYNC_ARCHITECTURE.md)
 - [QModem 通用美化版 UI 重构与自我审查报告](docs/QMODEM_GENERIC_UI_REPORT.md)

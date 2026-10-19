@@ -15,8 +15,7 @@
 #        qmodem-task _run  →  qmodem-worker collect / qmodem ubus / AT
 #
 # 关键保证：
-#   * 去重：同一 (type, config_section) 已有 queued/running 任务时，
-#           直接复用已有 task_id，绝不重复探测 modem、绝不并发抢串口。
+#   * 只读刷新和幂等采集去重；写操作每次必须独立执行，再由 AT 锁串行化。
 #   * 超时：每种任务都有 overall timeout，超时后置为 failed(timeout)。
 #           `get` 时还会兜底判定「running 但已超时」的僵尸任务。
 #   * 锁：涉及 AT 的任务统一先拿 qm_at_lock_name 互斥锁，串口访问串行化。
@@ -47,6 +46,9 @@ TASK_MAX_FILES=40
 QM_BIN_WORKER="$QMODEM_SBIN_DIR/qmodem-worker"
 QM_BIN_SUPPORT="$QMODEM_SBIN_DIR/qmodem-modem-support"
 QM_BIN_STATS="$QMODEM_BIN_DIR/qmodem-stats-collect"
+# 仅用于检测并兼容旧版官方短信接口；不修改官方脚本或 UCI 配置。
+QM_OFFICIAL_RPCD="${QMODEM_OFFICIAL_RPCD:-/usr/libexec/rpcd/qmodem}"
+QM_MODEM_CTRL="${QMODEM_MODEM_CTRL:-/usr/share/qmodem/modem_ctrl.sh}"
 
 # ---- 任务超时表 -----------------------------------------------------------
 
@@ -208,6 +210,46 @@ run_limited_out() {
 	return 124
 }
 
+# QModem stable 3.3.0（西瓜皮发行版 2e4c1c8）的 RPC 入口先 read input，
+# delete_sms 分支又 read 一次，导致 index 变空、返回 {"result":{}} 却没删除。
+# 仅命中这段实现时，复用官方旧短信页调用的 modem_ctrl.sh 参数接口。
+legacy_sms_delete_needed() {
+	[ -r "$QM_OFFICIAL_RPCD" ] || return 1
+	awk '
+		/^[[:space:]]*call\)/ { in_call = 1; next }
+		in_call && !in_delete && /^[[:space:]]*read[[:space:]]+-r[[:space:]]+input[[:space:]]*$/ { request_read = 1 }
+		in_call && /^[[:space:]]*delete_sms\)/ { in_delete = 1; next }
+		in_delete && /^[[:space:]]*;;/ { in_delete = 0 }
+		in_delete && request_read && /^[[:space:]]*read[[:space:]]+-r[[:space:]]+input[[:space:]]*$/ { broken = 1 }
+		END { exit !broken }
+	' "$QM_OFFICIAL_RPCD"
+}
+
+legacy_sms_delete() {
+	_sms_sec="$1"; _sms_args="$2"; _sms_timeout="$3"
+	_sms_arg_sec=$(printf '%s' "$_sms_args" | jsonfilter -e '@.config_section' 2>/dev/null)
+	_sms_indexes=$(printf '%s' "$_sms_args" | jsonfilter -e '@.index' 2>/dev/null)
+	if ! qm_valid_section "$_sms_sec" || [ "$_sms_arg_sec" != "$_sms_sec" ] ||
+		[ "$(uci -q get "qmodem.$_sms_sec" 2>/dev/null)" != modem-device ]; then
+		printf '%s\n' '{"error":"explicit valid modem section required"}'
+		return 2
+	fi
+	case "$_sms_indexes" in
+		''|*[!0-9\ ]*|' '*|*' '|*'  '*)
+			printf '%s\n' '{"error":"invalid modem SMS indexes"}'; return 2 ;;
+	esac
+	if [ "$(uci -q get "qmodem.$_sms_sec.state" 2>/dev/null)" = disabled ]; then
+		printf '%s\n' '{"error":"modem instance is offline"}'
+		return 2
+	fi
+	if [ ! -f "$QM_MODEM_CTRL" ]; then
+		printf '%s\n' '{"error":"QModem legacy SMS helper is missing"}'
+		return 2
+	fi
+	# 固定脚本与独立参数，不使用 eval；短信端口和 -u 参数仍由官方脚本选择。
+	run_limited_out "$_sms_timeout" sh "$QM_MODEM_CTRL" delete_sms "$_sms_sec" "$_sms_indexes"
+}
+
 t_run() {
 	ID="$1"; TYPE="$2"; SEC="$3"; PARAMS="$4"
 	qm_init_dirs
@@ -263,12 +305,19 @@ t_run() {
 			qm_lock "$_lock" 10 || { t_write "$ID" failed '{}' 'AT port busy' 'done'; return 0; }
 			trap 'qm_unlock_all' EXIT INT TERM
 			t_write "$ID" running '{}' '' "$_obj.$_m"
-			_o=$(run_limited_out "$TO" ubus -t "$TO" call "$_obj" "$_m" "$_args")
+			if [ "$_obj" = qmodem ] && [ "$_m" = delete_sms ] && legacy_sms_delete_needed; then
+				_o=$(legacy_sms_delete "$SEC" "$_args" "$TO")
+			else
+				_o=$(run_limited_out "$TO" ubus -t "$TO" call "$_obj" "$_m" "$_args")
+			fi
 			_rc=$?
 			qm_unlock "$_lock"
 			trap - EXIT INT TERM
-			# 动作完成后刷新缓存，让页面下一次轮询立刻看到新状态
-			[ "$_rc" = 0 ] && run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" 'status network registration' >/dev/null 2>&1
+			# IMEI 写入后页面会直接回读 get_imei 并单独补采 sim。
+			# 这里若同步补采无关的状态/网络/注册域，写入任务会长时间显示“处理中”。
+			# 短信页自行回读短信核对删除，无需同步等待无关的网络状态采集。
+			[ "$_rc" = 0 ] && [ "$_m" != set_imei ] && [ "$_m" != delete_sms ] && \
+				run_limited_out "$TO" sh "$QM_BIN_WORKER" collect "$SEC" 'status network registration' >/dev/null 2>&1
 			;;
 		sync_support)
 			t_write "$ID" running '{}' '' 'merging support library'
@@ -348,10 +397,15 @@ t_new() {
 
 	t_prune
 
-	# ---- 去重：同类任务已在跑就直接复用，避免多页面并发打 modem ----
+	# ---- 写操作不能复用其它动作的 task_id：否则删除短信会拿到上一条
+	#      命令的结果，实际删除没有执行。只读/幂等任务仍允许去重。 ----
 	_dedup_sec="$SEC"
 	[ "$TYPE" = "refresh_all" ] && _dedup_sec='*'
-	_existing=$(t_find_running "$TYPE" "$_dedup_sec")
+	_existing=''
+	case "$TYPE" in
+		refresh|refresh_all|sync_support|collect_stats)
+			_existing=$(t_find_running "$TYPE" "$_dedup_sec") ;;
+	esac
 	if [ -n "$_existing" ]; then
 		printf '{"success":true,"running":true,"deduplicated":true,"task_id":%s,"state":"running"}\n' \
 			"$(j_str "$_existing")"

@@ -5,6 +5,7 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
+				"qmodem.sms": [ "config_get", "list" ],
 				"qmodem_cache": [ "*" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],
@@ -18,7 +19,9 @@
 		"write": {
 			"uci": [ "qmodem" ],
 			"ubus": {
+				"uci": [ "commit" ],
 				"qmodem": [ "*" ],
+				"qmodem.sms": [ "send", "delete", "mark_read", "sync" ],
 				"qmodem_cache": [ "*" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],

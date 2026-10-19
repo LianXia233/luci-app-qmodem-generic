@@ -3,6 +3,7 @@
 'require ui';
 'require uci';
 'require rpc';
+'require dom';
 'require qmodem-generic.theme as theme';
 
 /*
@@ -31,14 +32,8 @@
  * ------------------------------------------------------------------ *
  * LuCI 26.x（OpenWrt/ImmortalWrt Master 26.246+）旧 API 兼容层            *
  * ------------------------------------------------------------------ *
- * 新版 LuCI 已移除两个历史全局辅助：
- *   1) String.prototype.format —— 仅保留 String.prototype.format.call()，
- *      直接写 'x'.format(...) 会抛 ".format is not a function"；
- *   2) 全局 E()（旧 dom.create 别名）与 findParent()。
- * 本包视图仍沿用这些写法（共计数百处），在 26.x 上会出现"菜单正常、内容区
- * 永远停在 Loading view"的现象。这里在本模块被 require 时（早于任何视图体
- * 执行）按需补齐，缺失才注入、已存在绝不覆盖，避免影响其它插件。
- * 后续若视图整体迁移到 L.dom.create / 模板字符串，本段可直接删除。
+ * 旧视图使用 String.prototype.format 和 findParent；缺失时按需补齐。
+ * E 已迁移为下方局部 DOM 工厂，不再往 window 写入不完整的 DOM 实现。
  */
 (function installLuCILegacyCompat() {
 	if (typeof window === 'undefined')
@@ -89,29 +84,6 @@
 		};
 	}
 
-	if (typeof window.E === 'undefined') {
-		window.E = function(elem, attrs, data) {
-			if (elem instanceof Node)
-				return elem;
-			var e = document.createElement(String(elem));
-			if (attrs != null && typeof attrs === 'object') {
-				for (var k in attrs)
-					e.setAttribute(k, attrs[k]);
-			}
-			if (data != null) {
-				if (data instanceof Array)
-					data.forEach(function(x) {
-						e.appendChild(x instanceof Node ? x : document.createTextNode(String(x)));
-					});
-				else if (data instanceof Node)
-					e.appendChild(data);
-				else
-					e.innerHTML = String(data);
-			}
-			return e;
-		};
-	}
-
 	if (typeof window.findParent === 'undefined') {
 		window.findParent = function(node, selector) {
 			while (node && node.parentNode) {
@@ -134,6 +106,54 @@
 	}
 })();
 
+/* 本插件局部使用的 DOM 工厂，不修改 LuCI 的全局 E。
+ * 25.12 的 dom.append 会将数组中的 null/undefined 转成文字；先展开并过滤
+ * 条件节点，再交给 dom.create 绑定事件和属性。纯文本总以数组传入，避免把
+ * 模组名称、短信和 AT 返回值当作 HTML。数值 0 必须保留。 */
+function E(tag, attrs, children) {
+	var nodes = [];
+	function add(value) {
+		if (Array.isArray(value)) value.forEach(add);
+		else if (value != null && value !== false) nodes.push(value);
+	}
+	add(children);
+	return dom.create(tag, attrs || {}, nodes);
+}
+
+/* 空值只影响展示，不改变 RPC 原始数据或 UCI 配置。false/0 是有效上报。 */
+function hasValue(value) {
+	if (value == null) return false;
+	if (typeof value === 'number') return isFinite(value);
+	if (typeof value === 'boolean') return true;
+	if (Array.isArray(value)) return value.some(hasValue);
+	if (typeof value === 'object') {
+		if (value.nodeType) return true;
+		return Object.keys(value).some(function(k) { return hasValue(value[k]); });
+	}
+	return !/^(?:\s*|[-–—]+|n\s*\/\s*a|none|null|undefined|nan|unknown|not available|not supported|unsupported)$/i.test(String(value).trim());
+}
+
+function valueText(value) {
+	if (!hasValue(value)) return '';
+	if (Array.isArray(value)) return value.filter(hasValue).map(valueText).join(', ');
+	return typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+function dataRow(label, value, rowClass, keyClass, valClass) {
+	if (!hasValue(value)) return null;
+	return E('div', { 'class': rowClass || 'qm-kv-row' }, [
+		E('span', { 'class': keyClass || '' }, label),
+		value && value.nodeType ? value : E('strong', { 'class': valClass || '' }, valueText(value))
+	]);
+}
+
+/* 23.05 / 24.10 的 uci.js 没有 commit()；使用各版本共有的官方 UCI RPC。
+ * 调用前仍由 CBI Map.save() 校验并保存当前表单，不应用其它配置。 */
+var callUciCommit = rpc.declare({ object: 'uci', method: 'commit', params: ['config'], expect: { }, reject: true, nobatch: true });
+function commitConfig(config) {
+	return callUciCommit(config);
+}
+
 var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { }, nobatch: true });
 var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { }, nobatch: true });
 var callInfo = rpc.declare({ object: 'qmodem', method: 'info', params: ['config_section'], expect: { }, nobatch: true });
@@ -148,6 +168,13 @@ var callGetNeighborcell = rpc.declare({ object: 'qmodem', method: 'get_neighborc
 var callGetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'get_network_prefer', params: ['config_section'], expect: { }, nobatch: true });
 var callGetDns = rpc.declare({ object: 'qmodem', method: 'get_dns', params: ['config_section'], expect: { }, nobatch: true });
 var callGetSms = rpc.declare({ object: 'qmodem', method: 'get_sms', params: ['config_section'], expect: { }, nobatch: true });
+/* 新版官方短信服务独立保存收发记录；它与 qmodem.get_sms 的 SIM 列表不同。 */
+var callSmsConfig = rpc.declare({ object: 'qmodem.sms', method: 'config_get', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
+var callSmsList = rpc.declare({ object: 'qmodem.sms', method: 'list', params: ['modem_id', 'limit', 'offset'], expect: { }, nobatch: true, reject: true });
+var callSmsSend = rpc.declare({ object: 'qmodem.sms', method: 'send', params: ['modem_id', 'recipient', 'content'], expect: { }, nobatch: true, reject: true });
+var callSmsDelete = rpc.declare({ object: 'qmodem.sms', method: 'delete', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsMarkRead = rpc.declare({ object: 'qmodem.sms', method: 'mark_read', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsSync = rpc.declare({ object: 'qmodem.sms', method: 'sync', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
 var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disabled_features', params: ['config_section'], expect: { }, nobatch: true });
 var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { }, nobatch: true });
 var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { }, nobatch: true });
@@ -169,6 +196,13 @@ var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset'
 // status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并
 var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { }, nobatch: true });
 var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { }, nobatch: true });
+var callSupportPorts = rpc.declare({ object: 'qmodem_support', method: 'ports', expect: { }, nobatch: true });
+var callCustomList = rpc.declare({ object: 'qmodem_support', method: 'custom_list', expect: { }, nobatch: true });
+var callCustomSave = rpc.declare({ object: 'qmodem_support', method: 'custom_save',
+	params: ['model', 'bus', 'manufacturer', 'manufacturer_id', 'platform', 'modes', 'pdp_index',
+		'wcdma_band', 'lte_band', 'nsa_band', 'sa_band', 'edit'], expect: { }, nobatch: true });
+var callCustomDelete = rpc.declare({ object: 'qmodem_support', method: 'custom_delete', params: ['model', 'bus'], expect: { }, nobatch: true });
+var callProbePort = rpc.declare({ object: 'qmodem_support', method: 'probe_port', params: ['port'], expect: { }, nobatch: true });
 
 var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { }, nobatch: true });
 var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { }, nobatch: true });
@@ -393,6 +427,36 @@ function requestRefresh(section, domains, force) {
 		TASK_RPC_TIMEOUT, null);
 }
 
+/* 显式“刷新”必须等待后台采集结束；直接重载页面只会再次显示旧快照。 */
+function refreshPage(section, domains, button) {
+	if (button && button.disabled) return Promise.resolve(null);
+	if (!section) { window.location.reload(); return Promise.resolve(null); }
+	var label = button && button.textContent;
+	if (button) {
+		button.disabled = true;
+		button.textContent = _('正在刷新…');
+		button.setAttribute('aria-busy', 'true');
+	}
+	var refresh = cacheLayerUsable()
+		? runTask(function() { return callTaskRefresh(section, domains || null); }, 120000)
+		: Promise.resolve(null);
+	return refresh.then(function(result) {
+		touch(section);
+		window.location.reload();
+		return result;
+	}, function(err) {
+		notify(null, E('p', {}, _('刷新失败：%s').format((err && err.message) || String(err))), 'danger');
+		return null;
+	}).then(function(result) {
+		if (button) {
+			button.disabled = false;
+			button.textContent = label;
+			button.removeAttribute('aria-busy');
+		}
+		return result;
+	});
+}
+
 /*
  * 统一的「缓存优先」读取。
  *   命中缓存      → 直接返回（不产生任何 modem 访问）
@@ -473,10 +537,27 @@ function qmodemAction(section, method, args, directFn, timeoutMs) {
 	if (!cacheLayerUsable())
 		return withTimeoutReject(directFn(), DIRECT_RPC_TIMEOUT, _('Modem request timed out'));
 
+	/* 外层 config_section 供任务队列加锁；args 会原样交给 QModem，必须也带目标。 */
+	var payload = Object.assign({}, args || {}, { config_section: section });
 	return runTask(function() {
-		return callTaskAction(section, 'qmodem', method, args || {});
+		return callTaskAction(section, 'qmodem', method, payload);
 	}, timeoutMs || 150000).then(function(result) {
 		touch(section);
+		/* 命令执行完后让 worker 更新受影响的域，页面轮询才会看到新状态。 */
+		var domains = {
+			set_mode: [ 'network', 'status' ],
+			set_lockband: [ 'network', 'signal' ],
+			set_network_prefer: [ 'network', 'signal' ],
+			set_neighborcell: [ 'network', 'signal' ],
+			set_sim_slot: [ 'sim', 'status' ],
+			set_traffic_reset_schedule: [ 'stats' ],
+			clear_stats: [ 'stats' ],
+			clear_dial_log: [ 'status' ],
+			modem_dial: [ 'status', 'network' ],
+			modem_hang: [ 'status', 'network' ],
+			modem_redial: [ 'status', 'network' ]
+		}[method];
+		if (domains) requestRefresh(section, domains, true).catch(function() {});
 		return result;
 	}, function(err) {
 		touch(section);
@@ -541,14 +622,24 @@ function createPoller(opts) {
 
 	function start() {
 		if (stopped) return;
-		if (timer === null && !busy) schedule();
+		/* render() 返回后 LuCI 才把节点挂进 document。首次启动时不能
+		 * 调用 alive()，否则所有页面的轮询器都会在挂载前被永久停止。 */
+		if (timer === null && !busy) {
+			var iv = (typeof document !== 'undefined' && document.hidden) ? hiddenInterval : interval;
+			timer = window.setTimeout(tick, iv);
+		}
+	}
+	function kick() {
+		if (stopped || busy) return;
+		if (timer !== null) { window.clearTimeout(timer); timer = null; }
+		tick();
 	}
 	function stop() {
 		stopped = true;
 		if (timer !== null) { window.clearTimeout(timer); timer = null; }
 	}
 
-	return { start: start, stop: stop, isRunning: function() { return !stopped; } };
+	return { start: start, stop: stop, kick: kick, isRunning: function() { return !stopped; } };
 }
 
 /*
@@ -583,7 +674,7 @@ function liveView(view, res, opts) {
 			return false;
 
 		var active = (typeof document !== 'undefined') ? document.activeElement : null;
-		if (active && holder.contains(active) &&
+		if (opts.skipIfFocused !== false && active && holder.contains(active) &&
 			/^(input|textarea|select)$/i.test(active.tagName || ''))
 			return true;
 
@@ -617,7 +708,7 @@ function liveView(view, res, opts) {
 		});
 	}
 
-	paint(res);
+	var initialPaint = paint(res);
 
 	if (res && res.section && opts.paint && opts.domains) {
 		if (view.poller && view.poller.stop) view.poller.stop();
@@ -643,6 +734,15 @@ function liveView(view, res, opts) {
 			}
 		});
 		view.poller.start();
+		/* 旧版短信首屏先显示读取中；AT 返回后立即补画，无需用户点刷新。
+		 * 失败也补画一次，让 collect() 的错误提示及时出现。 */
+		if (opts.wakeOn) Promise.resolve(opts.wakeOn).then(function() {}, function() {}).then(function() {
+			return initialPaint;
+		}).then(function() {
+			window.setTimeout(function() {
+				if (view.poller && view.poller.isRunning()) view.poller.kick();
+			}, 0);
+		});
 	}
 
 	if (view.poller)
@@ -685,11 +785,51 @@ function registerLivePoller(poller) {
 /* ------------------------------------------------------------------ */
 
 // 从 { modem_info: [ {key,value,...} ] } 数组中按 key 取出 value
+var INFO_KEYS = [
+	[ 'name', 'model', 'Model Name' ],
+	[ 'manufacturer', 'vendor' ],
+	[ 'revision', 'firmware', 'Firmware Version' ],
+	[ 'at_port', 'AT Port' ],
+	[ 'connect_status', 'connection_status' ],
+	[ 'SIM Status', 'sim_status' ],
+	[ 'SIM Slot', 'sim_slot' ],
+	[ 'SIM Number', 'MSISDN', 'Phone Number', 'phone_number' ],
+	[ 'ISP', 'operator', 'Operator Name' ],
+	[ 'network_mode', 'Network Type', 'Radio Access Technology' ],
+	[ 'Physical Cell ID', 'PCI', 'physical_cell_id' ],
+	[ 'Cell ID', 'CID', 'cell_id', 'NR Cell ID' ],
+	[ 'DL Bandwidth', 'dl_bandwidth' ], [ 'UL Bandwidth', 'ul_bandwidth' ],
+	[ 'IMEI' ], [ 'IMSI' ], [ 'ICCID' ], [ 'temperature' ]
+];
+
+function infoKey(key) { return String(key).toLowerCase().replace(/[\s_-]/g, ''); }
+
+function flagKeys(obj) {
+	return Object.keys(obj || {}).filter(function(k) { return /^(?:0|1|true|false)$/i.test(String(obj[k])); });
+}
+
+function isEnabled(value) { return /^(?:1|true)$/i.test(String(value)); }
+
+/* 下列 AT^ 私有设置仅在已知的 MT5700 系列上提供；其它品牌仍可用 AT 终端。 */
+function supportsTdTechAt(section, base) {
+	var model = findEntry(base, 'name') || '';
+	if (!model) try { model = uci.get('qmodem', section, 'model') || ''; } catch (e) {}
+	return /\bMT5700M?(?:[-\s]|$)/i.test(model);
+}
+
 function findEntry(arr, key) {
 	if (!Array.isArray(arr)) return undefined;
 	for (var i = 0; i < arr.length; i++) {
-		if (arr[i] && arr[i].key === key) return arr[i].value;
+		if (arr[i] && arr[i].key === key && hasValue(arr[i].value)) return arr[i].value;
 	}
+	var wanted = [ infoKey(key) ];
+	INFO_KEYS.forEach(function(keys) {
+		if (keys.some(function(k) { return infoKey(k) === wanted[0]; }))
+			wanted = keys.map(infoKey);
+	});
+	for (var j = 0; j < arr.length; j++)
+		if (arr[j] && wanted.indexOf(infoKey(arr[j].key)) !== -1 && hasValue(arr[j].value))
+			return arr[j].value;
 	return undefined;
 }
 
@@ -702,7 +842,15 @@ function entryList(v) {
 function entryMap(arr) {
 	var map = {};
 	entryList(arr).forEach(function(item) {
-		if (item && item.key != null) map[item.key] = item.value;
+		if (item && item.key != null && hasValue(item.value)) map[item.key] = item.value;
+	});
+	INFO_KEYS.forEach(function(keys) {
+		keys.forEach(function(key) {
+			if (!hasValue(map[key])) {
+				var value = findEntry(arr, key);
+				if (hasValue(value)) map[key] = value;
+			}
+		});
 	});
 	return map;
 }
@@ -869,6 +1017,12 @@ function getLockBand(section) {
 function getNeighborCell(section) {
 	return cachedValue(section, 'network', 'neighborcell', {}, function() { return callGetNeighborcell(section); });
 }
+
+/* 用户主动扫描时绕过定时缓存，由任务队列取得实时邻区信息；未安装缓存层时兼容直连旧 QModem。 */
+function getNeighborCellFresh(section) {
+	return qmodemAction(section, 'get_neighborcell', {},
+		function() { return withTimeoutReject(callGetNeighborcell(section), DIRECT_RPC_TIMEOUT, _('扫描邻区超时')); }, 120000);
+}
 function getNetworkPrefer(section) {
 	return cachedValue(section, 'network', 'network_prefer', {}, function() { return callGetNetworkPrefer(section); });
 }
@@ -877,22 +1031,279 @@ function getDns(section) {
 }
 
 /*
- * 短信列表不在 worker 的周期采集范围内（部分模组读短信很慢），
- * 因此：缓存命中就直接用；没有缓存则后台排任务 + 先返回空列表，
- * 由页面的轮询在数据到位后补上。绝不为了首屏去同步读 SIM。
+ * 旧版 QModem 没有 qmodem.sms 服务。有些固件的短信缓存一直为 missing，
+ * 即使官方 qmodem.get_sms 可以正常读取。
+ * 仅旧版且无有效缓存时直读，30 秒内复用结果与未完成请求，避免每轮轮询
+ * 都占用 AT 串口；新版 qmodem.sms 数据库 / direct 模式逻辑不变。
  */
-function getSms(section) {
+var LEGACY_SMS_TTL = 30000;
+var LEGACY_SMS_TIMEOUT = 18000;
+var legacySmsStore = {};
+var legacySmsInFlight = {};
+var legacySmsLastAttempt = {};  /* 后台读取失败时也限流，防止每次轮询重试 */
+var legacySmsError = {};
+
+function smsReadInFlight(section) {
+	return legacySmsInFlight[section] || null;
+}
+
+function readLegacySms(section) {
+	var saved = legacySmsStore[section];
+	if (legacySmsInFlight[section])
+		return legacySmsInFlight[section];
+	if (saved && Date.now() - saved.ts < LEGACY_SMS_TTL)
+		return Promise.resolve(saved.value);
+	/* 缓存存在时的后台读取若失败，30 秒内不再占用 AT 端口重试。
+	 * 缓存缺失的首次读取仍然给出实际错误，防止静默显示 0 条短信。 */
+	if (legacySmsLastAttempt[section] && Date.now() - legacySmsLastAttempt[section] < LEGACY_SMS_TTL)
+		return saved ? Promise.resolve(saved.value) :
+			Promise.reject(new Error(_('旧版短信读取失败，稍后自动重试。')));
+	legacySmsLastAttempt[section] = Date.now();
+
+	var task = withTimeoutReject(callGetSms(section), LEGACY_SMS_TIMEOUT,
+		_('读取旧版 QModem 短信超时，请检查模组 AT 端口。')).then(function(result) {
+		if (!result || typeof result !== 'object' ||
+			(Array.isArray(result) && !result.length) ||
+			result.error || result.status === 'error')
+			throw new Error((result && result.error) || _('旧版 QModem 未返回有效短信数据。'));
+		legacySmsStore[section] = { ts: Date.now(), value: result };
+		delete legacySmsError[section];
+		return result;
+	});
+	legacySmsInFlight[section] = task.then(function(result) {
+		delete legacySmsInFlight[section];
+		return result;
+	}, function(err) {
+		delete legacySmsInFlight[section];
+		legacySmsError[section] = (err && err.message) || String(err);
+		throw err;
+	});
+	return legacySmsInFlight[section];
+}
+
+function getSms(section, legacyMode) {
 	return fetchSnapshot(section, ['sms']).then(function(snap) {
 		var env = envelopeOf(snap, 'sms');
-		if (snap && env && env.data && env.data.get_sms)
-			return env.data.get_sms;
+		var cached = env && env.data && env.data.get_sms;
+		var hasCache = cached && typeof cached === 'object' && Object.keys(cached).length;
+
+		if (legacyMode) {
+			if (hasCache) {
+				/* stale-while-revalidate：缓存先返回，后台再向旧版 QModem 只读请求。
+				 * 请求完成后短存于内存，下轮 4 秒轮询显示新短信，不阻塞首屏。
+				 * 不通过 worker 同时采集，避免并发争抢模组 AT 端口。 */
+				readLegacySms(section).catch(function() { /* 后台失败时保留旧缓存 */ });
+				var fresh = legacySmsStore[section];
+				var cacheTime = Number(env.updated) * 1000 || 0;
+				return fresh && fresh.ts >= cacheTime ? fresh.value : cached;
+			}
+			/* 缓存缺失时也不能把旧版 QModem 的 AT 读取放到首屏 await。 */
+			readLegacySms(section).catch(function() {});
+			var latest = legacySmsStore[section];
+			return latest ? latest.value : legacySmsError[section]
+				? { error: legacySmsError[section] } : { _smsPending: true };
+		}
+
+		/* 新版 qmodem.sms/direct 维持原来的缓存优先逻辑。 */
+		if (hasCache) {
+			if (env.stale || env.status === 'missing') requestRefresh(section, ['sms']);
+			return cached;
+		}
 
 		if (!snap)
 			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
 
-		requestRefresh(section, ['sms'], true);
+		requestRefresh(section, ['sms']);
 		return {};
 	});
+}
+
+var smsServiceMissingUntil = 0;
+
+function smsServiceResult(result) {
+	if (!result || typeof result !== 'object' || result.error || result.status === 'error' || result.success === false)
+		throw new Error((result && (result.error || result.modem_response)) || _('短信服务未返回有效结果。'));
+	return result;
+}
+
+function smsServiceAction(result) {
+	result = smsServiceResult(result);
+	if (result.status !== 'success') throw new Error(_('短信服务未确认操作成功，请检查结果后再重试。'));
+	return result;
+}
+
+/*
+ * 不同版本的 rpc.js 对“对象不存在”有两种错误格式：
+ * 旧版 ubus code 4 / 3；LuCI 25.12 为 -32000: Object not found。
+ * 只在明确缺少服务/方法时回退旧版 qmodem.get_sms，避免隐藏权限与数据库错误。
+ */
+function isMissingSmsService(err) {
+	var message = String((err && err.message) || err || '');
+	return !!(err && (err.code === 3 || err.code === 4)) ||
+		/ubus code [34](?::|\b)/i.test(message) ||
+		/(?:error\s+)?(?:-32000|-32601)\s*:\s*(?:Object|Method) not found\b/i.test(message);
+}
+
+/* 只对“对象/方法不存在”降级；数据库损坏、无权限或超时都应显示原错误。 */
+function getSmsServiceConfig(section) {
+	if (Date.now() < smsServiceMissingUntil) return Promise.resolve(null);
+	return withTimeoutReject(callSmsConfig(section), 10000, _('读取短信服务超时')).then(function(result) {
+		result = smsServiceResult(result);
+		if (!/^(?:direct|database_poll|database_urc)$/.test(result.mode || ''))
+			throw new Error(_('短信服务返回了未知接收模式。'));
+		return result;
+	}, function(err) {
+		if (isMissingSmsService(err)) {
+			smsServiceMissingUntil = Date.now() + 60000;
+			return null;
+		}
+		throw err;
+	});
+}
+
+function getSmsInbox(section) {
+	return getSmsServiceConfig(section).then(function(config) {
+		/* direct 模式仍读后台缓存，首屏不通过新服务同步访问串口。 */
+		if (!config || config.mode === 'direct')
+			return getSms(section, !config).then(function(raw) {
+				if (raw && raw.error) throw new Error(raw.error);
+				return Object.assign({}, Array.isArray(raw) ? { messages: raw } : (raw || {}), {
+					_smsSource: 'modem', _smsConfig: config
+				});
+			});
+
+		var messages = [], seen = Object.create(null);
+		function page(offset) {
+			return withTimeoutReject(callSmsList(section, 500, offset), 10000, _('读取短信数据库超时')).then(function(raw) {
+				raw = smsServiceResult(raw);
+				if (raw.mode && raw.mode !== config.mode)
+					throw new Error(_('短信接收模式已改变，请刷新后重试。'));
+				var list = raw.messages || raw.received || raw.msg;
+				if (!Array.isArray(list)) throw new Error(_('短信服务未返回消息列表。'));
+				var before = messages.length;
+				list.forEach(function(item) {
+					if (!item || typeof item !== 'object' || item.id == null || seen[String(item.id)]) return;
+					seen[String(item.id)] = true; messages.push(item);
+				});
+				var more = list.length === 500;
+				if (more && messages.length > before && offset < 4500) return page(offset + list.length);
+				return { messages: messages, _smsSource: 'database', _smsConfig: config, _smsTruncated: more };
+			});
+		}
+		return page(0);
+	});
+}
+
+function refreshSmsInbox(section, source) {
+	if (source !== 'database') return getSmsServiceConfig(section).then(function(config) {
+		if (!config) {
+			delete legacySmsStore[section];
+			delete legacySmsLastAttempt[section];
+			return readLegacySms(section);
+		}
+		return runTask(function() { return callTaskRefresh(section, [ 'sms' ]); }, 90000)
+			.then(function(result) { touch(section); return result; });
+	});
+	return withTimeoutReject(callSmsSync(section), 45000, _('短信同步超时')).then(smsServiceAction);
+}
+
+/* 数据库模式的发送不做旧接口重试，超时/失败后交由用户核对发送结果。 */
+function sendSmsInbox(section, phoneNumber, content, source) {
+	if (source !== 'database') return sendSms(section, phoneNumber, content).then(smsServiceResult);
+	return withTimeoutReject(callSmsSend(section, phoneNumber, content), 60000, _('短信发送超时，请核对发送记录后再决定是否重试。')).then(smsServiceAction);
+}
+
+/*
+ * 老版本 qmodem.delete_sms 的 index 属于 ubus String（并非 Integer），
+ * 支持 "1 2 3" 同时删除一条分段短信；0 也是合法的模组槽位。
+ * 失败必须保留原消息和错误，不能当作成功后只刷新页面。
+ */
+function modemSmsDeleteResult(result) {
+	if (!result || typeof result !== 'object')
+		throw new Error(_('QModem 没有返回删除结果。'));
+	var body = result.delete_sms && typeof result.delete_sms === 'object' ? result.delete_sms :
+		(result.result && typeof result.result === 'object' ? result.result : result);
+	var status = body.status === undefined ? result.status : body.status;
+	var reason = body.error || result.error || body.modem_response || result.modem_response;
+	if (reason || body.success === false || result.success === false ||
+		status === false || status === 0 || status === '0' ||
+		typeof status === 'string' && /^(?:error|failed|failure)$/i.test(status))
+		throw new Error(String(reason || _('模组拒绝删除短信，请检查短信存储位置。')));
+	/* 官方响应 result.status="1"；没有状态时不能仅凭任务完成判断成功，
+	 * 后续将重新读取模组短信并核对存储索引。 */
+	return status === '1' || status === 1 || status === true || status === 'success' ||
+		body.success === true || result.success === true || result.result === 'success';
+}
+
+function modemSmsItems(raw) {
+	if (Array.isArray(raw)) return raw;
+	if (!raw || typeof raw !== 'object') return null;
+	var keys = [ 'sms', 'msg', 'messages', 'received' ];
+	for (var i = 0; i < keys.length; i++)
+		if (raw[keys[i]] && typeof raw[keys[i]] === 'object')
+			return modemSmsItems(raw[keys[i]]);
+	return null;
+}
+
+function smsStorageIndexes(indexes) {
+	var tokens = [];
+	(indexes || []).forEach(function(item) {
+		String(item).trim().split(/[\s,;]+/).forEach(function(value) {
+			if (/^\d+$/.test(value) && tokens.indexOf(value) === -1) tokens.push(value);
+		});
+	});
+	return tokens;
+}
+function deleteSmsMessage(section, message) {
+	if (message.source === 'database') {
+		var id = Number(message.index);
+		if (!Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error(_('无效的短信记录编号。')));
+		return withTimeoutReject(callSmsDelete(section, id), 10000, _('删除短信超时')).then(smsServiceAction);
+	}
+	var rawIndexes = message.indexes && message.indexes.length ? message.indexes : [message.index];
+	var indexes = smsStorageIndexes(rawIndexes);
+	if (!indexes.length)
+		return Promise.reject(new Error(_('短信缺少有效的模组存储索引，不能删除。')));
+	/* 与 QModem 官方短信页一致，先删较大的槽位，避免较小槽位删除后
+	 * 模组重新编排索引而删错后续分段。 */
+	indexes.sort(function(a, b) { return Number(b) - Number(a); });
+	/* 先等已有读取结束，避免它在删除后把旧数据重新写入短信缓存。 */
+	var reading = legacySmsInFlight[section];
+	return (reading ? reading.catch(function() {}) : Promise.resolve()).then(function() {
+		return deleteSms(section, indexes.join(' '));
+	}).then(function(result) {
+		modemSmsDeleteResult(result);
+		/* 官方旧界面的脚本可能只报告命令已执行；单条、多段均需回读确认。
+		 * 验证完成前保留页面原消息，不凭任务结束或 status=1 隐藏短信。 */
+		var previous = legacySmsInFlight[section];
+		return (previous ? previous.catch(function() {}) : Promise.resolve()).then(function() {
+			delete legacySmsStore[section];
+			delete legacySmsLastAttempt[section];
+			return readLegacySms(section).then(function(fresh) {
+				var items = modemSmsItems(fresh);
+				if (!items) throw new Error(_('删除命令已发送，但无法核对模组短信列表。'));
+				var remaining = items.some(function(item) {
+					return item && smsStorageIndexes([ item.index, item.indexes || '' ]).some(function(index) {
+						return indexes.indexOf(index) !== -1;
+					});
+				});
+				if (remaining) throw new Error(_('模组仍返回这条短信，删除未生效。'));
+				return result;
+			});
+		});
+	}).then(function(result) {
+		touch(section);
+		requestRefresh(section, [ 'sms' ], true).catch(function() {});
+		return result;
+	});
+}
+
+function markSmsRead(section, messages) {
+	return (messages || []).filter(function(item) { return item.source === 'database' && item.unread; }).reduce(function(chain, item) {
+		return chain.then(function() {
+			return withTimeoutReject(callSmsMarkRead(section, Number(item.index)), 10000, _('标记短信已读超时')).then(smsServiceAction);
+		});
+	}, Promise.resolve());
 }
 
 function getDisabledFeatures(section) {
@@ -973,6 +1384,18 @@ function getSupportStatus() {
 	return supportFromAnySection();
 }
 
+function getSupportPorts() { return withTimeout(callSupportPorts(), DIRECT_RPC_TIMEOUT,
+	{ ports: [], error: '串口映射服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function getCustomModels() { return withTimeout(callCustomList(), DIRECT_RPC_TIMEOUT,
+	{ entries: [], error: '自定义模组服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function saveCustomModel(data) {
+	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
+		data.platform, data.modes, data.pdp_index, data.wcdma_band, data.lte_band,
+		data.nsa_band, data.sa_band, data.edit || '0');
+}
+function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
+function probeSupportPort(port) { return callProbePort(port); }
+
 /* support 域与模组无关：从当前 section 的快照里取；拿不到再直连一次 */
 function supportFromAnySection() {
 	return resolveSection().then(function(section) {
@@ -1030,29 +1453,69 @@ function syncSupport(section) {
  * 缓存层不可用时自动退回直连（带超时）。
  */
 
+/* 兼容官方 at_cfg.res、平铺 response 及旧版 result 字符串。 */
+function atResponseText(raw) {
+	if (raw == null) return '';
+	if (typeof raw === 'string') return raw;
+	if (Array.isArray(raw)) return raw.map(atResponseText).filter(Boolean).join('\n');
+	if (typeof raw !== 'object') return String(raw);
+	var keys = [ 'response', 'at_response', 'res', 'output', 'stdout' ];
+	for (var i = 0; i < keys.length; i++)
+		if (typeof raw[keys[i]] === 'string' && raw[keys[i]] !== '') return raw[keys[i]];
+	if (raw.at_cfg && typeof raw.at_cfg === 'object') return atResponseText(raw.at_cfg);
+	for (var j = 0; j < 2; j++) {
+		var value = raw[j ? 'data' : 'result'];
+		if (value != null && (typeof value === 'object' || (typeof value === 'string' && !/^(?:success|error|failed)$/i.test(value))))
+			return atResponseText(value);
+	}
+	if (typeof raw.message === 'string') return raw.message;
+	return '';
+}
+
+function normalizeAtResult(raw) {
+	var text = atResponseText(raw);
+	var cfg = raw && typeof raw === 'object' && raw.at_cfg;
+	var error = raw && typeof raw === 'object' && (raw.error || raw.success === false || /^(?:error|failed)$/i.test(raw.result || ''));
+	if (cfg && (cfg.status === '0' || cfg.status === 0 || cfg.status === false)) error = true;
+	if (/(?:^|[\r\n])\s*(?:ERROR|\+(?:CME|CMS) ERROR[^\r\n]*)\s*(?:$|[\r\n])/i.test(text)) error = true;
+	if (error) {
+		var reason = (typeof error === 'string' ? error : '') || text || _('模组未返回有效响应，请检查 AT 端口。');
+		var err = new Error(reason);
+		err.response = raw;
+		throw err;
+	}
+	return raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.assign({}, raw, { response: text }) : raw;
+}
+
 /* 发送 AT 命令。atPort 可为空，由 QModem 自行选择默认端口。 */
 function sendAt(section, atPort, command, useUbus) {
 	var params = { at: command };
 	if (atPort) params.port = atPort;
-	if (useUbus !== undefined && useUbus !== null) params.use_ubus = useUbus;
+	if (useUbus !== undefined && useUbus !== null) params.use_ubus_flag = isEnabled(useUbus) ? '1' : '0';
 	var direct = function() { return withTimeoutReject(callSendAt(section, params), DIRECT_RPC_TIMEOUT, _('AT command timed out')); };
 
 	if (!cacheLayerUsable())
-		return direct();
+		return direct().then(normalizeAtResult);
 
 	/* 无端口/无 use_ubus 时走 qmodem_cache.send_at（后端串行化 AT 通道） */
 	if (!atPort && (useUbus === undefined || useUbus === null)) {
-		return runTask(function() { return callTaskSendAt(section, command); }, 30000).then(function(res) {
+		var accepted = false;
+		return runTask(function() {
+			return callTaskSendAt(section, command).then(function(task) { accepted = !!(task && task.task_id); return task; });
+		}, 30000).then(function(res) {
 			touch(section);
 			return res;
-		}, direct);
+		}, function(err) {
+			if (accepted) throw err;
+			return direct();
+		}).then(normalizeAtResult);
 	}
-	return qmodemAction(section, 'send_at', params, direct, 30000);
+	return qmodemAction(section, 'send_at', { params: params }, direct, 30000).then(normalizeAtResult);
 }
 
 function sendSms(section, phoneNumber, content) {
 	var args = { phone_number: phoneNumber, message_content: content };
-	return qmodemAction(section, 'send_sms', args,
+	return qmodemAction(section, 'send_sms', { params: args },
 		function() { return withTimeoutReject(callSendSms(section, args), DIRECT_RPC_TIMEOUT, _('Sending SMS timed out')); }, 60000);
 }
 function sendRawPdu(section, command) {
@@ -1060,8 +1523,12 @@ function sendRawPdu(section, command) {
 		function() { return withTimeoutReject(callSendRawPdu(section, command), DIRECT_RPC_TIMEOUT, _('PDU request timed out')); }, 60000);
 }
 function deleteSms(section, index) {
-	return qmodemAction(section, 'delete_sms', { index: index },
-		function() { return withTimeoutReject(callDeleteSms(section, index), DIRECT_RPC_TIMEOUT, _('Deleting SMS timed out')); }, 60000);
+	/* qmodem.delete_sms index 的 ubus 签名是 String，即便仅一个槽位也不能传数字。 */
+	var value = String(index);
+	if (!/^\d+(?: \d+)*$/.test(value))
+		return Promise.reject(new Error(_('无效的模组短信索引。')));
+	return qmodemAction(section, 'delete_sms', { index: value },
+		function() { return withTimeoutReject(callDeleteSms(section, value), DIRECT_RPC_TIMEOUT, _('删除模组短信超时')); }, 60000);
 }
 function setMode(section, mode) {
 	return qmodemAction(section, 'set_mode', { mode: mode },
@@ -1069,7 +1536,27 @@ function setMode(section, mode) {
 }
 function setImei(section, imei) {
 	return qmodemAction(section, 'set_imei', { imei: imei },
-		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000);
+		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000).then(function(result) {
+		var body = result && result.result && typeof result.result === 'object' ? result.result : result;
+		if (!result || result.error || body && (body.error || body.success === false || body.status === '0' || body.status === 0 || body.status === false))
+			throw new Error(String(result && (result.error || body && body.error) || _('QModem 拒绝写入 IMEI。')));
+		/* QModem 部分版本会回显提交值及 status=1，不能据此认为已生效。
+		 * 直接回读同一模组，避开尚未更新的 worker 快照。 */
+		function readBack(retry) {
+			return withTimeoutReject(callGetImei(section), DIRECT_RPC_TIMEOUT,
+				_('IMEI 写入命令已完成，但模组回读超时，尚无法确认结果。')).then(function(fresh) {
+				var actual = String(fresh && fresh.imei || '').trim();
+				if (actual === imei) {
+					touch(section);
+					requestRefresh(section, [ 'sim' ], true).catch(function() {});
+					return { imei: actual };
+				}
+				if (retry) return new Promise(function(resolve) { window.setTimeout(resolve, 800); }).then(function() { return readBack(false); });
+				throw new Error(_('写入命令已完成，但模组回读的 IMEI 仍为 %s，尚未确认生效。').format(actual || '--'));
+			});
+		}
+		return readBack(true);
+	});
 }
 function setLockBand(section, params) {
 	return qmodemAction(section, 'set_lockband', { params: params },
@@ -1085,7 +1572,7 @@ function setSimSlot(section, slot) {
 }
 function doReboot(section, method) {
 	var args = { method: method || 'soft' };
-	return qmodemAction(section, 'do_reboot', args,
+	return qmodemAction(section, 'do_reboot', { params: args },
 		function() { return withTimeoutReject(callDoReboot(section, args), DIRECT_RPC_TIMEOUT, _('Reboot request timed out')); }, 180000);
 }
 function clearDialLog(section) {
@@ -1108,17 +1595,43 @@ function setSmsStorage(section, storage) {
 	return qmodemAction(section, 'set_sms_storage', { storage: storage },
 		function() { return withTimeoutReject(callSetSmsStorage(section, storage), DIRECT_RPC_TIMEOUT, _('Setting SMS storage timed out')); }, 60000);
 }
+/*
+ * 官方 QModem 对拨号/挂断/重拨的响应为 {"result":{"status":"1"|"0"}}。
+ * task 成功只代表 ubus 请求执行完，不能误认 status=0 的失败为成功。
+ * 在旧固件缺少任务层时，这三种操作使用较长直连超时，不被普通 8s RPC 截断。
+ */
+function requireDialActionSuccess(raw, operation) {
+	var result = raw && raw.result && typeof raw.result === 'object' ? raw.result : raw;
+	if (!result || typeof result !== 'object')
+		throw new Error(operation + _('：QModem 未返回操作结果。'));
+	var status = result.status;
+	if (raw.error || result.error || raw.success === false || result.success === false ||
+		status === '0' || status === 0 || status === false ||
+		typeof status === 'string' && /^(error|failed|failure)$/i.test(status))
+		throw new Error(operation + _('失败：') + String(result.error || raw.error || result.message || _('QModem 拒绝执行该操作。')));
+	if (!(status === '1' || status === 1 || status === true ||
+		status === 'success' || result.success === true || raw.success === true))
+		throw new Error(operation + _('：QModem 未确认操作成功。'));
+	return raw;
+}
+function modemConnectionAction(section, method, directFn, timeoutMs, label) {
+	var action = cacheLayerUsable()
+		? qmodemAction(section, method, {}, directFn, timeoutMs)
+		: withTimeoutReject(directFn(), timeoutMs, label + _('超时，操作可能仍在执行，请检查连接状态。'));
+	return action.then(function(result) {
+		var accepted = requireDialActionSuccess(result, label);
+		touch(section);
+		return accepted;
+	});
+}
 function modemDial(section) {
-	return qmodemAction(section, 'modem_dial', {},
-		function() { return withTimeoutReject(callModemDial(section), DIRECT_RPC_TIMEOUT, _('Dial request timed out')); }, 180000);
+	return modemConnectionAction(section, 'modem_dial', function() { return callModemDial(section); }, 120000, _('开始拨号'));
 }
 function modemHang(section) {
-	return qmodemAction(section, 'modem_hang', {},
-		function() { return withTimeoutReject(callModemHang(section), DIRECT_RPC_TIMEOUT, _('Hangup request timed out')); }, 120000);
+	return modemConnectionAction(section, 'modem_hang', function() { return callModemHang(section); }, 90000, _('挂断连接'));
 }
 function modemRedial(section) {
-	return qmodemAction(section, 'modem_redial', {},
-		function() { return withTimeoutReject(callModemRedial(section), DIRECT_RPC_TIMEOUT, _('Redial request timed out')); }, 180000);
+	return modemConnectionAction(section, 'modem_redial', function() { return callModemRedial(section); }, 120000, _('重新拨号'));
 }
 
 /* 与 modem 无关：直接调用即可 */
@@ -1485,14 +1998,14 @@ var LABEL_ZH = {
 // 把 QModem 的 modem_info 渲染为分组卡片（每 class 一张 mt-ui-card），
 // 用于"完整信息"面板——QModem 返回什么就显示什么。
 function renderInfoGrouped(entries) {
-	var grouped = groupByClass(entries);
+	var grouped = groupByClass(entryList(entries).filter(function(item) { return item && hasValue(item.value); }));
 	var cards = [];
 	Object.keys(grouped).forEach(function(cls) {
 		var rows = grouped[cls].map(function(item) {
 			var rawName = item.full_name || item.key || '';
 			var name = LABEL_ZH[rawName] || _(rawName);
 			var display = item.extra_info ? (name + ' (' + item.extra_info + ')') : name;
-			var val = (item.value == null || item.value === '') ? '--' : String(item.value);
+			var val = valueText(item.value);
 			return E('div', { 'class': 'mt-info-row' }, [
 				E('span', { 'class': 'mt-info-key' }, display),
 				E('strong', { 'class': 'mt-info-val' }, val)
@@ -1509,6 +2022,27 @@ function renderInfoGrouped(entries) {
 /* ------------------------------------------------------------------ */
 /* UI 辅助（保留原 styles/排版/中文文案）                              */
 /* ------------------------------------------------------------------ */
+
+/* LuCI 的 addNotification 默认一直保留。只清理由本插件创建的提示，
+ * 不影响其它插件或 LuCI 自己的通知。 */
+function notify(title, children) {
+	var classes = Array.prototype.slice.call(arguments, 2);
+	var node = ui.addNotification.apply(ui, [ title, children ].concat(classes));
+	if (node && node.parentNode) {
+		var delay = classes.indexOf('danger') !== -1 ? 10000 :
+			classes.indexOf('warning') !== -1 ? 8000 : 5000;
+		window.setTimeout(function() {
+			if (!node.parentNode) return;
+			node.classList.add('fade-out');
+			node.classList.remove('fade-in');
+			/* 兼容没有过渡动画的主题与旧版 LuCI。 */
+			window.setTimeout(function() {
+				if (node.parentNode) node.parentNode.removeChild(node);
+			}, 350);
+		}, delay);
+	}
+	return node;
+}
 
 function formatBytes(value) {
 	var units = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ], index = 0;
@@ -1565,7 +2099,7 @@ function card(title, desc, body, wide) {
 }
 
 function state(label, value) {
-	return E('div', { 'class': 'mt-control-state' }, [ E('span', {}, label), E('strong', {}, value || '--') ]);
+	return dataRow(label, value, 'mt-control-state');
 }
 
 /* 保留历史导出：视图仍在调用 controls.styleNode()。
@@ -1574,15 +2108,15 @@ function state(label, value) {
 function styleNode() {
 	theme.apply();
 	return E('style', {}, [
-		'.mt-ui-page{--mt-ui-accent:var(--qm-accent);--mt-ui-teal:var(--qm-accent-3);--mt-ui-border:var(--border-color-medium,var(--qm-border));--mt-ui-border-soft:var(--border-color-low,var(--qm-border-soft));--mt-ui-surface:var(--background-color-high,var(--qm-surface));--mt-ui-muted:var(--text-color-medium,var(--qm-text-muted));max-width:1120px;margin:0 auto;color:var(--text-color-high,var(--qm-text))}',
+		'.mt-ui-page{--mt-ui-accent:var(--qm-accent);--mt-ui-teal:var(--qm-accent-3);--mt-ui-border:var(--qm-border);--mt-ui-border-soft:var(--qm-border-soft);--mt-ui-surface:var(--qm-surface);--mt-ui-muted:var(--qm-text-muted);max-width:1120px;margin:0 auto;color:var(--qm-text)}',
 		'.mt-ui-hero{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 24px;margin:0 0 16px;border:0;border-radius:16px;background:var(--qm-hero-gradient);color:var(--qm-on-hero);box-shadow:0 10px 28px var(--qm-shadow-color)}.mt-ui-hero h2{margin:0 0 6px;color:var(--qm-on-hero);font-size:24px;line-height:1.2}.mt-ui-hero p,.mt-ui-hero [class*="-sub"]{margin:0;color:var(--qm-on-hero);font-size:12px;line-height:1.5}.mt-ui-hero [class*="kicker"],.mt-ui-hero [class*="eyebrow"]{color:var(--qm-on-hero);font-size:11px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}',
 		'.mt-ui-card{border:1px solid var(--mt-ui-border);border-radius:14px;background:var(--mt-ui-surface);box-shadow:0 3px 12px var(--qm-shadow-color)}',
 		'.mt-ui-page .btn{border-radius:9px}.mt-ui-page input,.mt-ui-page select,.mt-ui-page textarea{border-radius:8px}',
-		'.mt-ui-details{margin-top:14px;border:1px solid var(--mt-ui-border);border-radius:14px;background:var(--mt-ui-surface);overflow:hidden}.mt-ui-details>summary{display:grid;grid-template-columns:minmax(0,1fr) 34px;align-items:center;gap:14px;min-height:54px;padding:10px 12px 10px 18px;cursor:pointer;list-style:none;transition:background-color .16s ease}.mt-ui-details>summary::-webkit-details-marker{display:none}.mt-ui-details>summary:hover{background:var(--background-color-low,#f6f8fa)}.mt-ui-summary-copy{min-width:0}.mt-ui-summary-title{display:block;font-size:14px;font-weight:700;line-height:1.35}.mt-ui-summary-desc{display:block;margin-top:3px;color:var(--mt-ui-muted);font-size:11px;font-weight:400;line-height:1.45}.mt-ui-chevron{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--mt-ui-border-soft);border-radius:9px;background:var(--background-color-low,#f5f7f9);color:var(--mt-ui-muted);font-size:22px;line-height:1;transform:rotate(0deg);transition:transform .18s ease,background-color .18s ease,color .18s ease}.mt-ui-details[open]>summary .mt-ui-chevron{transform:rotate(90deg);background:var(--qm-accent-soft);color:var(--qm-accent)}.mt-ui-details[open]>summary{border-bottom:1px solid var(--mt-ui-border-soft)}.mt-ui-details:not([open])>.mt-ui-details-body{display:none}',
-		'.mt-control-section{margin-top:20px}.mt-control-section-head{margin:0 0 11px}.mt-control-section-head h3{margin:0 0 4px;font-size:17px}.mt-control-section-head p{margin:0;color:var(--text-color-medium,var(--qm-text-muted));font-size:12px;line-height:1.5}',
-		'.mt-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.mt-control-card{padding:18px;border:1px solid var(--border-color-medium,var(--qm-border));border-radius:13px;background:var(--background-color-high,var(--qm-surface))}.mt-control-card.wide{grid-column:1/-1}',
-		'.mt-control-card h3{margin:0 0 5px;font-size:15px}.mt-control-desc{font-size:12px;color:var(--text-color-medium,var(--qm-text-muted));margin-bottom:14px;line-height:1.5}.mt-control-row{display:grid;grid-template-columns:145px 1fr;gap:10px;align-items:center;margin:11px 0}.mt-control-row label{font-size:12px;color:var(--text-color-medium,var(--qm-text-muted))}.mt-control-row input,.mt-control-row select{width:100%;box-sizing:border-box}',
-		'.mt-control-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}.mt-control-note{padding:10px 12px;border-radius:8px;background:var(--qm-warn-soft);color:var(--qm-warn);font-size:11px;line-height:1.5;margin-top:12px}.mt-control-state{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--border-color-low,var(--qm-border-soft));font-size:12px}.mt-control-state:last-child{border-bottom:0}.mt-control-state span{color:var(--text-color-medium,var(--qm-text-muted))}.mt-control-state strong{text-align:right}.mt-control-state-current{background:var(--qm-accent-soft);border:1px solid var(--qm-accent-border);border-radius:8px;padding:9px 12px;margin:8px 0}.mt-control-state-current span{color:var(--qm-accent)}.mt-control-state-current strong{color:var(--qm-accent);font-weight:700}',
+		'.mt-ui-details{margin-top:14px;border:1px solid var(--mt-ui-border);border-radius:14px;background:var(--mt-ui-surface);overflow:hidden}.mt-ui-details>summary{display:grid;grid-template-columns:minmax(0,1fr) 34px;align-items:center;gap:14px;min-height:54px;padding:10px 12px 10px 18px;cursor:pointer;list-style:none;transition:background-color .16s ease}.mt-ui-details>summary::-webkit-details-marker{display:none}.mt-ui-details>summary:hover{background:var(--qm-surface-2)}.mt-ui-summary-copy{min-width:0}.mt-ui-summary-title{display:block;font-size:14px;font-weight:700;line-height:1.35}.mt-ui-summary-desc{display:block;margin-top:3px;color:var(--mt-ui-muted);font-size:11px;font-weight:400;line-height:1.45}.mt-ui-chevron{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:1px solid var(--mt-ui-border-soft);border-radius:9px;background:var(--qm-surface-2);color:var(--mt-ui-muted);font-size:22px;line-height:1;transform:rotate(0deg);transition:transform .18s ease,background-color .18s ease,color .18s ease}.mt-ui-details[open]>summary .mt-ui-chevron{transform:rotate(90deg);background:var(--qm-accent-soft);color:var(--qm-accent)}.mt-ui-details[open]>summary{border-bottom:1px solid var(--mt-ui-border-soft)}.mt-ui-details:not([open])>.mt-ui-details-body{display:none}',
+		'.mt-control-section{margin-top:20px}.mt-control-section-head{margin:0 0 11px}.mt-control-section-head h3{margin:0 0 4px;font-size:17px}.mt-control-section-head p{margin:0;color:var(--qm-text-muted);font-size:12px;line-height:1.5}',
+		'.mt-control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.mt-control-card{padding:18px;border:1px solid var(--qm-border);border-radius:13px;background:var(--qm-surface)}.mt-control-card.wide{grid-column:1/-1}',
+		'.mt-control-card h3{margin:0 0 5px;font-size:15px}.mt-control-desc{font-size:12px;color:var(--qm-text-muted);margin-bottom:14px;line-height:1.5}.mt-control-row{display:grid;grid-template-columns:145px 1fr;gap:10px;align-items:center;margin:11px 0}.mt-control-row label{font-size:12px;color:var(--qm-text-muted)}.mt-control-row input,.mt-control-row select{width:100%;box-sizing:border-box}',
+		'.mt-control-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}.mt-control-note{padding:10px 12px;border-radius:8px;background:var(--qm-warn-soft);color:var(--qm-warn);font-size:11px;line-height:1.5;margin-top:12px}.mt-control-state{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12px}.mt-control-state:last-child{border-bottom:0}.mt-control-state span{color:var(--qm-text-muted)}.mt-control-state strong{text-align:right}.mt-control-state-current{background:var(--qm-accent-soft);border:1px solid var(--qm-accent-border);border-radius:8px;padding:9px 12px;margin:8px 0}.mt-control-state-current span{color:var(--qm-accent)}.mt-control-state-current strong{color:var(--qm-accent);font-weight:700}',
 		'.mt-control-card.mt-ui-card{border-radius:14px}',
 		'.mt-modem-bar{display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:10px 14px;border:1px solid var(--mt-ui-border);border-radius:12px;background:var(--mt-ui-surface)}.mt-modem-bar-label{font-size:12px;font-weight:700;color:var(--mt-ui-muted);white-space:nowrap}.mt-modem-select{min-width:220px;max-width:420px}',
 		'.mt-info-all{margin-top:14px}.mt-info-all>h3{margin:0 0 4px;font-size:16px}.mt-info-all>p{margin:0 0 12px;color:var(--mt-ui-muted);font-size:12px;line-height:1.5}.mt-info-grid-all{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}',
@@ -1604,11 +2138,11 @@ function confirmModal(title, message, onConfirm, restartRequired) {
 				'class': 'btn cbi-button-negative',
 				'click': function() {
 					ui.hideModal();
-					Promise.resolve(onConfirm()).then(function() {
-						ui.addNotification(null, E('p', {}, _('Settings applied.')));
+					Promise.resolve().then(onConfirm).then(function() {
+						notify(null, E('p', {}, _('Settings applied.')));
 						window.setTimeout(function() { window.location.reload(); }, 900);
 					}, function(err) {
-						ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+						notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
 					});
 				}
 			}, _('Apply'))
@@ -1618,8 +2152,10 @@ function confirmModal(title, message, onConfirm, restartRequired) {
 
 // 根据 MCC/MNC（或运营商名）返回中文名 + logo。
 function operatorInfo(name, mcc, mnc) {
-	var n = (name || '').toUpperCase().replace(/\s+/g, ' ').trim();
-	var code = (mcc && mnc) ? String(mcc) + String(mnc) : '';
+	var n = valueText(name).toUpperCase().replace(/\s+/g, ' ').trim();
+	var country = valueText(mcc), network = valueText(mnc);
+	if (country === '460' && /^\d$/.test(network)) network = '0' + network;
+	var code = country && network ? country + network : '';
 	if (!code && /^\d{5,6}$/.test(n)) code = n;
 	if (/^4600[02478]$/.test(code)) n = 'CHINA MOBILE';
 	else if (/^4600[169]$/.test(code)) n = 'CHINA UNICOM';
@@ -1633,7 +2169,7 @@ function operatorInfo(name, mcc, mnc) {
 		return { name: '中国电信', logo: null };
 	if (n.indexOf('BROADNET') !== -1 || n.indexOf('CBN') !== -1)
 		return { name: '中国广电', logo: null };
-	return { name: name || _('Mobile Network'), logo: null };
+	return { name: valueText(name) || _('Mobile Network'), logo: null };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1703,6 +2239,8 @@ return baseclass.extend({
 	domainData: domainData,
 	domainMeta: domainMeta,
 	requestRefresh: requestRefresh,
+	refreshPage: refreshPage,
+	notify: notify,
 	touch: touch,
 	cacheLayerUsable: cacheLayerUsable,
 	runTask: runTask,
@@ -1712,6 +2250,7 @@ return baseclass.extend({
 	liveView: liveView,
 	withTimeout: withTimeout,
 	withTimeoutReject: withTimeoutReject,
+	commitConfig: commitConfig,
 	mergeIfaceEntries: mergeIfaceEntries,
 	modemInfo: modemInfo,
 	getDeviceStatusCached: getDeviceStatusCached,
@@ -1733,9 +2272,16 @@ return baseclass.extend({
 	getMode: getMode,
 	getLockBand: getLockBand,
 	getNeighborCell: getNeighborCell,
+	getNeighborCellFresh: getNeighborCellFresh,
 	getNetworkPrefer: getNetworkPrefer,
 	getDns: getDns,
 	getSms: getSms,
+	getSmsInbox: getSmsInbox,
+	smsReadInFlight: smsReadInFlight,
+	refreshSmsInbox: refreshSmsInbox,
+	sendSmsInbox: sendSmsInbox,
+	deleteSmsMessage: deleteSmsMessage,
+	markSmsRead: markSmsRead,
 	getDisabledFeatures: getDisabledFeatures,
 	getRebootCaps: getRebootCaps,
 	getCopyright: getCopyright,
@@ -1752,8 +2298,14 @@ return baseclass.extend({
 	getTrafficResetSchedule: getTrafficResetSchedule,
 	getSupportStatus: getSupportStatus,
 	syncSupport: syncSupport,
+	getSupportPorts: getSupportPorts,
+	getCustomModels: getCustomModels,
+	saveCustomModel: saveCustomModel,
+	deleteCustomModel: deleteCustomModel,
+	probeSupportPort: probeSupportPort,
 
 	sendAt: sendAt,
+	atResponseText: atResponseText,
 	sendSms: sendSms,
 	sendRawPdu: sendRawPdu,
 	deleteSms: deleteSms,
@@ -1788,6 +2340,14 @@ return baseclass.extend({
 	groupByClass: groupByClass,
 	formatSignal: formatSignal,
 	renderInfoGrouped: renderInfoGrouped,
+	pageTitle: theme.pageTitle,
+	element: E,
+	hasValue: hasValue,
+	valueText: valueText,
+	dataRow: dataRow,
+	flagKeys: flagKeys,
+	isEnabled: isEnabled,
+	supportsTdTechAt: supportsTdTechAt,
 	normalizeTemperature: normalizeTemperature,
 
 	formatBytes: formatBytes,

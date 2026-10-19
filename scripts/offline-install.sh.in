@@ -1,0 +1,55 @@
+#!/bin/sh
+# 自带 APK 或 IPK 的离线安装包；可在 iStore 手动安装页直接上传 .run。
+set -eu
+
+fail() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+[ "$(id -u)" = 0 ] || fail '请使用 root 安装。'
+QM_OFFLINE_FORMAT='@PACKAGE_FORMAT@'
+case "$QM_OFFLINE_FORMAT" in
+	apk) command -v apk >/dev/null 2>&1 || fail '此 APK 安装包需要使用 apk 的系统，请为旧系统下载 IPK 离线包。' ;;
+	ipk) command -v opkg >/dev/null 2>&1 || fail '此 IPK 安装包需要使用 opkg 的系统，请为新系统下载 APK 离线包。' ;;
+	*) fail '安装包格式无效。' ;;
+esac
+for dependency in luci-base qmodem jq jsonfilter; do
+	if [ "$QM_OFFLINE_FORMAT" = apk ]; then
+		apk --no-network --repositories-file /dev/null info -e "$dependency" >/dev/null 2>&1 \
+			|| fail "缺少已安装依赖：$dependency。请先安装依赖，再运行本离线包。"
+	else
+		opkg status "$dependency" 2>/dev/null | grep -q '^Status: .* installed$' \
+			|| fail "缺少已安装依赖：$dependency。请先安装依赖，再运行本离线包。"
+	fi
+done
+
+QM_OFFLINE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/qmodem-generic.XXXXXX")
+trap 'rm -rf "$QM_OFFLINE_TMP"' EXIT
+trap 'exit 1' HUP INT TERM
+
+printf '%s\n' '正在校验离线安装包…'
+base64 -d > "$QM_OFFLINE_TMP/payload.tar.gz" <<'__QMODEM_OFFLINE_PAYLOAD__'
+@PAYLOAD@
+__QMODEM_OFFLINE_PAYLOAD__
+printf '%s  %s\n' '@PAYLOAD_SHA256@' "$QM_OFFLINE_TMP/payload.tar.gz" \
+	| sha256sum -c - >/dev/null || fail '安装包校验失败，请重新复制完整的 .run 文件。'
+tar -xzf "$QM_OFFLINE_TMP/payload.tar.gz" -C "$QM_OFFLINE_TMP"
+
+printf '%s\n' '正在离线安装 QModem WebUI…'
+# 隔离软件源；保留正常依赖检查和包安装钩子，不更新索引、不强制安装。
+install_packages() {
+	if [ "$QM_OFFLINE_FORMAT" = apk ]; then
+		apk --no-network --repositories-file /dev/null add --allow-untrusted "$QM_OFFLINE_TMP"/*.apk
+	else
+		# opkg 即使指定 --conf 也会加载 /etc/opkg/*.conf，必须同时隔离配置目录。
+		OPKG_CONF_DIR="$QM_OFFLINE_TMP" opkg --conf /dev/null install "$QM_OFFLINE_TMP"/*.ipk
+	fi
+}
+if install_packages; then
+	printf '%s\n' '安装完成，请刷新 LuCI 页面。'
+else
+	QM_OFFLINE_STATUS=$?
+	printf '%s\n' '离线安装失败，请检查上面的错误信息。' >&2
+	exit "$QM_OFFLINE_STATUS"
+fi

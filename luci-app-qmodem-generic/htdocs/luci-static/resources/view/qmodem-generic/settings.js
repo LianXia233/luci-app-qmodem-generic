@@ -5,8 +5,10 @@
 'require ui';
 'require qmodem-generic.controls as controls';
 
+var E = controls.element;
+
 /*
- * 设备参数（Settings）— 现代白色毛玻璃 (Glassmorphism) + 动态配置流 SVG 重构
+ * 设备参数（Settings）— QModem 设备配置与节点对应关系
  * 本页编辑 QModem 的 UCI 配置 /etc/config/qmodem 中当前模组的 modem-device 配置节。
  */
 
@@ -33,8 +35,8 @@ return view.extend({
 
 	styleNode: function() {
 		return E('style', {}, [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn);--qm-danger:var(--qm-danger)}',
-			'.mt-diag-page{position:relative;max-width:960px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
+			'.mt-diag-page{position:relative;max-width:1120px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
 			'.mt-set-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
 			'.mt-set-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
@@ -44,31 +46,38 @@ return view.extend({
 			'.mt-diag-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
 
 			/* 顶部 Hero 玻璃卡片 */
-			'.mt-diag-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
-			'.mt-diag-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
+			'.mt-diag-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:24px 28px;margin-bottom:16px;background:var(--qm-hero-gradient)}',
+			'.qm-app .mt-diag-hero .mt-diag-title{margin:0 0 6px;font-size:23px;line-height:1.35;font-weight:750;letter-spacing:0;background:none;color:var(--qm-on-hero);-webkit-text-fill-color:var(--qm-on-hero)}',
 			'.mt-diag-sub{font-size:13px;color:var(--qm-text-muted);line-height:1.5;margin:0}',
 			'.mt-diag-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--qm-accent-soft);color:var(--qm-accent);border:1px solid var(--qm-accent-border);font-size:12px;font-weight:750;white-space:nowrap}',
 			'.mt-diag-dot{width:8px;height:8px;border-radius:50%;background:var(--qm-accent);box-shadow:0 0 0 4px var(--qm-accent-soft)}',
 
-			/* 动态 SVG 配置流拓扑卡片 */
+			/* CSS 网格随容器伸缩，名称和设备节点可换行，不会被 SVG 固定宽度裁切。 */
 			'.mt-diag-topo-card{padding:20px 24px;margin-bottom:16px}',
-			'.mt-diag-topo-svg{width:100%;height:95px;display:block}',
-			'@keyframes qmConfigPulse{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}',
-			'.qm-cfg-stream{stroke-dasharray:7,5;animation:qmConfigDash 1.5s linear infinite}',
-			'@keyframes qmConfigDash{to{stroke-dashoffset:-36}}',
+			'.mt-diag-path{display:grid;grid-template-columns:minmax(0,1fr) 52px minmax(0,1fr) 52px minmax(0,1fr);align-items:center;gap:12px;padding:10px 0 2px}',
+			'.mt-diag-path-node{display:flex;align-items:center;gap:12px;min-width:0;min-height:84px;padding:14px;border:1px solid var(--qm-border);border-radius:14px;background:var(--qm-surface-2)}',
+			'.mt-diag-path-icon{display:flex;align-items:center;justify-content:center;flex:0 0 34px;height:34px;border-radius:10px;background:var(--qm-accent-soft);color:var(--qm-accent);font-size:15px;font-weight:750}',
+			'.mt-diag-path-copy{display:flex;flex-direction:column;gap:5px;min-width:0}',
+			'.mt-diag-path-copy strong{font-size:13px;line-height:1.4;color:var(--qm-text)}',
+			'.mt-diag-path-copy small{font-size:11px;line-height:1.45;color:var(--qm-text-muted);overflow-wrap:anywhere}',
+			'.mt-diag-path-line{height:2px;background:var(--qm-border);position:relative;overflow:hidden}',
+			'.mt-diag-path-line:after{content:"";display:block;width:45%;height:100%;background:var(--qm-accent);animation:qmPathFlow 2s linear infinite}',
+			'@keyframes qmPathFlow{from{transform:translateX(-110%)}to{transform:translateX(340%)}}',
 
 			/* 表单区域精美定制 (白色毛玻璃) */
-			'.mt-diag-card-head{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--qm-border-soft)}',
+			'.qm-app .mt-diag-card .mt-diag-card-head{margin-bottom:14px;padding:0 0 12px;border:0;border-bottom:1px solid var(--qm-border-soft);border-radius:0;background:transparent;box-shadow:none}',
 			'.mt-diag-card-head h3{font-size:16px;font-weight:750;color:var(--qm-text);margin:0 0 4px;display:flex;align-items:center;gap:8px}',
 			'.mt-diag-card-head p{font-size:12px;color:var(--qm-text-muted);margin:0;line-height:1.5}',
 			'.mt-diag-card .cbi-map>h2,.mt-diag-card .cbi-map-descr,.mt-diag-card .cbi-section>h3{display:none}',
 			'.mt-diag-card .cbi-section{margin:0;padding:0;border:0;box-shadow:none}',
 			'.mt-diag-card .cbi-section-node{padding:0}',
-			'.mt-diag-card .cbi-value{padding:14px 0;border-bottom:1px solid var(--qm-border-soft);display:grid;grid-template-columns:200px 1fr;align-items:center}',
+			'.qm-app .mt-diag-form-card .cbi-value{padding:13px 0;border-bottom:1px solid var(--qm-border-soft);display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr);gap:16px;align-items:start}',
 			'.mt-diag-card .cbi-value:last-child{border-bottom:0}',
-			'.mt-diag-card .cbi-value-title{font-size:13px;font-weight:650;color:var(--qm-text-soft)}',
+			'.qm-app .mt-diag-form-card .cbi-value-title{font-size:13px;font-weight:650;color:var(--qm-text-soft);padding-top:8px}',
 			'.mt-diag-card .cbi-value-description{font-size:11px;color:var(--qm-text-muted);margin-top:4px;line-height:1.4}',
-			'.mt-diag-card .cbi-input-text,.mt-diag-card select{background:var(--qm-glass);border:1px solid var(--qm-border);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--qm-text);transition:all .2s ease;width:100%;max-width:380px}',
+			'.qm-app .mt-diag-form-card .cbi-value-field{min-width:0;max-width:600px}',
+			'.mt-diag-form-card .cbi-input-text,.mt-diag-form-card select{background:var(--qm-glass);border:1px solid var(--qm-border);border-radius:10px;padding:8px 14px;font-size:13px;color:var(--qm-text);transition:all .2s ease;width:100%;max-width:560px}',
+			'.mt-diag-form-card .cbi-dynlist{max-width:560px}',
 			'.mt-diag-card .cbi-input-text:focus,.mt-diag-card select:focus{background:var(--qm-surface);border-color:var(--qm-accent);box-shadow:0 0 0 3px var(--qm-accent-soft);outline:none}',
 
 			/* 保存按钮与底部导航 */
@@ -80,42 +89,29 @@ return view.extend({
 			'.mt-diag-back-btn:hover{background:var(--qm-surface);color:var(--qm-accent);border-color:var(--qm-accent-border);transform:translateY(-1px)}',
 
 			/* 响应式适配 */
-			'@media(max-width:720px){.mt-diag-hero{flex-direction:column;align-items:flex-start}.mt-diag-card .cbi-value{grid-template-columns:1fr;gap:6px}.mt-diag-card{padding:18px}}'
+			'@media(max-width:820px){.mt-diag-path{grid-template-columns:1fr;gap:8px}.mt-diag-path-node{min-height:0}.mt-diag-path-line{width:2px;height:20px;margin-left:30px}.mt-diag-path-line:after{width:100%;height:45%;animation:qmPathFlowVertical 2s linear infinite}@keyframes qmPathFlowVertical{from{transform:translateY(-110%)}to{transform:translateY(340%)}}.qm-app .mt-diag-form-card .cbi-value{grid-template-columns:1fr;gap:5px}.qm-app .mt-diag-form-card .cbi-value-title{padding-top:0}}',
+			'@media(max-width:560px){.mt-diag-card{padding:16px}.mt-diag-hero{flex-direction:column;align-items:flex-start}.mt-diag-badge{white-space:normal}}',
+			'@media(prefers-reduced-motion:reduce){.mt-diag-path-line:after{animation:none;width:100%;height:100%}}'
 		].join(''));
 	},
 
-	/* 动态 SVG UCI 与设备实例同步链路拓扑 */
-	renderSvgConfigTopo: function(section) {
-		var svgStr = [
-			'<svg class="mt-diag-topo-svg" viewBox="0 0 540 85">',
-			'  <!-- 节点 1: UCI 配置文件 /etc/config/qmodem -->',
-			'  <g transform="translate(15, 14)">',
-			'    <rect x="0" y="0" width="135" height="54" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <rect x="14" y="15" width="24" height="24" rx="5" fill="#0072f5"/>',
-			'    <text x="46" y="26" font-size="12" font-weight="750" fill="#0f172a">UCI Config</text>',
-			'    <text x="46" y="41" font-size="10" fill="#64748b">/etc/config/qmodem</text>',
-			'  </g>',
-			'  <!-- 动态同步通信总线 -->',
-			'  <line x1="150" y1="41" x2="225" y2="41" stroke="#0072f5" stroke-width="2.6" class="qm-cfg-stream"/>',
-			'  <!-- 节点 2: QModem 守护解析器 -->',
-			'  <g transform="translate(225, 14)">',
-			'    <rect x="0" y="0" width="135" height="54" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="22" cy="27" r="6" fill="#10b981"/>',
-			'    <text x="36" y="26" font-size="12" font-weight="750" fill="#0f172a">QModem Parser</text>',
-			'    <text x="36" y="41" font-size="10" fill="#64748b">' + shown(section) + '</text>',
-			'  </g>',
-			'  <!-- 动态总线通道 2 -->',
-			'  <line x1="360" y1="41" x2="425" y2="41" stroke="#10b981" stroke-width="2.6" class="qm-cfg-stream" style="animation-duration:1.2s;"/>',
-			'  <!-- 节点 3: 模组设备实例与 AT 驱动 -->',
-			'  <g transform="translate(425, 14)">',
-			'    <rect x="0" y="0" width="105" height="54" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
-			'    <circle cx="20" cy="27" r="6" fill="#0ea5e9"/>',
-			'    <text x="34" y="26" font-size="12" font-weight="750" fill="#0f172a">Modem Node</text>',
-			'    <text x="34" y="41" font-size="10" fill="#64748b">Active Port</text>',
-			'  </g>',
-			'</svg>'
-		].join('');
-		return svgNode(svgStr);
+	/* 配置节与 AT 端口的示意路径；空端口明确标为自动选择。 */
+	renderConfigPath: function(section, atPort) {
+		function node(icon, title, detail) {
+			return E('div', { 'class': 'mt-diag-path-node' }, [
+				E('span', { 'class': 'mt-diag-path-icon', 'aria-hidden': 'true' }, icon),
+				E('span', { 'class': 'mt-diag-path-copy' }, [
+					E('strong', {}, title), E('small', {}, detail)
+				])
+			]);
+		}
+		return E('div', { 'class': 'mt-diag-path', 'role': 'group', 'aria-label': _('配置与设备对应关系') }, [
+			node('1', _('QModem 配置'), '/etc/config/qmodem'),
+			E('span', { 'class': 'mt-diag-path-line', 'aria-hidden': 'true' }),
+			node('2', _('当前配置节'), shown(section)),
+			E('span', { 'class': 'mt-diag-path-line', 'aria-hidden': 'true' }),
+			node('3', _('AT 端口'), atPort ? String(atPort) : _('由 QModem 自动选择'))
+		]);
 	},
 
 	render: function(res) {
@@ -139,7 +135,7 @@ return view.extend({
 				modemBar,
 				E('section', { 'class': 'mt-diag-card mt-diag-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mt-diag-title' }, _('设备参数')),
+						controls.pageTitle('settings', _('设备参数'), 'mt-diag-title'),
 						E('p', { 'class': 'mt-diag-sub' }, _('编辑 QModem 配置（/etc/config/qmodem）中当前模组的设备参数。'))
 					]),
 					E('span', { 'class': 'mt-diag-badge' }, [
@@ -198,20 +194,33 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s.option(form.ListValue, 'pdp_type', _('IP 协议'));
-		o.value('IPV4V6', 'IPv4 / IPv6');
-		o.value('IPV4', 'IPv4');
-		o.value('IPV6', 'IPv6');
-		o.default = 'IPV4V6';
+		o.value('ipv4v6', 'IPv4 / IPv6');
+		o.value('ip', 'IPv4');
+		o.value('ipv6', 'IPv6');
+		o.value('ethernet', 'Ethernet');
+		o.default = 'ipv4v6';
 		o.rmempty = false;
+		o.cfgvalue = function(sectionId) {
+			var raw = String(uci.get('qmodem', sectionId, 'pdp_type') || 'ipv4v6');
+			return { IPV4: 'ip', IPV6: 'ipv6', IPV4V6: 'ipv4v6' }[raw.toUpperCase()] || raw.toLowerCase();
+		};
 
-		var saveConfig = function() {
-			return m.save(null, true).then(function() {
-				return uci.commit('qmodem');
+		var saving = false;
+		var saveConfig = function(button) {
+			if (saving) return Promise.resolve();
+			saving = true;
+			button.disabled = true;
+			return Promise.resolve().then(function() { return m.save(null, true); }).then(function() {
+				return controls.commitConfig('qmodem');
 			}).then(function() {
-				ui.addNotification(null, E('p', {},
+				controls.notify(null, E('p', {},
 					_('设备参数已保存到 QModem 配置（/etc/config/qmodem），请重拨或重启模组使其生效。')));
+				window.setTimeout(function() { window.location.reload(); }, 1100);
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+				controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			}).then(function() {
+				saving = false;
+				button.disabled = false;
 			});
 		};
 
@@ -228,7 +237,7 @@ return view.extend({
 				/* 顶部 Hero 玻璃卡片 */
 				E('section', { 'class': 'mt-diag-card mt-diag-hero' }, [
 					E('div', {}, [
-						E('h2', { 'class': 'mt-diag-title' }, _('设备参数')),
+						controls.pageTitle('settings', _('设备参数'), 'mt-diag-title'),
 						E('p', { 'class': 'mt-diag-sub' }, _('编辑 QModem 配置中当前模组的设备参数（配置节：%s）。').format(shown(section)))
 					]),
 					E('span', { 'class': 'mt-diag-badge' }, [
@@ -237,20 +246,20 @@ return view.extend({
 					])
 				]),
 
-				/* 动态 SVG 配置链路拓扑 */
+				/* 配置与设备节点对应关系 */
 				E('section', { 'class': 'mt-diag-card mt-diag-topo-card' }, [
 					E('div', { 'class': 'mt-diag-card-head' }, [
 						E('h3', {}, [
 							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'),
-							_('UCI 配置与设备节点映射拓扑')
+							_('配置与设备对应关系')
 						]),
-						E('p', {}, _('展示 UCI 配置节、QModem 守护进程与硬件设备节点之间的同步流向。'))
+						E('p', {}, _('当前配置节与 AT 端口的对应关系；更改端口后保存并刷新页面即可更新。'))
 					]),
-					self.renderSvgConfigTopo(section)
+					self.renderConfigPath(section, uci.get('qmodem', section, 'at_port'))
 				]),
 
 				/* 表单卡片 (白色毛玻璃) */
-				E('section', { 'class': 'mt-diag-card' }, [
+				E('section', { 'class': 'mt-diag-card mt-diag-form-card' }, [
 					E('div', { 'class': 'mt-diag-card-head' }, [
 						E('h3', {}, [
 							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'),
@@ -262,7 +271,7 @@ return view.extend({
 					E('div', { 'class': 'mt-diag-footer' }, E('button', {
 						'type': 'button',
 						'class': 'mt-diag-save-btn',
-						'click': ui.createHandlerFn(self, saveConfig)
+						'click': function(ev) { return saveConfig(ev.currentTarget); }
 					}, [
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'),
 						_('保存设备参数')

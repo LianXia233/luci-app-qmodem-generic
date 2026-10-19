@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
-# 本项目是 QModem 的通用美化版 Web UI：所有界面数据均通过 QModem 的 `qmodem`
-# ubus 对象读取，对任意 QModem 支持的模组生效（不绑定特定型号，如 MT5700M）。
+# 本项目是 QModem 的通用美化版 Web UI：使用 QModem 官方的 `qmodem` / `qmodem.sms`
+# ubus 接口，对任意 QModem 支持的模组生效（不绑定特定型号，如 MT5700M）。
 # 因此运行时依赖 qmodem，不再依赖 ubus-at-daemon / sms-tool_q / mt5700m-at。
 #
 # 保留关闭 JS 压缩：本包视图使用较新的 JS 语法（箭头函数、模板字符串等），
@@ -10,22 +10,18 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=2.5.0
-PKG_RELEASE:=2
+PKG_RELEASE:=25
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
 LUCI_TITLE:=Modem management (QModem beautified UI)
 LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for any modem managed by QModem. \
-	All data is read through the `qmodem` ubus object, so it is not bound to a \
+	Data is read through official QModem ubus interfaces, so it is not bound to a \
 	specific module model.
-# 兼容基线：OpenWrt / ImmortalWrt 25.12 及更新版本（不再支持 24.10 及更早）。
-# 注意：OpenWrt buildroot 的 DEPENDS 不支持 `(>= 版本)` 约束语法（package-metadata.pl
-# 会把 `(>=` / `25.12)` 当作不存在的包名，导致 make defconfig 失败），因此 25.12+
-# 基线由 CI 编译矩阵（仅 25.12 + snapshot）与文档强制，此处保持无版本约束写法。
-LUCI_DEPENDS:=+luci-base +qmodem
+# 兼容 23.05 / 24.10 的 opkg/IPK 与 25.12+ 的 apk；依赖由各版本 SDK 解析。
+# jq/jsonfilter 为支持库和缓存脚本直接使用，显式声明以兼容旧 QModem 的依赖列表。
+LUCI_DEPENDS:=+luci-base +qmodem +jq +jsonfilter
 LUCI_PKGARCH:=all
-
-include $(TOPDIR)/feeds/luci/luci.mk
 
 # 确保 rpcd 脚本、uci-defaults 钩子、MT5700 修复脚本/服务、模组支持库同步
 # 脚本/服务、流量统计采集服务具有执行权限并注册 ubus 服务。
@@ -40,6 +36,7 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # 模组支持库合并放后台，modem 探测完全交给 qmodem-worker 后台服务。
 define Package/luci-app-qmodem-generic/postinst
 #!/bin/sh
+[ -n "$${IPKG_INSTROOT}" ] && exit 0
 for f in \
 	/usr/libexec/rpcd/qos \
 	/usr/libexec/rpcd/qmodem_stats \
@@ -50,6 +47,7 @@ for f in \
 	/usr/bin/qmodem-task \
 	/usr/sbin/qmodem-mt5700-fix \
 	/usr/sbin/qmodem-modem-support \
+	/usr/sbin/qmodem-support-custom \
 	/usr/sbin/qmodem-worker \
 	/usr/lib/qmodem/qmodem-at-probe \
 	/etc/init.d/qmodem-mt5700-fix \
@@ -73,12 +71,18 @@ fi
 /etc/init.d/qmodem-stats-collect enable 2>/dev/null || true
 /etc/init.d/qmodem-worker enable 2>/dev/null || true
 
-# rpcd 需要重启才会加载新的 qmodem_cache 插件
-/etc/init.d/rpcd restart 2>/dev/null || true
+# rpcd reload 会注册新的 qmodem_cache / qmodem_stats 插件，同时保留 LuCI 登录会话。
+# 不使用 restart：重启 rpcd 将中断安装页面的 ubus 会话，导致被踢回登录页。
+rm -f /tmp/luci-indexcache.*
+rm -rf /tmp/luci-modulecache/
+/etc/init.d/rpcd reload 2>/dev/null || true
 # 采集服务立即拉起（start 只向 procd 注册实例，不做任何 modem 探测）
 /etc/init.d/qmodem-worker start 2>/dev/null || true
 /etc/init.d/qmodem-stats-collect start 2>/dev/null || true
 exit 0
 endef
+
+# 放在自定义 postinst 之后，确保旧版 luci.mk 在 BuildPackage 时使用本包安装钩子。
+include $(TOPDIR)/feeds/luci/luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature
