@@ -1,8 +1,10 @@
 /*
- * QModem Generic — LuCI 前端异步链路测试
+ * QModem Generic — LuCI 前端直连链路测试
  *
  * 用最小化的 luci 运行时替身加载真实的 controls.js 与视图模块，
- * 验证「首屏只读缓存、写操作走任务、轮询不堆叠」确实成立。
+ * 验证「数据直连官方 qmodem/qmodem.sms 接口、写操作直调官方方法、
+ * 轮询不堆叠」确实成立。自 3.0.0 起前端不再有 qmodem_cache 快照层
+ * 与任务队列，所有 rpc.declare 都直连官方 ubus 对象。
  *
  * 运行：node tests/run-frontend-tests.js [模块名...]
  * 由 tests/run-frontend-tests.sh 包装（没有 node 时自动跳过）。
@@ -31,10 +33,8 @@ function assertEq(name, actual, expect) {
 
 function makeRuntime() {
 	var calls = [];            /* 所有 rpc 调用记录 */
-	var tasks = {};            /* task_id -> {op,state,...} */
-	var taskSeq = 0;
 	var ubusDelayMs = 0;       /* 模拟 qmodem 对象（AT 驱动）的慢速 */
-	var cacheDelayMs = 0;
+	var failAll = false;       /* 模拟模组完全失联：所有 qmodem 调用 reject */
 	var smsApi = null;
 	var modemSmsApi = null;
 	var modemImeiApi = null;
@@ -42,75 +42,68 @@ function makeRuntime() {
 	var dialResultStatus = '1';
 	var deleteResult = { result: { status: '1' } };
 	var imeiResult = { imei: '860000000000002', result: { status: '1' } };
+	var scanResult = { code: 0, message: 'scan queued' };
 
 	var NOW = Math.floor(Date.now() / 1000);
 
-	/* 与 /usr/libexec/rpcd/qmodem_cache 的 snapshot 输出完全一致：
-	 * { config_section, now, domains: { <domain>: {status,updated,stale,ttl,error,data} } } */
-	var cacheEmpty = false;
-	var cacheDomains = {
-		status: {
-			status: 'ok', updated: NOW, stale: false, ttl: 30, error: '',
-			data: {
-				base_info: [ { key: 'model', value: 'RM520N-GL' },
-					     { key: 'at_port', value: '/dev/ttyUSB2' },
-					     { key: 'imei', value: '860000000000001' } ],
-				device: { dev: 'wwan0', mtu: 1500, up: true },
-				ifaces: { names: [ 'wan_modem1' ],
-					  entries: { wan_modem1: { l3_device: 'wwan0', up: true } } },
-				connect_status: { connected: true }
-			}
-		},
-		network: {
-			status: 'ok', updated: NOW, stale: false, ttl: 60, error: '',
-			data: { mode: { mode: 'manual' },
-				lockband: { '4G': [ { band_id: 3, band_name: 'B3' } ] } }
-		},
-		signal: { status: 'missing', updated: 0, stale: true, ttl: 0, error: '', data: {} },
-		sim: {
-			status: 'ok', updated: NOW, stale: false, ttl: 300, error: '',
-			data: { sim_info: [ { key: 'imsi', value: '460010000000001' } ],
-				imei: { imei: '860000000000001' } }
-		},
-		device: {
-			status: 'ok', updated: NOW, stale: false, ttl: 300, error: '',
-			data: { at_cfg: { at_cfg: { at_port: '/dev/ttyUSB2', ports: [ '/dev/ttyUSB2' ] } } }
-		},
-		stats: {
-			status: 'ok', updated: NOW, stale: false, ttl: 60, error: '',
-			data: { usage: { rx: 1024, tx: 2048 }, daily: [ { date: '2026-09-27', rx: 10, tx: 20 } ] }
-		},
-		support: {
-			status: 'ok', updated: NOW, stale: false, ttl: 3600, error: '',
-			data: { available: 42, path: '/usr/share/qmodem/modem_support.json',
-				added: [], skipped: [], missing: [], error: null }
-		}
+	/* 官方 qmodem 对象各方法的 canned 返回（形状与 QModem rpcd 一致） */
+	var qmodemData = {
+		base_info: { modem_info: [ { key: 'model', value: 'RM520N-GL' },
+					   { key: 'at_port', value: '/dev/ttyUSB2' },
+					   { key: 'connect_status', value: 'Yes' } ] },
+		cell_info: { modem_info: [ { key: 'RSRP', value: '-85' },
+					   { key: 'Network Type', value: 'LTE' } ] },
+		info: { modem_info: [] },
+		network_info: { modem_info: [ { key: 'QCI', value: '9' },
+					      { key: 'AMBR DL', value: '100' },
+					      { key: 'AMBR UL', value: '50' } ] },
+		sim_info: { modem_info: [ { key: 'imsi', value: '460010000000001' } ] },
+		get_at_cfg: { at_cfg: { at_port: '/dev/ttyUSB2', ports: [ '/dev/ttyUSB2' ],
+					cmds: [ { name: '信号', value: 'AT+CSQ' } ] } },
+		get_imei: { imei: '860000000000001' },
+		get_mode: { mode: { ecm: '1', qmi: '0' } },
+		get_lockband: { lockband: { LTE: { available_band: [ { band_id: 3, band_name: 'B3' } ], lock_band: [ '3' ] } } },
+		get_neighborcell: { neighborcell: {} },
+		get_network_prefer: { network_prefer: { '4G': '1', '5G': '0' } },
+		get_dns: { dns: { ipv4_dns1: '1.1.1.1', ipv6_dns1: '' } },
+		get_sms: { msg: [] },
+		get_disabled_features: { disabled_features: [] },
+		get_reboot_caps: { reboot_caps: { soft_reboot_caps: '1', hard_reboot_caps: '0' } },
+		get_copyright: { copyright: { Vendor: 'QModem' } },
+		get_current_band: { current_band: { status: 'unsupported' } },
+		get_current_band_capabilities: { current_band_capabilities: { supported: false } },
+		get_connect_status: { connection_status: 'No' },
+		dial_status: { dial_status: { running: 'false' } },
+		get_dial_log: { log: 'dial log line' },
+		get_sim_slot: { sim_slot: '1' },
+		get_sim_switch_capabilities: { supportSwitch: '0' },
+		get_stats: { available: 1, updated_at: NOW, total_rx_bytes: 1024, total_tx_bytes: 2048 },
+		get_traffic_reset_schedule: { enabled: false, reset_type: 'monthly', hour: 0, day: 1, minute: 0 },
+		get_monitor_status: { enabled: false, running: false },
+		get_5g_lan: { supported: false }
 	};
 
-	function buildSnapshot(section, domains) {
-		var out = { config_section: section, now: Math.floor(Date.now() / 1000), domains: {} };
-		if (cacheEmpty) return out;      /* 模拟模组离线 / 缓存尚未建立 */
-		var want = (domains && domains.length) ? domains : Object.keys(cacheDomains);
-		for (var i = 0; i < want.length; i++) {
-			var d = want[i];
-			out.domains[d] = cacheDomains[d] || {
-				status: 'missing', updated: 0, stale: true, ttl: 0, error: '', data: {}
-			};
-		}
-		return out;
-	}
+	var qmodemSupportData = {
+		status: { available: 42, path: '/usr/share/qmodem/modem_support.json',
+			  added: [], skipped: [], missing: [], error: null },
+		sync: { available: 42, added: 1, skipped: 0, missing: 0, error: null },
+		ports: { ports: [ { port: '/dev/ttyUSB2', bus: 'usb', model: '', id: '2c7c:0900', confirmed: true } ] },
+		custom_list: { entries: [], presets: {} },
+		custom_save: { success: true, synced: true },
+		custom_delete: { success: true },
+		probe_port: { success: true, model: 'RG502Q-EA' }
+	};
 
 	function delay(ms) {
 		return new Promise(function(res) { setTimeout(res, ms); });
 	}
 
-	/* rpc.declare 的替身：只支持测试用到的形态 */
+	/* rpc.declare 的替身：直连分发，只支持测试用到的形态 */
 	function declare(def) {
 		var object = def.object, method = def.method;
 		var expect = def.expect || {};
-		var expectSingle = expect.single === true;
 		var expectKey = null, expectVal;
-		Object.keys(expect).forEach(function(k) { if (k !== 'single') { expectKey = k; expectVal = expect[k]; } });
+		Object.keys(expect).forEach(function(k) { expectKey = k; expectVal = expect[k]; });
 
 		/* 真实 LuCI 的 declare 会把位置参数按 params 数组映射成命名参数 */
 		var names = def.params || [];
@@ -126,114 +119,88 @@ function makeRuntime() {
 				body = uciCommitError ? { __rpcError: uciCommitError } : {};
 			} else if (object === 'qmodem.sms') {
 				body = smsApi ? smsApi(method, p) : { __rpcError: 'RPC call to qmodem.sms/config_get failed with ubus code 4: Not found' };
+			} else if (object === 'qmodem_stats') {
+				body = method === 'daily_stats'
+					? { config_section: p.config_section, updated_at: NOW, available: 1,
+					    today_rx: 1, today_tx: 2, total_rx: 10, total_tx: 20, swapped: 0,
+					    days: [ { date: '2026-09-27', rx: 10, tx: 20 } ] }
+					: { config_section: p.config_section, result: 1, success: true };
+			} else if (object === 'qmodem_support') {
+				body = qmodemSupportData[method] || { success: true };
+			} else if (object === 'qmodem.uplink') {
+				body = { enabled: false };
+			} else if (object === 'rc') {
+				body = { name: p.name || 'qmodem_network', enabled: true, running: false };
+			} else if (object === 'luci') {
+				body = {};
+			} else if (object === 'network.interface') {
+				body = { interface: [] };
+			} else if (object === 'network.device') {
+				body = { up: true, mtu: 1500 };
 			} else if (object === 'qmodem' && method === 'get_sms' && modemSmsApi) {
 				body = modemSmsApi(method, p);
 			} else if (object === 'qmodem' && method === 'get_imei' && modemImeiApi) {
 				body = modemImeiApi(method, p);
-			} else if (object === 'qmodem_cache' || object === 'qmodem_stats' || object === 'qmodem_support') {
-				body = handleCache(method, p);
-			} else if (object === 'qmodem' || object === 'qos' ||
-				   object === 'luci-rpc' || object === 'system' || object === 'network') {
-				/* 这些方法都代表「会摸 modem / 起子进程」的慢路径，测试里必须为 0 次 */
-				body = { __slow__: true };
+			} else if (object === 'qmodem') {
+				body = qmodemData[method] !== undefined ? qmodemData[method] : qmodemWrite(method, p);
 			} else {
 				body = {};
 			}
 
 			return Promise.resolve().then(function() {
-				var d = (object === 'qmodem_cache' || object === 'qmodem_stats' ||
-					 object === 'qmodem_support' || (object === 'qmodem.sms' &&
-					 (method === 'config_get' || (method === 'list' && body.mode !== 'direct')))) ? cacheDelayMs : ubusDelayMs;
-				return d ? delay(d) : null;
+				return object === 'qmodem' ? (ubusDelayMs ? delay(ubusDelayMs) : null) : null;
 			}).then(function() {
+				if (failAll && (object === 'qmodem' || object === 'qmodem.uplink'))
+					throw new Error('modem offline');
 				if (body && body.__rpcError) throw new Error(body.__rpcError);
 				if (expectKey && body && body[expectKey] === undefined) {
 					var wrapped = {};
 					wrapped[expectKey] = expectVal;
-					return expectSingle ? wrapped : [wrapped];
-				}
-				if (expectSingle && body && Array.isArray(body[expectKey])) {
-					var out = {};
-					out[expectKey] = body[expectKey];
-					return out;
+					return wrapped;
 				}
 				return body;
 			});
 		};
 	}
 
-	function handleCache(method, p) {
-		if (method === 'snapshot')
-			return buildSnapshot((p && p.config_section) || 'modem1', p && p.domains);
-
-		if (method === 'stats_reset') {
-			var sid = 'task-' + (++taskSeq);
-			tasks[sid] = {
-				task_id: sid, config_section: (p && p.config_section) || 'modem1',
-				operation: 'stats_reset', state: 'running', progress: 0,
-				started: Date.now(), result: null, error: null, _polls: 0
-			};
-			return { task_id: sid, state: 'running', deduplicated: false };
-		}
-
-		if (method === 'status')
-			return buildSnapshot('modem1', [ 'support' ]).domains.support.data;
-
-		if (method === 'action' || method === 'send_at' || method === 'refresh' || method === 'refresh_all') {
-			if (method === 'action' && p.object === 'qmodem') {
-				if (!p.args || !p.args.config_section || p.args.config_section !== p.config_section)
-					return { error: 'explicit valid modem section required' };
-				if (['send_at', 'send_sms', 'do_reboot'].indexOf(p.method) !== -1 && (!p.args.params || typeof p.args.params !== 'object'))
-					return { error: 'missing params object' };
+	function qmodemWrite(method, p) {
+		switch (method) {
+			case 'send_at': {
+				var command = p.params && p.params.at;
+				if (command === 'AT+BAD')
+					return { at_cfg: { status: '1', res: '\r\n+CME ERROR: 10\r\n' } };
+				return { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } };
 			}
-			var id = 'task-' + (++taskSeq);
-			tasks[id] = {
-				task_id: id,
-				config_section: (p && p.config_section) || 'modem1',
-				operation: (method === 'send_at' || method === 'refresh' || method === 'refresh_all') ? method : ((p && p.method) || ''),
-				payload: p,
-				state: 'running',
-				progress: 0,
-				started: Date.now(),
-				result: null,
-				error: null,
-				_polls: 0
-			};
-			return { task_id: id, state: 'running', deduplicated: false };
+			case 'send_sms':
+			case 'send_raw_pdu':
+			case 'delete_sms':
+				return method === 'delete_sms' ? deleteResult : { result: { status: '1' } };
+			case 'set_imei':
+				return imeiResult;
+			case 'do_reboot':
+			case 'clear_dial_log':
+			case 'clear_stats':
+				return { result: { status: '1' } };
+			case 'set_traffic_reset_schedule':
+				return { result: true };
+			case 'modem_dial':
+			case 'modem_hang':
+			case 'modem_redial':
+				return { result: { status: dialResultStatus,
+					message: dialResultStatus === '0' ? 'Dial command failed' : 'Dial command executed successfully' } };
+			case 'save_stats':
+				return { result: { status: '1' } };
+			case 'set_5g_lan':
+				return { supported: true, enabled: !!p.enabled };
+			case 'remove_modem':
+				return { status: '0' };
+			case 'scan_pcie':
+			case 'scan_usb':
+			case 'scan_all':
+				return scanResult;
+			default:
+				return { success: true };
 		}
-
-		if (method === 'get_task') {
-			var t = tasks[p && p.task_id];
-			if (!t) return { task_id: (p && p.task_id), state: 'missing' };
-			/* 第 3 次轮询完成：模拟 worker 真实处理耗时 */
-			t._polls++;
-			if (t._polls >= 3) {
-				t.state = 'success';
-				t.progress = 100;
-				if (t.operation === 'send_at') {
-					var command = t.payload.at || (t.payload.args && t.payload.args.params.at);
-					if (command === 'AT+TASKFAIL') { t.state = 'failed'; t.error = 'AT port busy'; }
-					else if (command === 'AT+BAD') t.result = { at_cfg: { status: '1', res: '\r\n+CME ERROR: 10\r\n' } };
-					else if (t.payload.args) t.result = { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } };
-					else t.result = { response: 'AT+CGMI\r\nQuectel\r\n\r\nOK', result: 'success', ret: 0 };
-				}
-				else if ([ 'modem_dial', 'modem_hang', 'modem_redial' ].indexOf(t.operation) !== -1)
-					t.result = { result: { status: dialResultStatus, message: dialResultStatus === '0' ? 'Dial command failed' : 'Dial command executed successfully' } };
-				else if (t.operation === 'delete_sms')
-					t.result = deleteResult;
-				else if (t.operation === 'set_imei')
-					t.result = imeiResult;
-				else if (t.operation === 'stats_reset')
-					t.result = { success: true, reset: true };
-				else if (t.operation === 'support_sync')
-					t.result = { available: 42, added: 1, skipped: 0, missing: 0, error: null };
-				else
-					t.result = { success: true };
-			}
-			return t;
-		}
-
-		return { success: true };
 	}
 
 	var rpc = {
@@ -436,13 +403,12 @@ function makeRuntime() {
 	return {
 		loadModule: loadModule,
 		calls: calls,
-		tasks: tasks,
 		notifications: notifications,
 		document: documentStub,
 		listeners: listeners,
 		El: El,
 		setUbusDelay: function(ms) { ubusDelayMs = ms; },
-		setCacheDelay: function(ms) { cacheDelayMs = ms; },
+		setFailAll: function(v) { failAll = !!v; },
 		setSmsApi: function(handler) { smsApi = handler; },
 		setModemSmsApi: function(handler) { modemSmsApi = handler; },
 		setModemImeiApi: function(handler) { modemImeiApi = handler; },
@@ -450,15 +416,6 @@ function makeRuntime() {
 		setDeleteResult: function(result) { deleteResult = result; },
 		setImeiResult: function(result) { imeiResult = result; },
 		setDialResultStatus: function(value) { dialResultStatus = String(value); },
-		setSmsCache: function(data) {
-			cacheDomains.sms = {
-				status:'ready', updated:NOW - 120, stale:false, ttl:600,
-				error:'', data:{ get_sms:data }
-			};
-		},
-		setSnapshot: function(s) { snapshot = s; },
-		setSnapshotEmpty: function() { cacheEmpty = true; },
-		setSnapshotFull: function() { cacheEmpty = false; },
 		setSections: function(s) { uciSections = s; },
 		countCalls: function(obj, method) {
 			return calls.filter(function(c) {
@@ -489,26 +446,19 @@ async function testLegacyUciCommit() {
 }
 
 function testBootstrap(rt) {
-	console.log('\n[1] bootstrap：首屏只读缓存，不等 modem');
+	console.log('\n[1] bootstrap：只读 UCI 解析配置节，不产生任何 RPC');
 	var controls = loadControls(rt);
-	rt.setUbusDelay(8000);       /* qmodem/qos 等慢对象：一旦被调用测试就会超时 */
-	rt.setCacheDelay(5);
 	rt.resetCalls();
 
 	var t0 = Date.now();
-	return controls.bootstrap([ 'status', 'network', 'signal', 'sim', 'device' ]).then(function(ctx) {
+	return controls.bootstrap().then(function(ctx) {
 		var elapsed = Date.now() - t0;
 
-		assertLt('bootstrap 完成耗时', elapsed, 1500);
+		assertLt('bootstrap 完成耗时', elapsed, 500);
 		assertEq('解析出配置节', ctx.section, 'modem1');
-		assertEq('qmodem_cache.snapshot 调用次数', rt.countCalls('qmodem_cache', 'snapshot'), 1);
-		assertEq('未调用任何 qmodem 对象方法（AT 驱动）', rt.countCalls('qmodem'), 0);
-		assertEq('未调用 qos 对象方法', rt.countCalls('qos'), 0);
-		assertEq('未调用 luci-rpc 对象方法', rt.countCalls('luci-rpc'), 0);
-		assertEq('未调用 system 对象方法', rt.countCalls('system'), 0);
-		assertEq('未调用 network 对象方法', rt.countCalls('network'), 0);
+		assertEq('bootstrap 只读 UCI，不产生任何 rpc 调用', rt.calls.length, 0);
 
-		console.log('\n[2] 缓存读取器：零 RPC');
+		console.log('\n[2] 读取器直连官方 qmodem 方法并解包');
 		rt.resetCalls();
 		var t1 = Date.now();
 		return Promise.all([
@@ -516,62 +466,45 @@ function testBootstrap(rt) {
 			controls.getMode(ctx.section),
 			controls.getSimInfo(ctx.section),
 			controls.getAtCfg(ctx.section),
-			controls.getDeviceStatusCached(ctx.section)
+			controls.getCellInfo(ctx.section)
 		]).then(function(vals) {
-			var base = vals[0], mode = vals[1], sim = vals[2], at = vals[3], dev = vals[4];
+			var base = vals[0], mode = vals[1], sim = vals[2], at = vals[3], cell = vals[4];
 			var elapsed2 = Date.now() - t1;
 
-			assertLt('5 个读取器总耗时', elapsed2, 50);
-			assertEq('读取器未产生任何额外 RPC（共用 bootstrap 的快照）',
-				   rt.countCalls('qmodem_cache') + rt.countCalls('qmodem'), 0);
+			assertLt('5 个读取器总耗时', elapsed2, 500);
+			assertEq('每个读取器各产生一次直连调用', rt.countCalls('qmodem'), 5);
 			assertEq('base_info 直接返回数组（向后兼容）', Array.isArray(base), true);
-			assertEq('base_info 内容来自缓存', controls.findEntry(base, 'model'), 'RM520N-GL');
+			assertEq('base_info 内容来自官方 modem_info', controls.findEntry(base, 'model'), 'RM520N-GL');
 			assertEq('findEntry 兼容对象数组', controls.findEntry(sim, 'imsi'), '460010000000001');
-			assertEq('getMode 解包正常', mode && mode.mode, 'manual');
+			assertEq('getMode 官方 flag 形状解包正常', !!(mode && mode.mode && mode.mode.ecm === '1'), true);
 			assertEq('getAtCfg 保留 at_cfg 包装', !!(at && at.at_cfg), true);
-			assertEq('设备状态从缓存读出 netdev', dev && dev.dev, 'wwan0');
-
-			console.log('\n[3] 缓存缺失时降级为默认值，不阻塞');
-			return controls.getCellInfo(ctx.section).then(function(cell) {
-				assertEq('缺失的 signal 域降级为空数组（不阻塞、不报错）', JSON.stringify(cell), '[]');
-				assertEq('缺失域会后台排队补采（而不是同步去查 modem）',
-					   rt.countCalls('qmodem_cache', 'refresh') >= 1, true);
-				assertEq('补采没有触发任何 qmodem 对象调用', rt.countCalls('qmodem'), 0);
-				return controls;
-			});
+			assertEq('cell_info 摊平为数组', Array.isArray(cell) && cell.length, 2);
+			return controls;
 		});
 	});
 }
 
 function testActions(rt, controls) {
-	console.log('\n[4] 写操作走任务队列，不同步打 modem');
-	rt.setUbusDelay(8000);
-	rt.setCacheDelay(2);
+	console.log('\n[4] 写操作直连官方方法（无任务队列）');
 	rt.resetCalls();
 
 	return controls.sendAt('modem1', '', 'AT+CGMI').then(function(res) {
-		assertEq('send_at 未直接调用 qmodem.send_at', rt.countCalls('qmodem', 'send_at'), 0);
-		ok('send_at 走了 qmodem_cache.send_at（AT 通道由后端串行化）',
-		   rt.countCalls('qmodem_cache', 'send_at') >= 1);
-		ok('send_at 轮询了 get_task', rt.countCalls('qmodem_cache', 'get_task') >= 1);
+		assertEq('send_at 直连官方方法', rt.countCalls('qmodem', 'send_at'), 1);
+		assertEq('无端口时不携带 port 参数', JSON.stringify(rt.calls[0].params.params), JSON.stringify({ at: 'AT+CGMI' }));
 		assertEq('任务结果带回 AT 响应', res.response.indexOf('OK') >= 0, true);
 
 		rt.resetCalls();
 		return controls.statsReset('modem1').then(function(r2) {
-			assertEq('stats_reset 未直接调用 qmodem.stats_reset', rt.countCalls('qmodem', 'stats_reset'), 0);
+			assertEq('stats_reset 直连 qmodem_stats', rt.countCalls('qmodem_stats', 'stats_reset'), 1);
+			assertEq('stats_reset 携带配置节', rt.calls[0].params.config_section, 'modem1');
 			assertEq('stats_reset 返回 success', !!(r2 && r2.success), true);
-			/* statsReset 会 touch(section) + 清空刷新去重窗口：
-			 * 下一次读取必须重新拉快照，而不是继续用清零前的旧数据 */
-			var snapsBefore = rt.countCalls('qmodem_cache', 'snapshot');
-			return controls.getUsageStats('modem1').then(function() {
-				assertEq('stats_reset 后缓存被作废，读取会重新拉快照',
-					   rt.countCalls('qmodem_cache', 'snapshot') > snapsBefore, true);
-			});
 
 			rt.resetCalls();
-			return controls.doReboot('modem1', 'cfun').then(function(r3) {
-				assertEq('reboot 未直接调用 qmodem.do_reboot', rt.countCalls('qmodem', 'do_reboot'), 0);
-				assertEq('reboot 结果 success', !!(r3 && r3.success), true);
+			return controls.doReboot('modem1', 'hard').then(function(r3) {
+				var call = rt.calls.filter(function(c) { return c.method === 'do_reboot'; })[0];
+				assertEq('reboot 直连官方方法', rt.countCalls('qmodem', 'do_reboot'), 1);
+				assertEq('reboot 携带 method 参数', JSON.stringify(call.params.params), JSON.stringify({ method: 'hard' }));
+				assertEq('reboot 结果 status=1', r3.result.status, '1');
 			});
 		});
 	});
@@ -585,13 +518,13 @@ function testDialResults() {
 	return names.reduce(function(chain, pair) {
 		return chain.then(function() {
 			rt.setDialResultStatus('1');
+			rt.resetCalls();
 			return controls[pair[0]]('8_1').then(function(res) {
 				assertEq(pair[1] + ' status=1 正常成功', res.result.status, '1');
-				var task = rt.calls.filter(function(x) {
-					return x.object === 'qmodem_cache' && x.method === 'action' &&
-						x.params.method === pair[1];
+				var call = rt.calls.filter(function(x) {
+					return x.object === 'qmodem' && x.method === pair[1];
 				})[0];
-				assertEq(pair[1] + ' 动态模组节 8_1 正确传递', task.params.args.config_section, '8_1');
+				assertEq(pair[1] + ' 直连官方方法并传递动态配置节', call.params.config_section, '8_1');
 				rt.setDialResultStatus('0');
 				return controls[pair[0]]('8_1').then(function() {
 					ok(pair[1] + ' status=0 必须失败', false);
@@ -620,11 +553,10 @@ function testActionPayloads() {
 		return chain.then(function() {
 			rt.resetCalls();
 			return c.run().then(function(result) {
-				var call = rt.calls.filter(function(x) { return x.object === 'qmodem_cache' && x.method === 'action'; })[0];
-				ok(c.method + ' 已创建后台任务', !!call);
-				assertEq(c.method + ' 队列目标保留动态配置节', call.params.config_section, c.section);
-				assertEq(c.method + ' QModem 载荷带显式配置节', call.params.args.config_section, c.section);
-				if (c.key) assertEq(c.method + ' 参数结构与 RPC 约定一致', JSON.stringify(call.params.args[c.key]), JSON.stringify(c.value));
+				var call = rt.calls.filter(function(x) { return x.object === 'qmodem' && x.method === c.method; })[0];
+				ok(c.method + ' 直连官方方法', !!call);
+				assertEq(c.method + ' 保留动态配置节', call.params.config_section, c.section);
+				if (c.key) assertEq(c.method + ' 参数结构与 RPC 约定一致', JSON.stringify(call.params[c.key]), JSON.stringify(c.value));
 				if (c.method === 'send_at') assertEq('官方 at_cfg.res 被解析为响应正文', result.response, 'Fibocom\r\nFM350-GL\r\nOK');
 			});
 		});
@@ -635,14 +567,6 @@ function testActionPayloads() {
 		return controls.sendAt('6_1', '/dev/ttyUSB1', 'AT+BAD').then(function() {
 			ok('模组 CME ERROR 必须 reject', false);
 		}, function(err) { ok('模组 CME ERROR 被如实返回', /CME ERROR: 10/.test(err.message)); });
-	}).then(function() {
-		rt.resetCalls();
-		return controls.sendAt('6_1', '', 'AT+TASKFAIL').then(function() {
-			ok('已接收的失败 AT 任务必须 reject', false);
-		}, function(err) {
-			assertEq('AT 任务失败保留原错误', err.message, 'AT port busy');
-			assertEq('已进入队列的失败命令不重复直发', rt.countCalls('qmodem', 'send_at'), 0);
-		});
 	}).then(function() {
 		/* 自定义模组的四组频段必须沿 LuCI RPC 完整传递，不能被退回固定 0。 */
 		rt.resetCalls();
@@ -659,25 +583,23 @@ function testActionPayloads() {
 			if (!call) return;
 			[ 'modes', 'wcdma_band', 'lte_band', 'nsa_band', 'sa_band' ].forEach(function(key) {
 				assertEq('自定义模组 RPC 保留 ' + key, call.params[key], cfg[key]);
-			assertEq('普通新增默认非编辑', call.params.edit, '0');
 			});
+			assertEq('普通新增默认非编辑', call.params.edit, '0');
 		});
 	});
 }
 
 async function testImeiReadback() {
-	console.log('\n[4d] IMEI 写入后直接回读并刷新 SIM 缓存');
+	console.log('\n[4d] IMEI 写入后直接回读官方接口确认');
 	var newImei = '860000000000002', oldImei = '860000000000001';
 	var rt = makeRuntime(), controls = loadControls(rt);
 	rt.setModemImeiApi(function() { return { imei: newImei }; });
 	var fresh = await controls.setImei('8_1', newImei);
 	assertEq('IMEI 实际回读值被返回', fresh.imei, newImei);
-	var action = rt.calls.filter(function(c) { return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'set_imei'; })[0];
-	assertEq('写入使用官方模组节', action.params.args.config_section, '8_1');
-	assertEq('写入携带目标 IMEI', action.params.args.imei, newImei);
-	assertEq('写入后直接读取模组而不是旧快照', rt.countCalls('qmodem','get_imei'), 1);
-	var refreshes = rt.calls.filter(function(c) { return c.object === 'qmodem_cache' && c.method === 'refresh'; });
-	assertEq('仅后台补采 SIM 域', JSON.stringify(refreshes.map(function(c) { return c.params.domains; })), JSON.stringify([[ 'sim' ]]));
+	var write = rt.calls.filter(function(c) { return c.object === 'qmodem' && c.method === 'set_imei'; })[0];
+	assertEq('写入使用官方模组节', write.params.config_section, '8_1');
+	assertEq('写入携带目标 IMEI', write.params.imei, newImei);
+	assertEq('写入后直接读取模组确认', rt.countCalls('qmodem','get_imei'), 1);
 
 	var stale = makeRuntime(), staleControls = loadControls(stale);
 	stale.setModemImeiApi(function() { return { imei: oldImei }; });
@@ -701,7 +623,7 @@ async function testImeiReadback() {
 }
 
 async function testSmsSources() {
-	console.log('\n[4c] 短信数据库、旧版模组存储与错误隔离');
+	console.log('\n[4e] 短信数据库、旧版模组存储与错误隔离');
 	function runtime(handler) {
 		var rt = makeRuntime();
 		if (handler) rt.setSmsApi(handler);
@@ -727,7 +649,7 @@ async function testSmsSources() {
 	await db.controls.sendSmsInbox('6_2','10010','测试发送','database');
 	var send = db.rt.calls.filter(function(c) { return c.object === 'qmodem.sms' && c.method === 'send'; })[0];
 	assertEq('发送使用短信服务并保存数据库历史', JSON.stringify(send.params), JSON.stringify({modem_id:'6_2',recipient:'10010',content:'测试发送'}));
-	assertEq('数据库发送不重复调用旧发送接口', db.rt.countCalls('qmodem_cache','action'), 0);
+	assertEq('数据库发送不重复调用旧发送接口', db.rt.countCalls('qmodem','send_sms'), 0);
 	await db.controls.deleteSmsMessage('6_2',{source:'database',index:'72'});
 	var deletion = db.rt.calls.filter(function(c) { return c.method === 'delete'; })[0];
 	assertEq('数据库删除使用记录 id 而非 SIM 序号', JSON.stringify(deletion.params), JSON.stringify({modem_id:'6_2',id:72}));
@@ -741,21 +663,18 @@ async function testSmsSources() {
 	var oldDelete = runtime();
 	oldDelete.rt.setModemSmsApi(function() { return { sms: { msg: [] } }; });
 	await oldDelete.controls.deleteSmsMessage('8_1', {source:'modem',index:'1',indexes:['1','2','3']});
-	var deletionJobs = oldDelete.rt.calls.filter(function(c) {
-		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+	var deletionCalls = oldDelete.rt.calls.filter(function(c) {
+		return c.object === 'qmodem' && c.method === 'delete_sms';
 	});
-	assertEq('旧版多段短信只产生一次删除任务', deletionJobs.length, 1);
-	assertEq('旧版短信删除索引按官方要求降序传入字符串', deletionJobs[0].params.args.index, '3 2 1');
-	assertEq('模组动态配置节传递正确', deletionJobs[0].params.args.config_section, '8_1');
+	assertEq('旧版多段短信只产生一次删除调用', deletionCalls.length, 1);
+	assertEq('旧版短信删除索引按官方要求降序传入字符串', deletionCalls[0].params.index, '3 2 1');
+	assertEq('模组动态配置节传递正确', deletionCalls[0].params.config_section, '8_1');
 	assertEq('多段删除即使返回成功也重新读取核对', oldDelete.rt.countCalls('qmodem','get_sms'), 1);
-	ok('删除成功后主动刷新短信缓存', oldDelete.rt.calls.some(function(c) {
-		return c.object === 'qmodem_cache' && c.method === 'refresh';
-	}));
 	await oldDelete.controls.deleteSmsMessage('8_1', {source:'modem',index:'0',indexes:['0']});
 	var deleteZero = oldDelete.rt.calls.filter(function(c) {
-		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+		return c.object === 'qmodem' && c.method === 'delete_sms';
 	})[1];
-	assertEq('模组短信槽位 0 有效', deleteZero.params.args.index, '0');
+	assertEq('模组短信槽位 0 有效', deleteZero.params.index, '0');
 	var partial = runtime();
 	partial.rt.setModemSmsApi(function() { return { sms: { msg: [{ index: 2, sender: '10010' }] } }; });
 	await rejects('多段中有一段仍存在不能误报删除成功', partial.controls.deleteSmsMessage('8_1',
@@ -783,7 +702,7 @@ async function testSmsSources() {
 	await rejects('非法索引直接拒绝删除', oldDelete.controls.deleteSmsMessage('8_1',
 		{source:'modem',index:'-5',indexes:[]}), /索引/);
 	assertEq('非法索引不会触发额外删除请求', oldDelete.rt.calls.filter(function(c) {
-		return c.object === 'qmodem_cache' && c.method === 'action' && c.params.method === 'delete_sms';
+		return c.object === 'qmodem' && c.method === 'delete_sms';
 	}).length, 2);
 
 	var legacy = runtime();
@@ -799,76 +718,39 @@ async function testSmsSources() {
 	assertEq('缺少新版短信方法时也回退旧版', (await noMethod.controls.getSmsInbox('6_1'))._smsSource, 'modem');
 	var rpcDenied = runtime(function() { return {__rpcError:'RPC call to qmodem.sms/config_get failed with error -32000: Access denied'}; });
 	await rejects('LuCI -32000 非缺失类错误不得误回退', rpcDenied.controls.getSmsInbox('6_1'), /Access denied/);
-	assertEq('权限故障不会触发旧版短信读取', rpcDenied.rt.countCalls('qmodem_cache','snapshot'), 0);
-	/* 西瓜皮实机：get_sms 有数据，qmodem_cache.get_sms 为 missing。 */
-	var cacheMissing = runtime();
-	cacheMissing.rt.setModemSmsApi(function() {
+	assertEq('权限故障不会触发旧版短信读取', rpcDenied.rt.countCalls('qmodem','get_sms'), 0);
+	/* 西瓜皮实机：get_sms 直读模组存储。 */
+	var directRead = runtime();
+	directRead.rt.setModemSmsApi(function() {
 		return { msg: [{ index:0, sender:'10010', content:'西瓜皮真实接口短信' }] };
 	});
-	var legacyReply = await cacheMissing.controls.getSmsInbox('8_1');
-	assertEq('缓存 missing 时先显示正在读取', legacyReply._smsPending, true);
-	await new Promise(function(resolve) { setTimeout(resolve, 10); });
-	legacyReply = await cacheMissing.controls.getSmsInbox('8_1');
-	assertEq('后台读取后旧版短信正常显示', legacyReply.msg[0].content, '西瓜皮真实接口短信');
-	var legacyCall = cacheMissing.rt.calls.filter(function(c) { return c.object === 'qmodem' && c.method === 'get_sms'; });
+	var legacyReply = await directRead.controls.getSmsInbox('8_1');
+	assertEq('旧版直读返回模组短信', legacyReply.msg[0].content, '西瓜皮真实接口短信');
+	var legacyCall = directRead.rt.calls.filter(function(c) { return c.object === 'qmodem' && c.method === 'get_sms'; });
 	assertEq('旧版读取携带动态模组配置节', legacyCall[0].params.config_section, '8_1');
-	await cacheMissing.controls.getSmsInbox('8_1');
-	assertEq('30 秒内不重复访问 AT 短信串口', cacheMissing.rt.countCalls('qmodem','get_sms'), 1);
-	assertEq('旧版直读时不并行触发 worker 抢占 AT', cacheMissing.rt.countCalls('qmodem_cache','refresh'), 0);
+	await directRead.controls.getSmsInbox('8_1');
+	assertEq('30 秒内不重复访问 AT 短信串口', directRead.rt.countCalls('qmodem','get_sms'), 1);
+
 	var oldError = runtime();
 	oldError.rt.setModemSmsApi(function() { return {__rpcError:'old sms port failed'}; });
-	assertEq('旧版短信失败前页面先显示读取状态', (await oldError.controls.getSmsInbox('8_1'))._smsPending, true);
-	await new Promise(function(resolve) { setTimeout(resolve, 10); });
 	await rejects('旧版接口读取失败会正确显示错误', oldError.controls.getSmsInbox('8_1'), /old sms port failed/);
-
-	/* 有缓存也要后台读一次：先秒开旧短信，再在轮询中显示最新消息。 */
-	var cachedSms = runtime();
-	cachedSms.rt.setSmsCache({ sms:{ msg:[{ index:0, sender:'10010', content:'缓存旧短信' }] } });
-	cachedSms.rt.setModemSmsApi(function() {
-		return { sms:{ msg:[{ index:0, sender:'10010', content:'AT 最新短信' },
-			{ index:1, sender:'10086', content:'新到短信' }] } };
-	});
-	cachedSms.rt.setUbusDelay(120);
-	var cacheStarted = Date.now();
-	var initialSms = await cachedSms.controls.getSmsInbox('8_1');
-	assertEq('命中短信缓存时先显示旧数据', initialSms.sms.msg[0].content, '缓存旧短信');
-	assertLt('缓存首屏不等待实时 AT 请求', Date.now() - cacheStarted, 110);
-	assertEq('读取缓存后后台请求一次旧版 get_sms', cachedSms.rt.countCalls('qmodem','get_sms'), 1);
-	await new Promise(function(resolve) { setTimeout(resolve, 160); });
-	var updatedSms = await cachedSms.controls.getSmsInbox('8_1');
-	assertEq('后台请求完成后显示最新短信', updatedSms.sms.msg.length, 2);
-	assertEq('后续轮询不会被旧缓存覆盖', updatedSms.sms.msg[1].content, '新到短信');
-	await cachedSms.controls.getSmsInbox('8_1');
-	assertEq('30 秒内多轮轮询仅一次真实 AT 请求', cachedSms.rt.countCalls('qmodem','get_sms'), 1);
-	assertEq('使用直读后不重复派发 worker 短信任务', cachedSms.rt.countCalls('qmodem_cache','refresh'), 0);
-
-	var staleFail = runtime();
-	staleFail.rt.setSmsCache({sms:{msg:[{index:0,sender:'10010',content:'原缓存保留'}]}});
-	staleFail.rt.setModemSmsApi(function() { return {__rpcError:'AT busy'}; });
-	assertEq('后台请求失败时继续显示缓存',
-		(await staleFail.controls.getSmsInbox('8_1')).sms.msg[0].content, '原缓存保留');
-	await new Promise(function(resolve) { setTimeout(resolve, 10); });
-	assertEq('后台失败后仍可读取缓存',
-		(await staleFail.controls.getSmsInbox('8_1')).sms.msg[0].content, '原缓存保留');
-	assertEq('后台失败不每轮重试串口', staleFail.rt.countCalls('qmodem','get_sms'), 1);
+	await rejects('后台失败限流期间继续给出明确错误', oldError.controls.getSmsInbox('8_1'), /稍后自动重试|old sms port failed/);
+	assertEq('失败后 30 秒内不重试串口', oldError.rt.countCalls('qmodem','get_sms'), 1);
 
 	var direct = runtime(function() { return {mode:'direct'}; });
-	direct.rt.setUbusDelay(8000);
-	var started = Date.now();
-	assertEq('direct 模式继续使用后台缓存', (await direct.controls.getSmsInbox('6_1'))._smsSource, 'modem');
-	assertLt('direct 模式首屏不等待慢串口', Date.now() - started, 1500);
-	assertEq('direct 模式首屏不调用会读串口的 list', direct.rt.countCalls('qmodem.sms','list'), 0);
-	assertEq('direct 模式首屏不直接读取模组', direct.rt.countCalls('qmodem','get_sms'), 0);
+	assertEq('direct 模式继续直读模组存储', (await direct.controls.getSmsInbox('6_1'))._smsSource, 'modem');
+	assertEq('direct 模式不调用数据库 list', direct.rt.countCalls('qmodem.sms','list'), 0);
+	assertEq('direct 模式读取一次模组短信', direct.rt.countCalls('qmodem','get_sms'), 1);
 
 	var empty = runtime(function(method) { return method === 'config_get' ? {mode:'database_urc'} : {messages:[]}; });
 	assertEq('数据库为空仍保留正确数据源', (await empty.controls.getSmsInbox('6_1'))._smsSource, 'database');
-	var denied = runtime(function() { return {__rpcError:'RPC call failed with ubus code 6: Permission denied'}; });
-	await rejects('权限失败如实显示，不伪装为无短信', denied.controls.getSmsInbox('6_1'), /Permission denied/);
-	assertEq('权限失败不切换到旧接口', denied.rt.countCalls('qmodem_cache','snapshot'), 0);
+	var denied2 = runtime(function() { return {__rpcError:'RPC call failed with ubus code 6: Permission denied'}; });
+	await rejects('权限失败如实显示，不伪装为无短信', denied2.controls.getSmsInbox('6_1'), /Permission denied/);
+	assertEq('权限失败不切换到旧接口', denied2.rt.countCalls('qmodem','get_sms'), 0);
 	var broken = runtime(function(method) { return method === 'config_get' ? {mode:'database_poll'} : {status:'error',error:'database unavailable'}; });
 	await rejects('数据库读取故障保留原错误', broken.controls.getSmsInbox('6_1'), /database unavailable/);
 	await rejects('发送故障保留原错误', broken.controls.sendSmsInbox('6_1','10010','测试','database'), /database unavailable/);
-	assertEq('失败的数据库发送不会切换接口重发', broken.rt.countCalls('qmodem_cache','action'), 0);
+	assertEq('失败的数据库发送不会切换接口重发', broken.rt.countCalls('qmodem','send_sms'), 0);
 	var invalid = runtime(function(method) { return method === 'config_get' ? {mode:'database_poll'} : {}; });
 	await rejects('无效列表不能当成空收件箱', invalid.controls.getSmsInbox('6_1'), /消息列表/);
 	await rejects('缺少成功状态不能当成发送成功', invalid.controls.sendSmsInbox('6_1','10010','测试','database'), /未确认操作成功/);
@@ -881,8 +763,9 @@ async function testSmsSources() {
 	assertEq('超过一页的短信继续读取并去重', all.messages.length, 501);
 	assertEq('短信分页传递 offset', paged.rt.calls.filter(function(c) { return c.method === 'list'; })[1].params.offset, 500);
 	var acl = JSON.parse(fs.readFileSync(path.join(ROOT,'root/usr/share/rpcd/acl.d/luci-app-qmodem-generic.json'),'utf8'))['luci-app-qmodem-generic'];
-	ok('短信数据库读权限齐全', ['config_get','list'].every(function(m) { return acl.read.ubus['qmodem.sms'].includes(m); }));
-	ok('短信数据库写权限齐全', ['send','delete','mark_read','sync'].every(function(m) { return acl.write.ubus['qmodem.sms'].includes(m); }));
+	ok('短信数据库读权限齐全', ['status','config_get','sync_status','list','get','modem_list','storage_get'].every(function(m) { return acl.read.ubus['qmodem.sms'].includes(m); }));
+	ok('短信数据库写权限齐全', ['configure','sync','send','delete','mark_read','modem_delete','storage_set'].every(function(m) { return acl.write.ubus['qmodem.sms'].includes(m); }));
+	ok('上联与统计/支持库权限齐全', !!acl.read.ubus['qmodem.uplink'] && !!acl.read.ubus['qmodem_stats'] && !!acl.read.ubus['qmodem_support']);
 }
 
 function testNoSlowPathDeclared(rt, controls) {
@@ -897,7 +780,6 @@ function testNoSlowPathDeclared(rt, controls) {
 
 function testLiveView(rt, controls) {
 	console.log('\n[6] liveView：不堆叠轮询、隐藏时降频、离开页面停止');
-	rt.setCacheDelay(1);
 	rt.resetCalls();
 
 	var paints = 0, collects = 0;
@@ -907,7 +789,6 @@ function testLiveView(rt, controls) {
 	};
 
 	var node1 = controls.liveView(view1, { section: 'modem1' }, {
-		domains: [ 'status' ],
 		interval: 120,
 		paint: function(res) { return view1.renderInto(res); },
 		collect: function(ctx) { collects++; return { section: ctx.section }; }
@@ -922,7 +803,6 @@ function testLiveView(rt, controls) {
 		var slowCollects = 0;
 		var view2 = { section: 'modem1', renderInto: function() { return new rt.El('div'); } };
 		controls.liveView(view2, { section: 'modem1' }, {
-			domains: [ 'status' ],
 			interval: 60,
 			paint: function(res) { return new rt.El('div'); },
 			collect: function(ctx) {
@@ -953,9 +833,8 @@ function testLiveView(rt, controls) {
 }
 
 function testViews(rt) {
-	console.log('\n[7] 视图模块：load() 不碰 modem');
-	rt.setUbusDelay(8000);
-	rt.setCacheDelay(5);
+	console.log('\n[7] 视图模块：load() 快速完成并解析配置节');
+	rt.setUbusDelay(60);
 
 	var controls = loadControls(rt);
 	var views = [ 'status', 'connection', 'network', 'system', 'sms', 'advanced', 'terminal', 'settings' ];
@@ -974,12 +853,11 @@ function testViews(rt) {
 				var elapsed = Date.now() - t0;
 				assertLt(name + '.load() 首屏耗时', elapsed, 1500);
 				if (name === 'sms')
-					ok('sms.load() 最多后台请求一次旧版短信', rt.calls.filter(function(c) {
+					ok('sms.load() 的模组调用仅为读取类且短信至多读一次', rt.calls.filter(function(c) {
 						return c.object === 'qmodem';
-					}).every(function(c) { return c.method === 'get_sms'; }) && rt.countCalls('qmodem') <= 1);
-				else
-					assertEq(name + '.load() 未调用 qmodem 对象', rt.countCalls('qmodem'), 0);
-				assertEq(name + '.load() 未调用 qos 对象', rt.countCalls('qos'), 0);
+					}).every(function(c) { return /^(get_sms|sim_info|get_at_cfg)$/.test(c.method); }) &&
+					rt.countCalls('qmodem', 'get_sms') <= 1);
+				assertEq(name + '.load() 未调用已删除的 qos 对象', rt.countCalls('qos'), 0);
 				assertEq(name + '.load() 未调用 luci-rpc', rt.countCalls('luci-rpc'), 0);
 				ok(name + '.load() 解析出 section', !!res && res.section === 'modem1',
 				   res && res.section);
@@ -990,7 +868,7 @@ function testViews(rt) {
 	}, Promise.resolve());
 }
 
-/* 签约速率与 QCI/5QI 展示：验证后端 kbps → 前端 'N M/G/Kbps'，未知 → '--' */
+/* 签约速率与 QCI/5QI 展示：验证官方 AMBR kbps → 前端 'N M/G/Kbps'，未知 → '--' */
 function testQosDisplay(rt, controls) {
 	console.log('\n[7.5] 签约速率 / QoS 等级前端格式化');
 	function freshStatus(controls) {
@@ -1127,9 +1005,8 @@ function testAdvancedNonblocking() {
 }
 
 function testRender(rt) {
-	console.log('\n[8] 视图渲染：首屏数据不全也不能抛异常（白屏）');
-	rt.setUbusDelay(8000);
-	rt.setCacheDelay(5);
+	console.log('\n[8] 视图渲染：模组失联（RPC 全部失败）也不能抛异常（白屏）');
+	rt.setUbusDelay(5);
 
 	var controls = loadControls(rt);
 	var views = [ 'status', 'connection', 'network', 'system', 'sms', 'advanced', 'terminal' ];
@@ -1147,22 +1024,20 @@ function testRender(rt) {
 				}
 				ok(name + '.render() 未抛异常（不会白屏）', !err, err && (err.stack || err.message));
 				ok(name + '.render() 返回了可挂载节点', !!node && typeof node.appendChild === 'function');
-				/* 渲染阶段也不允许去摸 modem（骨架里全是缓存值） */
-				return node;
 			}).then(function() {
-				/* 数据完全缺失（modem 死透 / 缓存为空）时同样必须能渲染 */
-				rt.setSnapshotEmpty();
+				/* 模组完全失联（所有 qmodem 调用失败）时同样必须能渲染 */
+				rt.setFailAll(true);
 				var mod2 = rt.loadModule('view/qmodem-generic/' + name + '.js',
 					{ 'luci/qmodem-generic/controls': controls });
 				return Promise.resolve(mod2.load.call(mod2)).then(function(res) {
 					var err = null;
 					try { mod2.render.call(mod2, res); } catch (e) { err = e; }
-					rt.setSnapshotFull();
-					ok(name + ' 在缓存全空（模组离线）时仍能渲染', !err, err && (err.stack || err.message));
+					ok(name + ' 在模组失联（RPC 全失败）时仍能渲染', !err, err && (err.stack || err.message));
 				});
 			}).catch(function(e) {
+				rt.setFailAll(false);
 				ok(name + ' 渲染链路无未捕获异常', false, (e && e.stack) || String(e));
-			});
+			}).then(function() { rt.setFailAll(false); });
 		});
 	}, Promise.resolve());
 }
@@ -1185,7 +1060,7 @@ testLegacyUciCommit().then(function() { return testBootstrap(rt); })
 	.then(testSmsSources)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
-	.then(function(rt2) { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
+	.then(function() { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
 	.then(testOptionalData)
 	.then(testAdvancedNonblocking)
 	.then(function() { return testRender(makeRuntime()); })

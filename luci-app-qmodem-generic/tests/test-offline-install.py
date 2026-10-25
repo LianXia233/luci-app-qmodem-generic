@@ -160,7 +160,7 @@ sys.exit(int(os.environ.get('QM_TEST_ADD_STATUS', 0)) if 'install' in args else 
         stage = Path(device.name)
         for directory in ["etc/init.d", "tmp/luci-modulecache", "etc/qmodem-stats"]:
             (stage / directory).mkdir(parents=True, exist_ok=True)
-        for name in ["rpcd", "qmodem-worker", "qmodem-stats-collect", "qmodem-modem-support"]:
+        for name in ["rpcd", "qmodem-stats-collect", "qmodem-modem-support"]:
             service = stage / "etc/init.d" / name
             service.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$0.log"\n')
             service.chmod(0o755)
