@@ -232,11 +232,11 @@ return view.extend({
 	},
 
 	DOMAINS: [ 'sms', 'sim', 'device' ],
-	POLL_INTERVAL: 4000,
+	POLL_INTERVAL: 5000,
 
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			return self.collect(ctx);
 		});
@@ -360,21 +360,89 @@ return view.extend({
 		var database = this.smsSource === 'database';
 		var tdtech = controls.supportsTdTechAt(this.section);
 		var smsc = E('input', { 'class': 'cbi-input-text', 'placeholder': '--' });
-		var storage = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': 'SM' }, _('SIM card')), E('option', { 'value': 'ME' }, _('Module storage')) ]);
 		var ims = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': '1' }, _('Enabled')), E('option', { 'value': '0' }, _('Disabled')) ]);
+		var legacyStorage = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': 'SM' }, _('SIM card')), E('option', { 'value': 'ME' }, _('Module storage')) ]);
 		var current = { ims: '', smsc: '', storage: '' };
 		var importFile = E('input', { 'type': 'file', 'accept': 'application/json,.json', 'style': 'display:none', 'change': function() { if (importFile.files && importFile.files[0]) self.importSent(importFile.files[0]); } });
+
+		/* ---- 官方 qmodem.sms 短信守护进程管理 ---- */
+		var serviceRows = [];
+		var modeSelect = controls.select([
+			[ 'direct', _('直连模式（AT 直接收发）') ],
+			[ 'database_poll', _('数据库轮询') ],
+			[ 'database_urc', _('数据库 URC 触发') ]
+		]);
+		var pollInput = E('input', { 'type': 'number', 'min': '60', 'max': '3600', 'class': 'cbi-input-text', 'style': 'width:120px' });
+		var autoDeleteBox = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+		var forwardBox = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+		var countryInput = E('input', { 'class': 'cbi-input-text', 'placeholder': '+86', 'style': 'width:120px' });
+		var serviceStateLine = E('div', { 'class': 'mt-control-note', 'style': 'display:none' });
+		var mem1 = E('select', { 'class': 'cbi-input-select' }, [ E('option', { 'value': 'SM' }, _('SIM card')), E('option', { 'value': 'ME' }, _('Module storage')) ]);
+		var mem2 = mem1.cloneNode(true);
+		var mem3 = mem1.cloneNode(true);
+		var storageUsage = E('span', { 'style': 'font-size:11px;color:var(--qm-text-muted)' }, '--');
+		var pduInput = E('textarea', { 'class': 'cbi-input-text', 'rows': 3, 'placeholder': _('粘贴 PDU 十六进制串（含短信中心号），经 qmodem.send_raw_pdu 直发'), 'style': 'font-family:ui-monospace,monospace' });
+
+		function memRow(label, sel) {
+			var row = E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, label), sel ]);
+			return row;
+		}
+		var serviceSection = E('div', {}, [
+			E('h4', { 'style': 'margin:18px 0 4px;font-size:13px;color:var(--qm-accent)' }, _('短信服务（qmodem_smsd）')),
+			serviceStateLine,
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('接收模式')), modeSelect ]),
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('轮询间隔（秒）')), pollInput ]),
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('读取后从 SIM 删除')), autoDeleteBox ]),
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('启用转发')), forwardBox ]),
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('国家码')), countryInput ]),
+			database ? E('div', { 'class': 'right', 'style': 'margin:6px 0' }, [
+				E('button', { 'type': 'button', 'class': 'btn', 'click': function() {
+					controls.refreshSmsInbox(self.section, 'database').then(function() {
+						controls.notify(null, E('p', {}, _('短信同步完成。')));
+					}).catch(function(err) {
+						controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+					});
+				} }, _('立即同步'))
+			]) : null
+		]);
+		var storageSection = E('div', {}, [
+			E('h4', { 'style': 'margin:18px 0 4px;font-size:13px;color:var(--qm-accent)' }, _('短信存储位置')),
+			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('存储占用')), storageUsage ]),
+			memRow(_('读取存储 (mem1)'), mem1),
+			memRow(_('写入存储 (mem2)'), mem2),
+			memRow(_('其它存储 (mem3)'), mem3)
+		]);
+		var legacyStorageRow = E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('Storage location')), legacyStorage ]);
+		var pduSection = E('div', {}, [
+			E('h4', { 'style': 'margin:18px 0 4px;font-size:13px;color:var(--qm-accent)' }, _('PDU 直发（高级）')),
+			pduInput,
+			E('div', { 'class': 'right', 'style': 'margin-top:8px' }, [
+				E('button', { 'type': 'button', 'class': 'btn', 'click': function() {
+					var pdu = pduInput.value.replace(/[^0-9a-fA-F]/g, '');
+					if (pdu.length < 2 || pdu.length % 2)
+						return controls.notify(null, E('p', {}, _('PDU 必须是偶数长度的十六进制串。')), 'warning');
+					controls.sendRawPdu(self.section, pdu).then(function() {
+						controls.notify(null, E('p', {}, _('PDU 已提交模组发送。')));
+					}).catch(function(err) {
+						controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+					});
+				} }, _('发送 PDU'))
+			])
+		]);
 
 		function failed(err) { controls.notify(null, E('p', {}, err && err.message ? err.message : _('Message operation failed.')), 'danger'); }
 		function query(cmd) { return controls.sendAt(self.section, self.atPort, cmd).then(atText).catch(function() { return ''; }); }
 
-		ui.showModal(_('Message settings'), [ E('div', {}, [
+		ui.showModal(_('Message settings'), [ E('div', { 'style': 'max-height:70vh;overflow-y:auto' }, [
 			E('p', { 'class': 'mt-control-note' }, database ? _('当前会话来自路由器短信数据库，读取后从 SIM 卡删除不会清除这些记录。') : _('当前会话来自模组存储，浏览器单独保存本页面发送的历史记录。')),
 			tdtech ? E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('SMS service')), ims ]) : null,
 			tdtech ? E('div', { 'class': 'alert-message warning' }, _('Changing SMS service cycles airplane mode and also changes the IMS PDP context. Leave it enabled unless the carrier does not support IMS messaging.')) : null,
 			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('Message center')), smsc ]),
-			E('div', { 'class': 'mt-sms-settings-row' }, [ E('label', {}, _('Storage location')), storage ]),
-			E('div', { 'class': 'mt-control-note' }, '以上设置经 QModem 的 send_at 下发到模组，部分参数可能不被本模组支持。'),
+			legacyStorageRow,
+			serviceSection,
+			storageSection,
+			pduSection,
+			E('div', { 'class': 'mt-control-note' }, _('短信中心 / IMS 等模组参数经 QModem 的 send_at 下发；短信服务与存储经官方 qmodem.sms 接口下发。部分参数可能不被本模组支持。')),
 			E('div', { 'class': 'right' }, [
 				E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('Close')), ' ',
 				E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function() {
@@ -383,12 +451,29 @@ return view.extend({
 						if (!/^\+?[0-9]{5,20}$/.test(value)) return controls.notify(null, E('p', {}, _('Enter a valid message center number.')), 'warning');
 						commands.push('AT+CSCA="' + value + '"');
 					}
-					if (!storage.disabled && storage.value !== current.storage) commands.push('AT+CPMS="' + storage.value + '","' + storage.value + '","' + storage.value + '"');
+					if (!legacyStorage.disabled && legacyStorage.value !== current.storage) commands.push('AT+CPMS="' + legacyStorage.value + '","' + legacyStorage.value + '","' + legacyStorage.value + '"');
 					if (tdtech && current.ims && ims.value !== current.ims) commands.push('AT^IMSSWITCH=' + ims.value);
-					commands.reduce(function(chain, cmd) { return chain.then(function() { return controls.sendAt(self.section, self.atPort, cmd); }); }, Promise.resolve()).then(function() {
-						ui.hideModal(); controls.notify(null, E('p', {}, _('Message settings saved.')));
-						window.setTimeout(function() { window.location.reload(); }, 1200);
-					}).catch(failed);
+					var atChain = commands.reduce(function(chain, cmd) { return chain.then(function() { return controls.sendAt(self.section, self.atPort, cmd); }); }, Promise.resolve());
+					var serviceSave = serviceSection.parentNode ? controls.configureSmsService(self.section, {
+						mode: modeSelect.value,
+						pollInterval: Number(pollInput.value) || null,
+						forwarding: forwardBox.checked,
+						autoDelete: autoDeleteBox.checked,
+						countryCode: countryInput.value.trim()
+					}).catch(function(err) {
+						if (serviceAvailable) throw err;
+						return null;   /* 服务不可用时跳过，保持旧行为 */
+					}) : Promise.resolve();
+					var storageSave = storageAvailable ? controls.setSmsStorageService(self.section, mem1.value, mem2.value, mem3.value).catch(function(err) {
+						if (storageAvailable) throw err;
+						return null;
+					}) : Promise.resolve();
+					atChain.then(function() { return serviceSave; })
+						.then(function() { return storageSave; })
+						.then(function() {
+							ui.hideModal(); controls.notify(null, E('p', {}, _('Message settings saved.')));
+							window.setTimeout(function() { window.location.reload(); }, 1200);
+						}).catch(failed);
 				} }, _('Save settings'))
 			]),
 			E('div', { 'class': 'mt-sms-danger' }, [
@@ -416,22 +501,78 @@ return view.extend({
 			])
 		]) ]);
 
-		storage.disabled = true; ims.disabled = true;
-		Promise.all([ query('AT+CSCA?'), query('AT+CPMS?'), tdtech ? query('AT^IMSSWITCH?') : Promise.resolve('') ]).then(function(res) {
+		legacyStorage.disabled = true; ims.disabled = true;
+		mem1.disabled = mem2.disabled = mem3.disabled = true;
+		var serviceAvailable = false, storageAvailable = false;
+
+		Promise.all([
+			query('AT+CSCA?'),
+			tdtech ? query('AT^IMSSWITCH?') : Promise.resolve(''),
+			controls.getSmsServiceConfig(self.section).catch(function() { return null; })
+		]).then(function(res) {
 			current.smsc = ((String(res[0]).match(/\+CSCA:\s*"([^"]+)"/) || [])[1] || '');
-			current.storage = ((String(res[1]).match(/\+CPMS:\s*"([A-Z]+)"/) || [])[1] || '');
-			current.ims = ((String(res[2]).match(/IMSSWITCH:\s*(\d+)/) || [])[1] || '');
+			current.ims = ((String(res[1]).match(/IMSSWITCH:\s*(\d+)/) || [])[1] || '');
 			smsc.value = current.smsc;
-			storage.value = current.storage === 'ME' ? 'ME' : 'SM';
-			storage.disabled = !/^(SM|ME)$/.test(current.storage);
 			ims.value = current.ims === '0' ? '0' : '1';
 			ims.disabled = !current.ims;
+
+			var config = res[2];
+			if (!config) {
+				/* 旧版 QModem：无短信守护进程，退回 AT+CPMS 管理存储 */
+				serviceStateLine.textContent = _('未检测到短信服务（qmodem_smsd），存储管理退回 AT+CPMS。');
+				serviceStateLine.style.display = '';
+				serviceSection.querySelectorAll('.mt-sms-settings-row, .right').forEach(function(node) { node.style.display = 'none'; });
+				storageSection.style.display = 'none';
+				return query('AT+CPMS?').then(function(text) {
+					current.storage = ((String(text).match(/\+CPMS:\s*"([A-Z]+)"/) || [])[1] || '');
+					legacyStorage.value = current.storage === 'ME' ? 'ME' : 'SM';
+					legacyStorage.disabled = !/^(SM|ME)$/.test(current.storage);
+				});
+			}
+
+			serviceAvailable = true;
+			modeSelect.value = config.mode;
+			pollInput.value = config.poll_interval != null ? config.poll_interval : 300;
+			autoDeleteBox.checked = !!config.auto_delete;
+			forwardBox.checked = !!config.forwarding;
+			countryInput.value = config.country_code || '';
+
+			controls.getSmsServiceStatus().then(function(status) {
+				if (!status) return;
+				serviceStateLine.style.display = '';
+				serviceStateLine.textContent = _('服务状态：%s · 默认模式：%s · 数据库：%s').format(
+					status.status || '--', status.default_mode || '--', status.database || '--');
+			});
+			controls.getSmsSyncStatus().then(function(sync) {
+				if (!sync) return;
+				var last = sync.last_sync_at ? new Date(Number(sync.last_sync_at) * 1000).toLocaleString() : '--';
+				serviceStateLine.style.display = '';
+				serviceStateLine.textContent += '　·　' + _('最近同步：%s（导入 %s 条）').format(last, sync.imported != null ? sync.imported : '--');
+			});
+
+			return controls.getSmsStorageService(self.section).then(function(storage) {
+				storageAvailable = true;
+				mem1.disabled = mem2.disabled = mem3.disabled = false;
+				mem1.value = /^(SM|ME)$/.test(storage.mem1) ? storage.mem1 : 'SM';
+				mem2.value = /^(SM|ME)$/.test(storage.mem2) ? storage.mem2 : storage.mem1;
+				mem3.value = /^(SM|ME)$/.test(storage.mem3) ? storage.mem3 : storage.mem2;
+				storageUsage.textContent = _('ME %s/%s · SM %s/%s').format(
+					storage.ME.used, storage.ME.total, storage.SM.used, storage.SM.total);
+				legacyStorageRow.style.display = 'none';
+			}, function() {
+				/* storage_get 失败：保持 AT+CPMS 通道 */
+				return query('AT+CPMS?').then(function(text) {
+					current.storage = ((String(text).match(/\+CPMS:\s*"([A-Z]+)"/) || [])[1] || '');
+					legacyStorage.value = current.storage === 'ME' ? 'ME' : 'SM';
+					legacyStorage.disabled = !/^(SM|ME)$/.test(current.storage);
+					storageSection.style.display = 'none';
+				});
+			});
 		}).catch(function() {});
 	},
 
 	render: function(res) {
 		return controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			skipIfFocused: false,
 			wakeOn: res && res.section ? controls.smsReadInFlight(res.section) : null,

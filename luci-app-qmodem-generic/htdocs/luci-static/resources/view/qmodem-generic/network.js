@@ -1201,7 +1201,7 @@ return view.extend({
 			E('div', { 'style': 'display:flex;gap:10px;margin:16px 0' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn cbi-button-action',
-					'click': function(ev) { return controls.refreshPage(section, [ 'network', 'signal', 'sim', 'device' ], ev.currentTarget); }
+					'click': function(ev) { return controls.refreshPage(section, null, ev.currentTarget); }
 				}, _('刷新状态'))
 			]),
 

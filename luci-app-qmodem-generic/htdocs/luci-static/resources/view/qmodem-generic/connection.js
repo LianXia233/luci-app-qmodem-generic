@@ -67,12 +67,11 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [ 'status', 'network' ],
-	POLL_INTERVAL: 5000,
+	POLL_INTERVAL: 6000,
 
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			return self.collect(ctx);
 		});
@@ -92,13 +91,17 @@ return view.extend({
 			guard(controls.getDns(section), 'DNS', errors),
 			guard(controls.getMode(section), '拨号模式', errors),
 			guard(controls.getDialStatus(section), '拨号状态', errors),
-			guard(controls.getInterfaceStatus(section), '接口状态', errors)
+			guard(controls.getInterfaceStatus(section), '接口状态', errors),
+			guard(controls.rcList('qmodem_network'), '拨号服务', errors),
+			guard(controls.getMonitorStatus(section), '网络监测', errors),
+			guard(controls.getUplinkStatus(), '上联管理', errors),
+			guard(controls.get5gLan(section), '5G LAN', errors)
 		]).then(function(results) {
 			var ifstat = results[5] || {};
 			var devName = ifstat.l3_device || ifstat.device || '';
 
 			return guard(
-				devName ? controls.getDeviceStatusCached(section) : Promise.resolve({}),
+				devName ? controls.getDeviceStatus(devName) : Promise.resolve({}),
 				'设备状态', errors
 			).then(function(devstat) {
 				var netdev = '';
@@ -116,6 +119,10 @@ return view.extend({
 					dial: results[4],
 					ifstat: ifstat,
 					devstat: devstat || {},
+					networkService: results[6] || {},
+					monitor: results[7] || {},
+					uplink: results[8] || {},
+					fiveGLan: results[9] || {},
 					errors: errors
 				};
 			});
@@ -443,9 +450,167 @@ return view.extend({
 		});
 	},
 
+	clearLog: function(details, output, section) {
+		var self = this;
+		controls.confirmModal(_('清除拨号日志'),
+			_('将调用 QModem 清除该模组的拨号日志文件。是否继续？'),
+			function() {
+				return controls.clearDialLog(section).then(function() {
+					details.setAttribute('data-loaded', '0');
+					output.textContent = _('日志已清除，展开可重新读取。');
+					if (!details.open) details.open = true;
+					return self.loadLog(details, output, section);
+				});
+			});
+	},
+
+	/* qmodem_network 拨号服务管理（官方 rc list + luci setInitAction 接口） */
+	serviceCard: function(res) {
+		var self = this;
+		var svc = res.networkService || {};
+		var known = svc && (svc.running !== undefined || svc.enabled !== undefined) &&
+			Object.keys(svc).length > 0;
+		var running = svc.running === true;
+		var enabled = svc.enabled === true;
+
+		function serviceAction(label, action) {
+			controls.confirmModal(label,
+				_('将对 qmodem_network 拨号服务执行「%s」操作，确定继续？').format(label),
+				function() {
+					return controls.setInitAction('qmodem_network', action).then(function() {
+						controls.notify(null, E('p', {}, _('拨号服务已执行「%s」。').format(label)), 'info');
+						return controls.kickPoller();
+					});
+				});
+		}
+
+		function toggleGlobalDial(ev) {
+			var val = ev.currentTarget.checked ? '1' : '0';
+			try {
+				if (!uci.get('qmodem', 'main'))
+					uci.add('qmodem', 'main', 'main');
+				uci.set('qmodem', 'main', 'enable_dial', val);
+			} catch (e) {
+				controls.notify(null, E('p', {}, _('保存失败：') + ((e && e.message) || String(e))), 'danger');
+				return;
+			}
+			uci.save().then(function() {
+				return controls.commitConfig('qmodem');
+			}).then(function() {
+				controls.notify(null, E('p', {}, _('全局拨号开关已保存。')), 'info');
+			}).catch(function(err) {
+				controls.notify(null, E('p', {}, _('保存失败：') + ((err && err.message) || String(err))), 'danger');
+			});
+		}
+
+		var globalDial = '0';
+		try { globalDial = uci.get('qmodem', 'main', 'enable_dial') || '1'; } catch (e) { globalDial = '1'; }
+		var globalDialBox = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+		globalDialBox.checked = controls.isEnabled(globalDial);
+		globalDialBox.addEventListener('change', toggleGlobalDial);
+
+		var body = [
+			controls.state(_('服务状态'), !known ? _('未检测到（请确认 QModem 已安装）') :
+				running ? _('运行中') : _('已停止')),
+			controls.state(_('开机自启'), !known ? '--' : enabled ? _('已启用') : _('未启用')),
+			controls.row(_('全局拨号开关（enable_dial）'), globalDialBox)
+		];
+
+		if (known) {
+			body.push(controls.action(_('重启服务'), function() { serviceAction(_('重启服务'), 'restart'); }));
+			if (running)
+				body.push(controls.action(_('停止服务'), function() { serviceAction(_('停止服务'), 'stop'); }));
+			else
+				body.push(controls.action(_('启动服务'), function() { serviceAction(_('启动服务'), 'start'); }));
+			body.push(controls.action(enabled ? _('禁用开机自启') : _('启用开机自启'), function() {
+				serviceAction(enabled ? _('禁用开机自启') : _('启用开机自启'), enabled ? 'disable' : 'enable');
+			}));
+		}
+
+		return controls.card(_('拨号服务'), _('qmodem_network 服务与全局拨号开关（写入 /etc/config/qmodem）。'), body);
+	},
+
+	/* qmodem_monitor 网络监测状态（官方 get_monitor_status；未安装时优雅降级） */
+	monitorCard: function(res) {
+		var m = res.monitor || {};
+		var known = m.enabled != null || m.running != null || controls.hasValue(m.phase);
+		var body;
+		if (!known) {
+			body = [ E('div', { 'class': 'mt-control-note' },
+				_('未检测到 qmodem_monitor 网络监测服务。安装 QModem 的 qmodem-monitor 组件后，此处显示断线监测与自动恢复状态。')) ];
+		} else {
+			body = [
+				controls.state(_('监测开关'), m.enabled ? _('已启用') : _('未启用')),
+				controls.state(_('监测进程'), m.running ? _('运行中') : _('未运行')),
+				controls.state(_('阶段'), m.phase),
+				controls.state(_('连通性'), m.connectivity),
+				controls.state(_('失败次数'), m.failures != null ? String(m.failures) : ''),
+				controls.state(_('原因'), m.reason),
+				controls.state(_('恢复策略'), m.profile)
+			];
+		}
+		return controls.card(_('网络监测'), _('断线监测与自动恢复状态（QModem qmodem_monitor）。'), body);
+	},
+
+	/* qmodem-uplink-manager 上联管理状态（官方 qmodem.uplink status） */
+	uplinkCard: function(res) {
+		var up = res.uplink || {};
+		var known = up.enabled != null || (Array.isArray(up.members) && up.members.length > 0);
+		var body;
+		if (!known) {
+			body = [ E('div', { 'class': 'mt-control-note' },
+				_('未检测到 qmodem-uplink-manager 服务。安装后此处显示多上行（WAN + 模组）的负载均衡 / 故障切换状态。')) ];
+		} else {
+			var memberRows = (up.members || []).map(function(m) {
+				return E('div', { 'class': 'mt-info-row' }, [
+					E('span', { 'class': 'mt-info-key' }, joinAddresses([ m.interface || m.id || '' ]) || m.id),
+					E('strong', { 'class': 'mt-info-val' }, [
+						m.selected ? E('span', { 'style': 'color:var(--qm-ok)' }, _('使用中') + ' · ') : null,
+						(m.healthy === true ? _('健康') : m.healthy === false ? _('异常') : m.reason || _('未知'))
+					])
+				]);
+			});
+			body = [
+				controls.state(_('上联管理'), up.enabled ? _('已启用') : _('未启用')),
+				controls.state(_('模式'), up.mode),
+				controls.state(_('当前出口'), joinAddresses([ up.active || '' ]) || up.active || '--'),
+				controls.state(_('策略状态'), up.reason || _('正常')),
+				up.config_generation && up.config_generation !== up.applied_generation ?
+					E('div', { 'class': 'mt-control-note' }, _('配置已更新，等待服务应用。')) : null,
+				memberRows.length ? E('div', { 'class': 'mt-info-body' }, memberRows) : null
+			];
+		}
+		return controls.card(_('上联管理状态'), _('多上行策略路由与健康探测（qmodem.uplink）。'), body, true);
+	},
+
+	/* 5G LAN 开关（官方 get_5g_lan / set_5g_lan；不支持的模组优雅降级） */
+	fiveGLanCard: function(res) {
+		var self = this;
+		var lan = res.fiveGLan || {};
+		var body;
+		if (lan.supported !== true) {
+			body = [ E('div', { 'class': 'mt-control-note' },
+				_('当前模组或 QModem 版本未提供 5G LAN 能力。')) ];
+		} else {
+			var box = E('input', { 'type': 'checkbox', 'class': 'cbi-input-checkbox' });
+			box.checked = lan.enabled === true;
+			body = [
+				controls.row(_('启用 5G LAN'), box),
+				controls.action(_('应用'), function() {
+					return controls.set5gLan(res.section, box.checked).then(function() {
+						controls.notify(null, E('p', {}, _('5G LAN 设置已下发。')), 'info');
+						return controls.kickPoller();
+					}, function(err) {
+						controls.notify(null, E('p', {}, _('设置失败：') + ((err && err.message) || String(err))), 'danger');
+					});
+				})
+			];
+		}
+		return controls.card(_('5G LAN'), _('模组内置 5G LAN / 以太网直通能力（QModem 5g_lan 接口）。'), body);
+	},
+
 	render: function(res) {
 		return controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect
@@ -502,16 +667,23 @@ return view.extend({
 				E('span', { 'class': 'mtconn-chevron' }, '›')
 			]),
 			E('div', { 'class': 'mtconn-details-body' }, [
-				E('div', { 'class': 'mtconn-term-box' }, [
-					E('div', { 'class': 'mtconn-term-header' }, [
-						E('span', { 'class': 'mtconn-term-dot r' }),
-						E('span', { 'class': 'mtconn-term-dot y' }),
-						E('span', { 'class': 'mtconn-term-dot g' })
+					E('div', { 'class': 'mtconn-term-box' }, [
+						E('div', { 'class': 'mtconn-term-header' }, [
+							E('span', { 'class': 'mtconn-term-dot r' }),
+							E('span', { 'class': 'mtconn-term-dot y' }),
+							E('span', { 'class': 'mtconn-term-dot g' })
+						]),
+						logOutput
 					]),
-					logOutput
+					E('div', { 'class': 'mtconn-config-footer' }, [
+						E('button', {
+							'type': 'button',
+							'class': 'mtconn-btn mtconn-btn-danger',
+							'click': function() { self.clearLog(logDetails, logOutput, section); }
+						}, _('清除日志'))
+					])
 				])
-			])
-		]);
+			]);
 
 		/* 入站路由与数据通路面板 */
 		var inboundPanel = E('div', { 'class': 'mtconn-inbound-grid' }, [
@@ -622,6 +794,14 @@ return view.extend({
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'),
 						_('重新拨号')
 					])
+				]),
+
+				/* 服务与扩展能力：拨号服务管理 / 网络监测 / 上联管理 / 5G LAN */
+				E('div', { 'class': 'mt-control-grid', 'style': 'margin-bottom:16px' }, [
+					self.serviceCard(res),
+					self.monitorCard(res),
+					self.uplinkCard(res),
+					self.fiveGLanCard(res)
 				]),
 
 				/* 拨号设置 (APN) 白色毛玻璃卡片 */
