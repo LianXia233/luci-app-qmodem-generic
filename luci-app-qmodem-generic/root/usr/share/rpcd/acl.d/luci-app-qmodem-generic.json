@@ -5,27 +5,23 @@
 			"uci": [ "qmodem" ],
 			"ubus": {
 				"qmodem": [ "*" ],
-				"qmodem.sms": [ "config_get", "list" ],
-				"qmodem_cache": [ "*" ],
+				"qmodem.sms": [ "status", "config_get", "sync_status", "list", "get", "modem_list", "storage_get" ],
+				"qmodem.uplink": [ "status" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],
-				"qos": [ "*" ],
 				"rc": [ "list" ],
-				"luci": [ "setInitAction" ],
 				"network.device": [ "status" ],
 				"network.interface": [ "status", "dump" ]
 			}
 		},
 		"write": {
-			"uci": [ "qmodem" ],
+			"uci": [ "qmodem", "network" ],
 			"ubus": {
 				"uci": [ "commit" ],
 				"qmodem": [ "*" ],
-				"qmodem.sms": [ "send", "delete", "mark_read", "sync" ],
-				"qmodem_cache": [ "*" ],
+				"qmodem.sms": [ "configure", "sync", "send", "delete", "mark_read", "modem_delete", "storage_set" ],
 				"qmodem_stats": [ "*" ],
 				"qmodem_support": [ "*" ],
-				"qos": [ "*" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ]
 			}
