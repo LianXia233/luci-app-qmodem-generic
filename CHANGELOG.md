@@ -3,6 +3,14 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [3.0.0-1] - 2026-10-26
+
+- 全面改为直连 QModem 官方 ubus 接口：移除 qmodem_cache 快照层、qmodem-task 任务队列与 qmodem-worker 采集服务，所有读写与官方 luci-app-qmodem-next 相同地直接调用 `qmodem` / `qmodem.sms` / `qmodem.uplink` 对象（QModem rpcd 自带 10 秒缓存）。
+- 补齐此前缺失的官方能力：设备扫描与模组接入（scan_pcie/scan_usb/scan_all、get_available_devices、remove_modem、get_tty_ports）、qmodem_network 拨号服务启停与全局拨号开关、短信守护进程管理（qmodem.sms configure/storage_get/storage_set/同步状态）、PDU 直发（send_raw_pdu）、清除拨号日志、模组自动统计上报（save_stats）、5G LAN 开关（get/set_5g_lan）、网络监测状态（get_monitor_status）、上联管理状态（qmodem.uplink status）、AT 终端渲染官方快捷命令表（get_at_cfg.cmds）。
+- 保留并自包含两个增值组件：分天流量统计（数据源仅为官方 qmodem get_stats，采样服务 + 只读 rpcd 插件）与模组支持库（qmodem_support）；移除 AT 探测 QOS/调制私有插件（qos）、MT5700 修复服务与串口映射对 worker 的依赖。
+- QCI/5QI/签约速率改为纯官方 network_info 字段驱动；概览页分天流量图表、流量自动清零、SIM 切换、IMEI、锁频锁小区等既有功能全部保持。
+- Makefile 依赖精简为 +luci-base +qmodem +jq +jsonfilter；uci-defaults 升级时自动禁用并清理旧版遗留的私有服务；ACL 移除私有对象并补齐 qmodem.sms 全方法、qmodem.uplink、qmodem_stats、qmodem_support 授权。
+
 ## [2.5.0-25] - 2026-10-18
 
 - 新增旧版 opkg 系统的 IPK 构建，与现有 APK 共用最新代码；Actions 同时提供两种格式的主包、中文翻译包和独立离线 RUN。
