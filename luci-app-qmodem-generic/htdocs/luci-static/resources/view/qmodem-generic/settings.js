@@ -23,14 +23,100 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [],
-
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
-			return { section: ctx.section, errors: ctx.errors };
+			return Promise.all([
+				controls.getTtyPorts(),
+				controls.getAvailableDevices()
+			]).then(function(extra) {
+				return {
+					section: ctx.section,
+					errors: ctx.errors,
+					ttyPorts: (extra[0] && extra[0].ports) || [],
+					availableDevices: (extra[1] && extra[1].devices) || {}
+				};
+			});
 		});
+	},
+
+	/* ---- 官方 QModem 设备扫描 / 添加 / 移除（与官方 settings 页同款接口） ---- */
+
+	scan: function(kind, button) {
+		var self = this;
+		if (self._scanning) return;
+		self._scanning = true;
+		if (button) button.disabled = true;
+		var label = kind === 'pcie' ? 'PCIe' : kind === 'usb' ? 'USB' : _('全部总线');
+		ui.showModal(_('Scanning'), [
+			E('p', { 'class': 'spinning' }, _('正在扫描 %s 设备，扫描由 QModem 的 modem_scan 服务执行，可能需要数十秒…').format(label))
+		]);
+		controls.scanDevices(kind).then(function(res) {
+			ui.hideModal();
+			if (res && res.code != null && Number(res.code) !== 0)
+				throw new Error(res.message || ('scan exit ' + res.code));
+			controls.notify(null, E('p', {}, _('扫描完成，模组列表已更新。')));
+			window.setTimeout(function() { window.location.reload(); }, 900);
+		}).catch(function(err) {
+			ui.hideModal();
+			controls.notify(null, E('p', {}, _('扫描失败：') + ((err && err.message) || String(err))), 'danger');
+		}).then(function() {
+			self._scanning = false;
+			if (button) button.disabled = false;
+		});
+	},
+
+	showAddModal: function(available) {
+		var self = this;
+		var keys = Object.keys(available || {}).sort();
+		if (!keys.length) {
+			controls.notify(null, E('p', {}, _('没有可用的新设备。请先执行扫描，QModem 识别到设备后即可在此添加。')), 'info');
+			return;
+		}
+		var select = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%' }, keys.map(function(key) {
+			var info = available[key] || {};
+			return E('option', { 'value': key }, info.label || key);
+		}));
+		ui.showModal(_('Add modem'), [
+			E('p', {}, _('选择 QModem 扫描到的设备并添加为模组配置节。')),
+			E('div', { 'style': 'margin:12px 0' }, select),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'type': 'button', 'class': 'btn', 'click': ui.hideModal }, _('Cancel')), ' ',
+				E('button', { 'type': 'button', 'class': 'btn cbi-button-apply', 'click': function() {
+					var key = select.value;
+					var info = available[key] || {};
+					if (!key) return;
+					ui.hideModal();
+					try {
+						uci.add('qmodem', 'modem-device', key);
+						if (info.type) uci.set('qmodem', key, 'data_interface', info.type);
+						if (info.path) uci.set('qmodem', key, 'path', info.path);
+						uci.set('qmodem', key, 'use_ubus', '1');
+					} catch (e) {
+						return controls.notify(null, E('p', {}, _('添加失败：') + ((e && e.message) || String(e))), 'danger');
+					}
+					uci.save().then(function() {
+						return controls.commitConfig('qmodem');
+					}).then(function() {
+						controls.notify(null, E('p', {}, _('模组已添加，QModem 将在下次扫描时完成识别。')));
+						window.setTimeout(function() { window.location.reload(); }, 1000);
+					}).catch(function(err) {
+						controls.notify(null, E('p', {}, _('添加失败：') + ((err && err.message) || String(err))), 'danger');
+					});
+				} }, _('Add'))
+			])
+		]);
+	},
+
+	removeModem: function(section) {
+		controls.confirmModal(_('移除该模组'),
+			_('将调用 QModem 移除该模组的配置节、挂断其连接并清理生成的网络接口配置。该操作不可撤销，是否继续？'),
+			function() {
+				return controls.removeModem(section).then(function() {
+					controls.notify(null, E('p', {}, _('模组已移除。')));
+				});
+			});
 	},
 
 	styleNode: function() {
@@ -169,7 +255,10 @@ return view.extend({
 
 		o = s.option(form.Value, 'at_port', _('AT 端口'));
 		o.placeholder = '/dev/ttyUSB0';
-		o.description = _('QModem 下发 AT 命令使用的端口设备节点。留空则由 QModem 自动选择。');
+		var ttyHints = (res.ttyPorts || []).map(function(p) { return (p && p.id) || ''; }).filter(Boolean);
+		o.description = ttyHints.length
+			? _('QModem 下发 AT 命令使用的端口设备节点。留空则由 QModem 自动选择。检测到的端口：%s').format(ttyHints.join('、'))
+			: _('QModem 下发 AT 命令使用的端口设备节点。留空则由 QModem 自动选择。');
 		o.rmempty = true;
 
 		o = s.option(form.Value, 'pdp_index', _('PDP 上下文索引'));
@@ -205,6 +294,46 @@ return view.extend({
 			return { IPV4: 'ip', IPV6: 'ipv6', IPV4V6: 'ipv4v6' }[raw.toUpperCase()] || raw.toLowerCase();
 		};
 
+		/* ---- QModem 全局扫描设置（/etc/config/qmodem main 节） ---- */
+		var gm = new form.Map('qmodem', 'main');
+		var gs = gm.section(form.NamedSection, 'main', 'main');
+		gs.anonymous = true;
+		gs.addremove = false;
+
+		var g = gs.option(form.Flag, 'enable_dial', _('全局拨号开关'));
+		g.description = _('关闭后 QModem 不再为任何模组自动拨号。');
+		g.default = '1';
+		g.rmempty = false;
+
+		g = gs.option(form.Flag, 'enable_pcie_scan', _('允许 PCIe 扫描'));
+		g.description = _('启动与热插拔时扫描 PCIe 总线上的模组。');
+		g.rmempty = false;
+
+		g = gs.option(form.Flag, 'enable_usb_scan', _('允许 USB 扫描'));
+		g.description = _('启动与热插拔时扫描 USB 总线上的模组。');
+		g.rmempty = false;
+
+		g = gs.option(form.Flag, 'block_auto_probe', _('禁止自动探测'));
+		g.description = _('开启后 QModem 不再自动探测/添加新模组，仅保留手动添加。');
+		g.rmempty = false;
+
+		var savingGlobal = false;
+		var saveGlobal = function(button) {
+			if (savingGlobal) return Promise.resolve();
+			savingGlobal = true;
+			button.disabled = true;
+			return Promise.resolve().then(function() { return gm.save(null, true); }).then(function() {
+				return controls.commitConfig('qmodem');
+			}).then(function() {
+				controls.notify(null, E('p', {}, _('全局扫描设置已保存。')));
+			}).catch(function(err) {
+				controls.notify(null, E('p', {}, (err && err.message) || String(err)), 'danger');
+			}).then(function() {
+				savingGlobal = false;
+				button.disabled = false;
+			});
+		};
+
 		var saving = false;
 		var saveConfig = function(button) {
 			if (saving) return Promise.resolve();
@@ -224,7 +353,8 @@ return view.extend({
 			});
 		};
 
-		return m.render().then(function(formNode) {
+		return Promise.all([ m.render(), gm.render() ]).then(function(nodes) {
+			var formNode = nodes[0], globalFormNode = nodes[1];
 			return E('div', { 'class': 'mt-diag-page' }, [
 				self.styleNode(),
 				controls.styleNode(),
@@ -243,6 +373,24 @@ return view.extend({
 					E('span', { 'class': 'mt-diag-badge' }, [
 						E('span', { 'class': 'mt-diag-dot' }),
 						_('由 QModem 管理')
+					])
+				]),
+
+				/* 设备扫描与模组接入（官方 QModem 扫描接口） */
+				E('section', { 'class': 'mt-diag-card mt-diag-topo-card' }, [
+					E('div', { 'class': 'mt-diag-card-head' }, [
+						E('h3', {}, [
+							svgNode('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0072f5" stroke-width="2.2" stroke-linecap="round"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><line x1="2" y1="20" x2="2.01" y2="20"/></svg>'),
+							_('设备扫描与模组接入')
+						]),
+						E('p', {}, _('扫描 PCIe / USB 总线上的模组设备，或从 QModem 已识别的设备中手动添加；移除操作将同时清理生成的网络配置。'))
+					]),
+					E('div', { 'style': 'display:flex;gap:10px;flex-wrap:wrap' }, [
+						E('button', { 'type': 'button', 'class': 'mt-diag-save-btn', 'click': function(ev) { self.scan('pcie', ev.currentTarget); } }, _('扫描 PCIe 设备')),
+						E('button', { 'type': 'button', 'class': 'mt-diag-save-btn', 'click': function(ev) { self.scan('usb', ev.currentTarget); } }, _('扫描 USB 设备')),
+						E('button', { 'type': 'button', 'class': 'mt-diag-save-btn', 'click': function(ev) { self.scan('all', ev.currentTarget); } }, _('扫描全部设备')),
+						E('button', { 'type': 'button', 'class': 'mt-diag-back-btn', 'click': function() { self.showAddModal(res.availableDevices); } }, _('添加模组')),
+						E('button', { 'type': 'button', 'class': 'mt-diag-back-btn', 'style': 'color:var(--qm-danger)', 'click': function() { self.removeModem(section); } }, _('移除该模组'))
 					])
 				]),
 
@@ -276,6 +424,20 @@ return view.extend({
 						svgNode('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>'),
 						_('保存设备参数')
 					]))
+				]),
+
+				/* 全局扫描设置 */
+				E('section', { 'class': 'mt-diag-card mt-diag-form-card' }, [
+					E('div', { 'class': 'mt-diag-card-head' }, [
+						E('h3', {}, _('全局扫描设置')),
+						E('p', {}, _('写入 /etc/config/qmodem 的 main 配置节，控制 QModem 的自动扫描与拨号行为。'))
+					]),
+					globalFormNode,
+					E('div', { 'class': 'mt-diag-footer' }, E('button', {
+						'type': 'button',
+						'class': 'mt-diag-save-btn',
+						'click': function(ev) { return saveGlobal(ev.currentTarget); }
+					}, _('保存全局设置')))
 				]),
 
 				/* 底部返回导航 */
