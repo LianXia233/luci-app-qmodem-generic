@@ -231,7 +231,6 @@ return view.extend({
 		reader.readAsText(file);
 	},
 
-	DOMAINS: [ 'sms', 'sim', 'device' ],
 	POLL_INTERVAL: 5000,
 
 	load: function() {

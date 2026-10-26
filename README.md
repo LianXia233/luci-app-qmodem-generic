@@ -23,12 +23,11 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 - [依赖与版本](#依赖与版本)
 - [安装](#安装)
 - [流量统计](#流量统计)
-- [MT5700 系列 SIM 初始化](#mt5700-系列-sim-初始化)
 - [模组支持库自动注入](#模组支持库自动注入)
 - [自行编译](#自行编译)
 - [GitHub Actions 自动构建](#github-actions-自动构建)
 - [界面主题与响应式（QM UI v2）](#界面主题与响应式qm-ui-v2)
-- [页面加载与后台任务（异步化）](#页面加载与后台任务异步化)
+- [数据获取与降级（直连官方接口）](#数据获取与降级直连官方接口)
 - [已知事项](#已知事项)
 - [相关文档](#相关文档)
 - [致谢](#致谢)
@@ -53,7 +52,6 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 
 - 使用 QModem 官方 ubus 接口，全模组通用；动态字段自适应，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
-- MT5700 系列海思模组 SIM 卡槽上电自动初始化（开机服务 + 首次安装脚本）。
 - 内置 RG520N-CN、RG502Q-EA、RG650E-EU、RG650V-EU 定义；高级页可查看 USB/PCIe 串口和硬件 ID，并添加其它型号。
 
 ## 文件布局
@@ -62,27 +60,24 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 
 ```
 /etc/config/qmodem                  # QModem 配置（本包读取的 modem-device 节）
-/etc/init.d/qmodem-worker           # 后台采集 procd 服务（唯一访问 modem 的常驻进程）
 /etc/init.d/qmodem-stats-collect    # 流量采样 procd 服务（开机自启）
-/etc/init.d/qmodem-mt5700-fix       # MT5700 SIM 初始化开机服务（START=99）
 /etc/init.d/qmodem-modem-support    # 模组支持库同步开机服务（START=90）
-/etc/uci-defaults/99_luci-app-qmodem-generic  # 首次安装：执行修复/同步并 enable 服务
-/tmp/qmodem-cache/                  # 状态缓存（原子写入的 JSON 快照 + 任务 + 锁）
-/usr/bin/qmodem-task                # 后台任务队列（new/get/list/prune/_run，带去重与超时）
+/etc/uci-defaults/99_luci-app-qmodem-generic  # 首次安装：注册服务并清理旧版遗留
+/etc/qmodem-generic/modems/         # 用户自定义模组定义（usb / pcie 两个子目录）
+/etc/qmodem-stats/                  # 分天流量统计落盘目录
 /usr/bin/qmodem-stats-collect       # 流量采样 / 落盘 / 输出 JSON / 清零
 /usr/bin/qmodem-stats-loop          # 按间隔驱动采集器的常驻循环
-/usr/sbin/qmodem-worker             # 后台采集器（周期采集缓存域，硬超时 + AT 串行化）
-/usr/sbin/qmodem-mt5700-fix         # SIM 初始化修复脚本（幂等）
 /usr/sbin/qmodem-modem-support      # 模组支持库合并脚本（幂等，写入前备份）
-/usr/lib/qmodem/qmodem-lib.sh       # 公共库：JSON 原子写、flock 互斥、带超时 ubus 调用
-/usr/lib/qmodem/qmodem-at-probe     # 带超时的 AT 探测工具
-/usr/libexec/rpcd/qmodem_cache      # rpcd 插件：快速读缓存 + 后台任务
+/usr/sbin/qmodem-support-custom     # 自定义型号管理（配合 rpcd 的 custom_* 方法）
 /usr/libexec/rpcd/qmodem_stats      # rpcd 插件：daily_stats / stats_history / stats_reset
-/usr/libexec/rpcd/qmodem_support    # rpcd 插件：status / sync
-/usr/libexec/rpcd/qos               # rpcd 插件：qos_info / radio_info
+/usr/libexec/rpcd/qmodem_support    # rpcd 插件：status / sync / ports / custom_*
 /usr/share/qmodem-generic/extra_modem_support.json  # 内置待注入模组定义
 /www/luci-static/resources/qmodem-generic/          # 前端资源
 ```
+
+自 3.0.0 起，本包不再携带任何私有 rpcd 插件或后台守护进程：数据与控制全部直连
+QModem 官方 ubus 对象（`qmodem` / `qmodem.sms` / `qmodem.uplink`），映射关系见
+[docs/QMODEM_OFFICIAL_WIRING.md](docs/QMODEM_OFFICIAL_WIRING.md)。
 
 ## 依赖与版本
 
@@ -134,18 +129,8 @@ opkg install ./luci-app-qmodem-generic_*_all.ipk ./luci-i18n-qmodem-generic-zh-c
 
 相关文件：`/usr/bin/qmodem-stats-collect`（run/show/reset）、`/usr/bin/qmodem-stats-loop`、`/etc/init.d/qmodem-stats-collect`、`/usr/libexec/rpcd/qmodem_stats`、数据目录 `/etc/qmodem-stats/`。
 
-## MT5700 系列 SIM 初始化
-
-MT5700M-CN 等海思平台模组上电后 SIM 卡槽处于未初始化状态，QModem 拨号不会主动发送 `AT^SCICHG=0,1`，导致 `AT+CPIN?` 返回 `+CME ERROR: 10`（SIM 未识别）。
-
-本包通过开机服务（`/etc/init.d/qmodem-mt5700-fix`，`START=99`）自动遍历 `/etc/config/qmodem` 中的 `modem-device` 配置节：凡型号匹配 `MT5700`（不区分大小写）的模组，自动向其 `pre_dial_at_cmds` 列表追加 `AT^SCICHG=0,1` 并提交，QModem 拨号前会逐条执行。
-
-- 修复逻辑：`/usr/sbin/qmodem-mt5700-fix`（幂等，重复运行不重复添加）
-- 开机服务监听 `qmodem` 配置变更后自动重跑，以应对模组在更晚阶段才被识别
-- 手动触发（无需重启）：
-  ```sh
-  /usr/sbin/qmodem-mt5700-fix
-  ```
+> MT5700 系列海思模组的 SIM 卡槽初始化脚本（`qmodem-mt5700-fix`）自 3.0.0 起随包移除；
+> 如仍需要 `AT^SCICHG=0,1`，请改用 QModem 自身的 `pre_dial_at_cmds` 配置项手动添加。
 
 ## 模组支持库自动注入
 
@@ -211,22 +196,25 @@ make package/luci-app-qmodem-generic/compile V=s
 `.qm-badge` / `.qm-kv` / `.qm-btn` / `.qm-alert`（`theme.card()` 等 helper 亦可）。
 详见 [QM UI v2 设计与落地说明](docs/QMODEM_UI_THEME.md)。
 
-## 页面加载与后台任务（异步化）
+## 数据获取与降级（直连官方接口）
 
-自 2.4.11-16 起，**LuCI 首屏不再等待任何 modem 查询**：
+自 3.0.0 起，前端与 QModem 官方 `luci-app-qmodem-next` 采用完全相同的接线方式：
 
-- 页面 `load()` 只读 UCI + 一次 `qmodem_cache.snapshot`（纯文件 IO，实测 < 100 ms），随后立即渲染整页；数据未就绪的字段显示 `--`，并标注「离线 / 数据过期」。
-- 所有慢活（模组探测、AT、SIM、IMEI、信号、注册、运营商、邻区、拨号、接口检查、初始化、重启、流量统计）都在后台任务里执行；写操作立即返回 `task_id`，前端轮询进度，同类任务自动去重。
-- 模组失联 / AT 口不存在 / 正在 reset 时页面照常打开；轮询不堆叠，切后台自动降频，离开页面自动停止。
-
-设计与 12 项验收结论见 [docs/QMODEM_ASYNC_ARCHITECTURE.md](docs/QMODEM_ASYNC_ARCHITECTURE.md)。
+- **直连官方 ubus 对象**：`qmodem` / `qmodem.sms` / `qmodem.uplink` / `rc` / `luci` / `network.*`。
+  不经过任何私有快照层或任务队列，方法映射见
+  [docs/QMODEM_OFFICIAL_WIRING.md](docs/QMODEM_OFFICIAL_WIRING.md)。
+- **QModem rpcd 自带 10 秒缓存**（`/tmp/cache_*`）：页面轮询不会击穿模组 AT 串口，
+  数据新鲜度与官方 LuCI 完全一致。
+- **读写失败如实上报**：所有读路径带客户端超时并降级显示 `--`；所有写路径显式
+  `reject` 并校验官方返回的 `status` / `success` / 退出码，失败直接提示，绝不静默成功。
+- **轮询不堆叠**：上一次采集未完成绝不发起下一次；切后台自动降频，离开页面自动停止。
+- 模组失联 / AT 口不存在 / 正在 reset 时页面照常打开；未就绪字段显示 `--`。
 
 本地验证：
 
 ```sh
-sh tests/run-backend-tests.sh                  # 后端 67 项（dash / busybox sh 均可）
-TEST_SH="busybox sh" sh tests/run-backend-tests.sh
-sh tests/run-frontend-tests.sh                 # 前端 94 项（需要 node）
+node tests/run-frontend-tests.js               # 前端 247 项（需要 node）
+sh tests/run-frontend-tests.sh                 # 无 node 时自动跳过
 python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 ```
 
@@ -234,17 +222,17 @@ python3 tests/check-po.py po/zh_Hans/qmodem-generic.po
 
 - 前端命名空间（资源目录、JS 模块、菜单路由、CSS 类名）统一为 `qmodem-generic`，与具体模组型号彻底解耦；`po/zh_Hans/qmodem-generic.po` 已与当前 JavaScript UI 字符串同步。
 - **字段未上报时的降级显示**：部分模组不会上报全部字段，QModem 会以占位值回填（如 FM350-GL 温度回 `"0°C"`、带宽回 `"M"`）。本包对占位值做归一化，未上报字段统一显示 `--`。
-- **上下行调制**：来自 `qos` 对象的 `radio_info`；模组/固件不支持时返回 `{"status":"unavailable"}`，页面显示 `--` 属预期降级。
+- **上下行调制信息**：3.0.0 起随私有 `qos` 插件一并移除；QModem 官方 `network_info` 未提供该字段，页面不再显示 MCS / 调制方式。
 - **LuCI 26.x（Master 26.246+）**：移除了 `String.prototype.format` 与全局 `E()` / `findParent()`。本包在 `controls.js` 顶部带有按需注入的兼容层（缺失才注入，不覆盖已有实现）。
-- **缓存层不可用时自动降级**：若 `qmodem_cache` 插件未安装或 rpcd 未重新加载，前端会在 60 s 冷却窗口内退回直连 QModem。升级时安装钩子会自动执行 `/etc/init.d/rpcd reload`；需要手动补加载时也使用 `reload`，保留登录会话。
-- **短信列表按需采集**：读短信在部分模组上极慢，`sms` 域不进周期采集；进入「短信」页时后台排队，数据到位后自动补上。
+- **QModem rpcd 缓存**：信息类方法由 QModem rpcd 侧缓存约 10 秒（`/tmp/cache_*`），页面轮询直接命中缓存；rpcd 未加载该插件时按官方接口实际返回处理。
+- **短信列表按需读取**：旧通道（`qmodem.get_sms`）读取在部分模组上极慢，前端带 30 秒 TTL 与在途去重；数据库模式（`qmodem.sms`）分页读取，删除前回读模组确认。
 - **`settings` 与 `terminal` 页不做轮询重绘**：避免把用户未保存的表单内容 / AT 会话日志冲掉。
 
 ## 相关文档
 
 - [逐页修复与验证范围（2.5.0-3）](docs/QMODEM_PAGE_REVIEW.md)
 
-- [异步化架构（后端任务不阻塞页面加载）](docs/QMODEM_ASYNC_ARCHITECTURE.md)
+- [官方 ubus 接口对接说明（3.0.0 起）](docs/QMODEM_OFFICIAL_WIRING.md)
 - [QModem 通用美化版 UI 重构与自我审查报告](docs/QMODEM_GENERIC_UI_REPORT.md)
 - [QM UI v2 视觉层设计与落地说明](docs/QMODEM_UI_THEME.md)
 - [重构契约（数据层 API 约定）](docs/QMODEM_REFACTOR_CONTRACT.md)

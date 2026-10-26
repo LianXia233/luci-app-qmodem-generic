@@ -3,6 +3,14 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [3.0.0-2] - 2026-10-26
+
+- 修复：短信设置保存时国家码未随 `qmodem.sms configure` 下发（官方 configure 支持各参数并存，合并为一次调用；空国家码按清除语义下发空串）。
+- 修复：`remove_modem` 非零退出码（`{"status":"<退出码>"}`，0=成功）与 `stats_reset` 的 `{"success":false}` 失败载荷此前会被误报为成功；现在如实报错。
+- 修复：全部 `qmodem` 写类 ubus 声明补齐 `reject: true`，并新增统一载荷校验（`requireSuccess` / `requireExitCodeZero`）覆盖清日志、清计数、清零计划、模式/频段/优选/卡槽/锁小区/重启/存储切换与 `luci.setInitAction`，QModem 拒绝时不再提示"Settings applied."。
+- 调整 ACL 为最小权限：`read.uci` 增加 `network`（接口名映射需要），`write.uci` 移除未使用的 `network`。
+- 清理：删除已无调用方的 `qmodem-lib.sh`；移除视图中残留的 `DOMAINS` 常量与 `domains` 参数；CI 的 `sh -n` 覆盖全部可执行脚本（含无扩展名的采样器）；README 同步直连架构并修复 `QMODEM_ASYNC_ARCHITECTURE.md` 死链；新增失败载荷与国家码回归用例。
+
 ## [3.0.0-1] - 2026-10-26
 
 - 全面改为直连 QModem 官方 ubus 接口：移除 qmodem_cache 快照层、qmodem-task 任务队列与 qmodem-worker 采集服务，所有读写与官方 luci-app-qmodem-next 相同地直接调用 `qmodem` / `qmodem.sms` / `qmodem.uplink` 对象（QModem rpcd 自带 10 秒缓存）。

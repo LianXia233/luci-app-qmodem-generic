@@ -967,7 +967,6 @@ return view.extend({
 
 	render: function(res) {
 		return controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect

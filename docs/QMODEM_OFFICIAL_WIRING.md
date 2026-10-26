@@ -62,7 +62,7 @@ QModem 接口契约见官方文档：QModem 仓库 `docs/qmodem-rpcd-interface.m
 | `qmodem.uplink status` | 上联管理（多上行负载均衡/故障切换）状态卡 |
 | `rc list` + `luci setInitAction` | qmodem_network 拨号服务启停 / 自启 / 全局 enable_dial |
 | `network.interface dump` / `network.device status` | 模组逻辑接口地址 / DNS / MTU（连接判定来源之一） |
-| `uci`（qmodem, network） | 设备参数、APN/PDP、全局扫描开关、添加模组配置节 |
+| `uci`（read: qmodem, network / write: qmodem） | 设备参数、APN/PDP、全局扫描开关、添加模组配置节；network 仅用于读取接口名映射，不做写入 |
 
 ## 随包附带的两个增值组件（只依赖官方接口）
 
@@ -80,6 +80,7 @@ QModem 接口契约见官方文档：QModem 仓库 `docs/qmodem-rpcd-interface.m
   —— 读写改为直连官方接口，QModem rpcd 自带缓存兜底；
 - `qos` rpcd 插件（AT 探测 QCI/调制）—— QCI/5QI/签约速率改用官方 `network_info` 字段；
 - `qmodem-mt5700-fix` 服务 —— 设备相关 UCI 修补不再随包携带；
-- 相关的 `qmodem-lib.sh` 缓存/锁封装仅保留支持库与统计组件所需的最小用法。
+- 相关的 `qmodem-lib.sh` 公共库已无任何调用方（统计组件改为自包含 `timeout` 封装），
+  自本版起随包删除；
 
 升级安装时 `uci-defaults` 钩子会自动 `disable`/`stop` 上述旧服务并清理注册。

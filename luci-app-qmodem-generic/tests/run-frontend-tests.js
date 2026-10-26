@@ -43,6 +43,9 @@ function makeRuntime() {
 	var deleteResult = { result: { status: '1' } };
 	var imeiResult = { imei: '860000000000002', result: { status: '1' } };
 	var scanResult = { code: 0, message: 'scan queued' };
+	var statsResetResult = null;    /* 覆盖 qmodem_stats/stats_reset 的返回（测失败载荷） */
+	var removeModemResult = null;   /* 覆盖 qmodem/remove_modem 的返回（测退出码语义） */
+	var qmodemOverrides = {};       /* 按方法覆盖 qmodem 返回（测失败载荷） */
 
 	var NOW = Math.floor(Date.now() / 1000);
 
@@ -124,7 +127,7 @@ function makeRuntime() {
 					? { config_section: p.config_section, updated_at: NOW, available: 1,
 					    today_rx: 1, today_tx: 2, total_rx: 10, total_tx: 20, swapped: 0,
 					    days: [ { date: '2026-09-27', rx: 10, tx: 20 } ] }
-					: { config_section: p.config_section, result: 1, success: true };
+					: (statsResetResult || { config_section: p.config_section, result: 1, success: true });
 			} else if (object === 'qmodem_support') {
 				body = qmodemSupportData[method] || { success: true };
 			} else if (object === 'qmodem.uplink') {
@@ -142,7 +145,8 @@ function makeRuntime() {
 			} else if (object === 'qmodem' && method === 'get_imei' && modemImeiApi) {
 				body = modemImeiApi(method, p);
 			} else if (object === 'qmodem') {
-				body = qmodemData[method] !== undefined ? qmodemData[method] : qmodemWrite(method, p);
+				body = qmodemOverrides[method] !== undefined ? qmodemOverrides[method] :
+					(qmodemData[method] !== undefined ? qmodemData[method] : qmodemWrite(method, p));
 			} else {
 				body = {};
 			}
@@ -177,6 +181,9 @@ function makeRuntime() {
 				return method === 'delete_sms' ? deleteResult : { result: { status: '1' } };
 			case 'set_imei':
 				return imeiResult;
+			case 'set_mode':
+				/* 官方 rpcd 仅回显 {"result":"<mode>"}，不带状态字段 */
+				return { result: p.mode };
 			case 'do_reboot':
 			case 'clear_dial_log':
 			case 'clear_stats':
@@ -193,7 +200,7 @@ function makeRuntime() {
 			case 'set_5g_lan':
 				return { supported: true, enabled: !!p.enabled };
 			case 'remove_modem':
-				return { status: '0' };
+				return removeModemResult || { status: '0' };
 			case 'scan_pcie':
 			case 'scan_usb':
 			case 'scan_all':
@@ -416,6 +423,12 @@ function makeRuntime() {
 		setDeleteResult: function(result) { deleteResult = result; },
 		setImeiResult: function(result) { imeiResult = result; },
 		setDialResultStatus: function(value) { dialResultStatus = String(value); },
+		setStatsResetResult: function(result) { statsResetResult = result; },
+		setRemoveModemResult: function(result) { removeModemResult = result; },
+		setQmodemResult: function(method, body) {
+			if (body === undefined) delete qmodemOverrides[method];
+			else qmodemOverrides[method] = body;
+		},
 		setSections: function(s) { uciSections = s; },
 		countCalls: function(obj, method) {
 			return calls.filter(function(c) {
@@ -506,6 +519,95 @@ function testActions(rt, controls) {
 				assertEq('reboot 携带 method 参数', JSON.stringify(call.params.params), JSON.stringify({ method: 'hard' }));
 				assertEq('reboot 结果 status=1', r3.result.status, '1');
 			});
+		});
+	});
+}
+
+function testFailurePayloads() {
+	console.log('\n[4f] 官方失败载荷必须 reject（不静默成功）');
+	var rt = makeRuntime(), controls = loadControls(rt);
+
+	rt.setStatsResetResult({ config_section: 'modem1', result: 0, success: false, error: 'stats collector missing' });
+	return controls.statsReset('modem1').then(function() {
+		ok('stats_reset success:false 必须失败', false);
+	}, function(err) {
+		ok('stats_reset success:false 返回实际错误',
+			/stats collector missing|清零/i.test((err && err.message) || ''));
+	}).then(function() {
+		rt.setStatsResetResult(null);
+		rt.setRemoveModemResult({ status: '1' });
+		return controls.removeModem('modem1').then(function() {
+			ok('remove_modem 非零退出码必须失败', false);
+		}, function(err) {
+			ok('remove_modem 非零退出码返回实际错误', /exit|失败/i.test((err && err.message) || ''));
+		});
+	}).then(function() {
+		rt.setRemoveModemResult({ status: '0' });
+		rt.resetCalls();
+		return controls.removeModem('modem1').then(function(res) {
+			assertEq('remove_modem 退出码 0 视为成功', String(res.status), '0');
+			assertEq('remove_modem 直连官方方法', rt.countCalls('qmodem', 'remove_modem'), 1);
+		});
+	}).then(function() {
+		/* clear_dial_log 官方返回 {"result":{"status":"0"}} 表示文件不存在等失败 */
+		rt.setQmodemResult('clear_dial_log', { result: { status: '0' } });
+		return controls.clearDialLog('modem1').then(function() {
+			ok('clear_dial_log status=0 必须失败', false);
+		}, function(err) {
+			ok('clear_dial_log status=0 返回实际错误', /失败|拒绝/i.test((err && err.message) || ''));
+		});
+	}).then(function() {
+		/* set_sim_slot 官方返回 {"success":false,...} */
+		rt.setQmodemResult('set_sim_slot', { success: false, error: 'SIM switch failed' });
+		return controls.setSimSlot('modem1', '1').then(function() {
+			ok('set_sim_slot success:false 必须失败', false);
+		}, function(err) {
+			ok('set_sim_slot success:false 返回实际错误', /SIM switch failed|失败/i.test((err && err.message) || ''));
+		});
+	}).then(function() {
+		/* set_mode 官方仅回显 {"result":"<mode>"}（无状态字段），不得误伤 */
+		rt.resetCalls();
+		return controls.setMode('modem1', 'auto').then(function(res) {
+			assertEq('set_mode 无状态字段回显视为成功', res.result, 'auto');
+			assertEq('set_mode 直连官方方法', rt.countCalls('qmodem', 'set_mode'), 1);
+		});
+	}).then(function() {
+		rt.setQmodemResult('clear_dial_log', undefined);
+		rt.setQmodemResult('set_sim_slot', undefined);
+	});
+}
+
+function testSmsCountryCode() {
+	console.log('\n[4g] 短信设置保存时国家码随 configure 一次下发');
+	var rt = makeRuntime(), controls = loadControls(rt);
+	rt.setSmsApi(function(method, p) {
+		if (method === 'config_get')
+			return { modem_id: p.modem_id, mode: 'database_poll', poll_interval: 300,
+				forwarding: false, auto_delete: false, country_code: '' };
+		return { status: 'success' };
+	});
+	rt.resetCalls();
+	return controls.configureSmsService('modem1', {
+		mode: 'database_poll', pollInterval: 120, forwarding: true,
+		autoDelete: true, countryCode: ' 86 '
+	}).then(function(res) {
+		assertEq('configure 返回成功', res.status, 'success');
+		var call = rt.calls.filter(function(c) {
+			return c.object === 'qmodem.sms' && c.method === 'configure';
+		})[0];
+		ok('configure 被调用', !!call);
+		assertEq('configure 携带 country_code（去空白）', call && call.params.country_code, '86');
+		assertEq('configure 携带 mode', call && call.params.mode, 'database_poll');
+		assertEq('configure 携带 poll_interval', call && call.params.poll_interval, 120);
+		assertEq('configure 携带 forwarding', call && call.params.forwarding, true);
+		assertEq('configure 携带 auto_delete', call && call.params.auto_delete, true);
+	}).then(function() {
+		rt.resetCalls();
+		return controls.configureSmsService('modem1', { countryCode: '' }).then(function() {
+			var call = rt.calls.filter(function(c) {
+				return c.object === 'qmodem.sms' && c.method === 'configure';
+			})[0];
+			assertEq('空国家码按清除语义下发空串', call && call.params.country_code, '');
 		});
 	});
 }
@@ -1056,8 +1158,10 @@ testLegacyUciCommit().then(function() { return testBootstrap(rt); })
 	.then(function(controls) { return testActions(rt, controls); })
 	.then(testActionPayloads)
 	.then(testDialResults)
+	.then(testFailurePayloads)
 	.then(testImeiReadback)
 	.then(testSmsSources)
+	.then(testSmsCountryCode)
 	.then(function() { testNoSlowPathDeclared(rt); return testLiveView(rt, loadControls(rt)); })
 	.then(function() { return testViews(makeRuntime()); })
 	.then(function() { return testQosDisplay(makeRuntime(), loadControls(makeRuntime())); })
