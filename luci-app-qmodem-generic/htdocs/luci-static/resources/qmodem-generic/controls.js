@@ -7,11 +7,16 @@
 'require qmodem-generic.theme as theme';
 
 /*
- * 通用 QModem LuCI 前端 — QModem 数据层（美化版 UI 的数据桥梁）
+ * 通用 QModem LuCI 前端 — QModem 官方接口数据层
  *
- * 本文件把原先基于私有文本后端输出的数据获取方式，全面替换为
- * 经由 QModem 的 `qmodem` ubus 对象读取/下发。"显示的数据"与"控制动作"全部来自 QModem，
- * 不再依赖任何模组私有的文本后端。
+ * 本文件是视图与 QModem 之间的唯一数据桥梁：所有"显示的数据"与"控制动作"
+ * 全部直连 QModem 的官方 ubus 接口（与官方 luci-app-qmodem-next 相同的接线方式）：
+ *
+ *   qmodem          — 模组信息 / 射频控制 / 拨号 / 短信直连通道 / 设备扫描
+ *   qmodem.sms      — qmodem_smsd 短信守护进程（数据库收发 / 存储管理 / 同步）
+ *   qmodem.uplink   — 上联管理状态（qmodem-uplink-manager）
+ *   rc / luci       — procd 服务状态与启停（qmodem_network 等）
+ *   network.* / uci — netifd 接口状态 / UCI 配置
  *
  * 设计原则（通用、不绑定任何具体模组型号）：
  *  - 本包对 QModem 管理的"任意模组"生效：QModem 识别到什么模组，这里就显示什么。
@@ -22,19 +27,14 @@
  *  - 其它方法返回各自的具体 JSON（见各封装函数说明）。
  *  - config_section 指向 /etc/config/qmodem 中的 modem-device 配置节
  *    （多模组时由模组选择器切换，见 renderModemBar / getModemList）。
+ *  - QModem rpcd 自带 10 秒文件缓存（/tmp/cache_*），页面轮询不会击穿 AT 串口；
+ *    本层不做额外缓存，数据新鲜度与官方 LuCI 完全一致。
  */
 
 /* ------------------------------------------------------------------ */
-/* QModem ubus RPC 声明                                                */
+/* LuCI 26.x 旧 API 兼容层                                              */
 /* ------------------------------------------------------------------ */
 
-/*
- * ------------------------------------------------------------------ *
- * LuCI 26.x（OpenWrt/ImmortalWrt Master 26.246+）旧 API 兼容层            *
- * ------------------------------------------------------------------ *
- * 旧视图使用 String.prototype.format 和 findParent；缺失时按需补齐。
- * E 已迁移为下方局部 DOM 工厂，不再往 window 写入不完整的 DOM 实现。
- */
 (function installLuCILegacyCompat() {
 	if (typeof window === 'undefined')
 		return;
@@ -154,6 +154,10 @@ function commitConfig(config) {
 	return callUciCommit(config);
 }
 
+/* ------------------------------------------------------------------ */
+/* QModem ubus RPC 声明（全部单行 + nobatch，见测试约定）               */
+/* ------------------------------------------------------------------ */
+
 var callBaseInfo = rpc.declare({ object: 'qmodem', method: 'base_info', params: ['config_section'], expect: { }, nobatch: true });
 var callCellInfo = rpc.declare({ object: 'qmodem', method: 'cell_info', params: ['config_section'], expect: { }, nobatch: true });
 var callInfo = rpc.declare({ object: 'qmodem', method: 'info', params: ['config_section'], expect: { }, nobatch: true });
@@ -168,13 +172,6 @@ var callGetNeighborcell = rpc.declare({ object: 'qmodem', method: 'get_neighborc
 var callGetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'get_network_prefer', params: ['config_section'], expect: { }, nobatch: true });
 var callGetDns = rpc.declare({ object: 'qmodem', method: 'get_dns', params: ['config_section'], expect: { }, nobatch: true });
 var callGetSms = rpc.declare({ object: 'qmodem', method: 'get_sms', params: ['config_section'], expect: { }, nobatch: true });
-/* 新版官方短信服务独立保存收发记录；它与 qmodem.get_sms 的 SIM 列表不同。 */
-var callSmsConfig = rpc.declare({ object: 'qmodem.sms', method: 'config_get', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
-var callSmsList = rpc.declare({ object: 'qmodem.sms', method: 'list', params: ['modem_id', 'limit', 'offset'], expect: { }, nobatch: true, reject: true });
-var callSmsSend = rpc.declare({ object: 'qmodem.sms', method: 'send', params: ['modem_id', 'recipient', 'content'], expect: { }, nobatch: true, reject: true });
-var callSmsDelete = rpc.declare({ object: 'qmodem.sms', method: 'delete', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
-var callSmsMarkRead = rpc.declare({ object: 'qmodem.sms', method: 'mark_read', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
-var callSmsSync = rpc.declare({ object: 'qmodem.sms', method: 'sync', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
 var callGetDisabledFeatures = rpc.declare({ object: 'qmodem', method: 'get_disabled_features', params: ['config_section'], expect: { }, nobatch: true });
 var callGetRebootCaps = rpc.declare({ object: 'qmodem', method: 'get_reboot_caps', params: ['config_section'], expect: { }, nobatch: true });
 var callGetCopyright = rpc.declare({ object: 'qmodem', method: 'get_copyright', params: ['config_section'], expect: { }, nobatch: true });
@@ -186,14 +183,51 @@ var callGetDialLog = rpc.declare({ object: 'qmodem', method: 'get_dial_log', par
 var callGetSimSlot = rpc.declare({ object: 'qmodem', method: 'get_sim_slot', params: ['config_section'], expect: { }, nobatch: true });
 var callGetSimSwitchCapabilities = rpc.declare({ object: 'qmodem', method: 'get_sim_switch_capabilities', params: ['config_section'], expect: { }, nobatch: true });
 var callGetUsageStats = rpc.declare({ object: 'qmodem', method: 'get_stats', params: ['config_section'], expect: { }, nobatch: true });
+var callSaveStats = rpc.declare({ object: 'qmodem', method: 'save_stats', params: ['config_section'], expect: { }, nobatch: true, reject: true });
 var callGetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'get_traffic_reset_schedule', params: ['config_section'], expect: { }, nobatch: true });
-// 持久化分天流量统计（/usr/libexec/rpcd/qmodem_stats 提供）：
-// daily_stats 采样一次并返回今日/历史/累计；stats_reset 清零本地分天记录
+// 持久化分天流量统计（/usr/libexec/rpcd/qmodem_stats 提供，数据源为官方 get_stats）：
+// daily_stats 只读落盘记录；stats_reset 清零本地分天记录并重建基准（带硬超时）
 var callDailyStats = rpc.declare({ object: 'qmodem_stats', method: 'daily_stats', params: ['config_section'], expect: { }, nobatch: true });
-var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { }, nobatch: true });
+var callStatsReset = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+var callGetMonitorStatus = rpc.declare({ object: 'qmodem', method: 'get_monitor_status', params: ['config_section'], expect: { }, nobatch: true });
+var callGet5gLan = rpc.declare({ object: 'qmodem', method: 'get_5g_lan', params: ['config_section'], expect: { }, nobatch: true });
+var callSet5gLan = rpc.declare({ object: 'qmodem', method: 'set_5g_lan', params: ['config_section', 'enabled'], expect: { }, nobatch: true, reject: true });
 
-// 模组支持库注入（/usr/libexec/rpcd/qmodem_support 提供）：
-// status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并
+/* 设备扫描 / 模组接入（官方 settings 页同款接口） */
+var callScanPcie = rpc.declare({ object: 'qmodem', method: 'scan_pcie', expect: { }, nobatch: true, reject: true });
+var callScanUsb = rpc.declare({ object: 'qmodem', method: 'scan_usb', expect: { }, nobatch: true, reject: true });
+var callScanAll = rpc.declare({ object: 'qmodem', method: 'scan_all', expect: { }, nobatch: true, reject: true });
+var callGetPcieDevices = rpc.declare({ object: 'qmodem', method: 'get_pcie_devices', expect: { }, nobatch: true });
+var callGetUsbDevices = rpc.declare({ object: 'qmodem', method: 'get_usb_devices', expect: { }, nobatch: true });
+var callGetAvailableDevices = rpc.declare({ object: 'qmodem', method: 'get_available_devices', expect: { }, nobatch: true });
+var callGetTtyPorts = rpc.declare({ object: 'qmodem', method: 'get_tty_ports', expect: { }, nobatch: true });
+var callGetLeds = rpc.declare({ object: 'qmodem', method: 'get_leds', expect: { }, nobatch: true });
+var callGetNetworkInterfaces = rpc.declare({ object: 'qmodem', method: 'get_network_interfaces', expect: { }, nobatch: true });
+var callRemoveModem = rpc.declare({ object: 'qmodem', method: 'remove_modem', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+
+/* 短信守护进程 qmodem.sms（qmodem_smsd） */
+var callSmsConfig = rpc.declare({ object: 'qmodem.sms', method: 'config_get', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
+var callSmsList = rpc.declare({ object: 'qmodem.sms', method: 'list', params: ['modem_id', 'limit', 'offset'], expect: { }, nobatch: true, reject: true });
+var callSmsSend = rpc.declare({ object: 'qmodem.sms', method: 'send', params: ['modem_id', 'recipient', 'content'], expect: { }, nobatch: true, reject: true });
+var callSmsDelete = rpc.declare({ object: 'qmodem.sms', method: 'delete', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsMarkRead = rpc.declare({ object: 'qmodem.sms', method: 'mark_read', params: ['modem_id', 'id'], expect: { }, nobatch: true, reject: true });
+var callSmsSync = rpc.declare({ object: 'qmodem.sms', method: 'sync', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
+var callSmsServiceStatus = rpc.declare({ object: 'qmodem.sms', method: 'status', expect: { }, nobatch: true, reject: true });
+var callSmsSyncStatus = rpc.declare({ object: 'qmodem.sms', method: 'sync_status', expect: { }, nobatch: true, reject: true });
+var callSmsModemList = rpc.declare({ object: 'qmodem.sms', method: 'modem_list', expect: { }, nobatch: true, reject: true });
+/* 官方 qmodem_smsd 的 configure 用同一份 policy 解析全部字段（main.c configure_method）：
+ * country_code 与 mode/poll_interval/forwarding/auto_delete 可在同一次调用中并存，
+ * country_code 传空串即清除。不要拆成两次调用——设置弹窗保存时两路都会走。 */
+var callSmsConfigure = rpc.declare({ object: 'qmodem.sms', method: 'configure', params: ['modem_id', 'mode', 'poll_interval', 'forwarding', 'auto_delete', 'country_code'], expect: { }, nobatch: true, reject: true });
+var callSmsStorageGet = rpc.declare({ object: 'qmodem.sms', method: 'storage_get', params: ['modem_id'], expect: { }, nobatch: true, reject: true });
+var callSmsStorageSet = rpc.declare({ object: 'qmodem.sms', method: 'storage_set', params: ['modem_id', 'mem1', 'mem2', 'mem3'], expect: { }, nobatch: true, reject: true });
+
+/* 上联管理（qmodem-uplink-manager） */
+var callUplinkStatus = rpc.declare({ object: 'qmodem.uplink', method: 'status', expect: { }, nobatch: true, reject: true });
+
+/* 模组支持库（/usr/libexec/rpcd/qmodem_support 提供）：
+ * status 查询内置型号是否已存在于 QModem 支持库；sync 执行一次合并；
+ * ports 列出系统里候选的模组串口；custom_* 管理用户自定义型号 JSON。 */
 var callSupportStatus = rpc.declare({ object: 'qmodem_support', method: 'status', expect: { }, nobatch: true });
 var callSupportSync = rpc.declare({ object: 'qmodem_support', method: 'sync', expect: { }, nobatch: true });
 var callSupportPorts = rpc.declare({ object: 'qmodem_support', method: 'ports', expect: { }, nobatch: true });
@@ -204,84 +238,44 @@ var callCustomSave = rpc.declare({ object: 'qmodem_support', method: 'custom_sav
 var callCustomDelete = rpc.declare({ object: 'qmodem_support', method: 'custom_delete', params: ['model', 'bus'], expect: { }, nobatch: true });
 var callProbePort = rpc.declare({ object: 'qmodem_support', method: 'probe_port', params: ['port'], expect: { }, nobatch: true });
 
-var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { }, nobatch: true });
-var callDeleteSms = rpc.declare({ object: 'qmodem', method: 'delete_sms', params: ['config_section', 'index'], expect: { }, nobatch: true });
-var callSetMode = rpc.declare({ object: 'qmodem', method: 'set_mode', params: ['config_section', 'mode'], expect: { }, nobatch: true });
-var callSetImei = rpc.declare({ object: 'qmodem', method: 'set_imei', params: ['config_section', 'imei'], expect: { }, nobatch: true });
-var callSetLockband = rpc.declare({ object: 'qmodem', method: 'set_lockband', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'set_network_prefer', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSetSimSlot = rpc.declare({ object: 'qmodem', method: 'set_sim_slot', params: ['config_section', 'slot'], expect: { }, nobatch: true });
-var callDoReboot = rpc.declare({ object: 'qmodem', method: 'do_reboot', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callClearDialLog = rpc.declare({ object: 'qmodem', method: 'clear_dial_log', params: ['config_section'], expect: { }, nobatch: true });
-var callClearStats = rpc.declare({ object: 'qmodem', method: 'clear_stats', params: ['config_section'], expect: { }, nobatch: true });
-var callSetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'set_traffic_reset_schedule', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSetNeighborCell = rpc.declare({ object: 'qmodem', method: 'set_neighborcell', params: ['config_section', 'params'], expect: { }, nobatch: true });
-var callSetSmsStorage = rpc.declare({ object: 'qmodem', method: 'set_sms_storage', params: ['config_section', 'storage'], expect: { }, nobatch: true });
-var callModemDial = rpc.declare({ object: 'qmodem', method: 'modem_dial', params: ['config_section'], expect: { }, nobatch: true });
-var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params: ['config_section'], expect: { }, nobatch: true });
-var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { }, nobatch: true });
+/* 控制动作（写操作）。全部显式 reject: true：ubus 层错误（权限/参数/对象缺失）
+ * 必须以 reject 交给上层 UI 提示，不能像读路径那样被吞成 null 静默降级。 */
+var callSendAt = rpc.declare({ object: 'qmodem', method: 'send_at', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSendSms = rpc.declare({ object: 'qmodem', method: 'send_sms', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSendRawPdu = rpc.declare({ object: 'qmodem', method: 'send_raw_pdu', params: ['config_section', 'cmd'], expect: { }, nobatch: true, reject: true });
+var callDeleteSms = rpc.declare({ object: 'qmodem', method: 'delete_sms', params: ['config_section', 'index'], expect: { }, nobatch: true, reject: true });
+var callSetMode = rpc.declare({ object: 'qmodem', method: 'set_mode', params: ['config_section', 'mode'], expect: { }, nobatch: true, reject: true });
+var callSetImei = rpc.declare({ object: 'qmodem', method: 'set_imei', params: ['config_section', 'imei'], expect: { }, nobatch: true, reject: true });
+var callSetLockband = rpc.declare({ object: 'qmodem', method: 'set_lockband', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSetNetworkPrefer = rpc.declare({ object: 'qmodem', method: 'set_network_prefer', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSetSimSlot = rpc.declare({ object: 'qmodem', method: 'set_sim_slot', params: ['config_section', 'slot'], expect: { }, nobatch: true, reject: true });
+var callDoReboot = rpc.declare({ object: 'qmodem', method: 'do_reboot', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callClearDialLog = rpc.declare({ object: 'qmodem', method: 'clear_dial_log', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+var callClearStats = rpc.declare({ object: 'qmodem', method: 'clear_stats', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+var callSetTrafficResetSchedule = rpc.declare({ object: 'qmodem', method: 'set_traffic_reset_schedule', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSetNeighborCell = rpc.declare({ object: 'qmodem', method: 'set_neighborcell', params: ['config_section', 'params'], expect: { }, nobatch: true, reject: true });
+var callSetSmsStorage = rpc.declare({ object: 'qmodem', method: 'set_sms_storage', params: ['config_section', 'storage'], expect: { }, nobatch: true, reject: true });
+var callModemDial = rpc.declare({ object: 'qmodem', method: 'modem_dial', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+var callModemHang = rpc.declare({ object: 'qmodem', method: 'modem_hang', params: ['config_section'], expect: { }, nobatch: true, reject: true });
+var callModemRedial = rpc.declare({ object: 'qmodem', method: 'modem_redial', params: ['config_section'], expect: { }, nobatch: true, reject: true });
 
+/* 服务与系统 */
 var callRcList = rpc.declare({ object: 'rc', method: 'list', params: ['name'], expect: { }, nobatch: true });
+var callSetInitAction = rpc.declare({ object: 'luci', method: 'setInitAction', params: ['name', 'action'], expect: { }, nobatch: true, reject: true });
 // 网络接口批量状态：netifd 的裸 network.interface 对象只提供 dump（status 需要具体的
 // network.interface.<name> 对象），因此这里统一用 dump 一次取回全部接口再按名匹配。
 var callInterfaceDump = rpc.declare({ object: 'network.interface', method: 'dump', expect: { 'interface': [] }, nobatch: true });
-// 网络设备状态（用于获取网口链路速率，作为签约速率参考）
+// 网络设备状态（用于获取 MTU / 链路速率等物理设备属性）
 var callDeviceStatus = rpc.declare({ object: 'network.device', method: 'status', params: ['name'], expect: { }, nobatch: true });
-// QOS 信息（QCI / 签约速率），由 /usr/libexec/rpcd/qos 提供
-var callQosInfo = rpc.declare({ object: 'qos', method: 'qos_info', params: ['config_section'], expect: { }, nobatch: true });
-// 无线电调制信息（上下行调制 / MCS / MIMO 层数），同一 rpcd 插件提供
-var callRadioInfo = rpc.declare({ object: 'qos', method: 'radio_info', params: ['config_section'], expect: { }, nobatch: true });
 
-/* ================================================================== */
-/* 状态缓存层 —— 首屏与后台耗时任务彻底解耦                            */
-/* ================================================================== */
-/*
- * 为什么必须解耦（LuCI rpc.js 的两个硬事实）
- * ----------------------------------------
- * 1) rpc.js 的 call() 会把「同一 tick 内发出的所有 rpc.declare 调用」合并成
- *    一个 HTTP POST（rpcBaseURL + '/obj.method;obj.method;...'），rpcd 在同一个
- *    ubus 请求里**顺序**执行。也就是说：一个慢方法会拖住同批次的**所有**请求，
- *    包括其它页面的请求 —— 这就是「一个慢请求拖慢整个 LuCI」的根因。
- * 2) rpc.declare 不支持按调用设置超时，整批共用 L.env.rpctimeout（默认 20 秒）。
- *    20 秒一到，整批 promise 一起 reject，页面直接白屏。
- *
- * 改造后的数据链路：
- *
- *   浏览器 → LuCI 视图 load()
- *              │  只读 UCI + qmodem_cache.snapshot（纯文件 IO，正常 < 50 ms）
- *              ▼
- *        立即渲染页面骨架 + 已有缓存数据
- *              │
- *              └── 后台：qmodem-worker 周期采集 / qmodem-task 执行按需任务
- *                        （所有 ubus / AT / netifd 调用都在那里，带硬超时）
- *              │
- *              ▼
- *        非重叠轮询 snapshot → 局部重绘
- *
- * 所有慢动作（refresh / send_at / 拨号 / 重启 / 改模式…）都改成
- * 「创建任务 → 立即返回 task_id → 轮询 get_task」，rpcd 永不等待 modem。
- */
+/* ------------------------------------------------------------------ */
+/* 客户端超时                                                           */
+/* ------------------------------------------------------------------ */
 
-/* 快速读取（A 类）：只读 /tmp/qmodem-cache，绝不访问 modem */
-var callSnapshot = rpc.declare({ object: 'qmodem_cache', method: 'snapshot', params: ['config_section', 'domains'], expect: { }, nobatch: true });
-/* 后台任务（B 类）：立即返回 task_id */
-var callTaskGet = rpc.declare({ object: 'qmodem_cache', method: 'get_task', params: ['task_id'], expect: { }, nobatch: true });
-var callTaskRefresh = rpc.declare({ object: 'qmodem_cache', method: 'refresh', params: ['config_section', 'domains'], expect: { }, nobatch: true });
-var callTaskAction = rpc.declare({ object: 'qmodem_cache', method: 'action', params: ['config_section', 'object', 'method', 'args'], expect: { }, nobatch: true });
-var callTaskSendAt = rpc.declare({ object: 'qmodem_cache', method: 'send_at', params: ['config_section', 'at'], expect: { }, nobatch: true });
-/* stats_reset 已改为后台任务（需要读一次模组计数器建立新基准） */
-var callStatsResetTask = rpc.declare({ object: 'qmodem_stats', method: 'stats_reset', params: ['config_section'], expect: { }, nobatch: true });
-
-/* 超时预算（毫秒）—— rpc 本身不提供按调用超时，必须在客户端兜住 */
-var CACHE_RPC_TIMEOUT = 6000;     /* 读缓存：正常 < 50 ms */
-var TASK_RPC_TIMEOUT = 8000;      /* 建任务 / 查任务：纯文件操作 */
-var DIRECT_RPC_TIMEOUT = 8000;    /* 缓存层不可用时的直连兜底 */
-var TASK_POLL_INTERVAL = 400;     /* 任务轮询间隔（request→完成→等待→下一次） */
-var SNAPSHOT_TTL = 3000;          /* 同一页面多个 getter 共享一次快照读取 */
-var REFRESH_DEDUP_MS = 15000;     /* 客户端侧刷新去重窗口 */
-var CACHE_RETRY_MS = 60000;       /* 缓存层不可用后的重试间隔 */
+/* rpc.declare 不支持按调用设置超时（整批共用 L.env.rpctimeout）。
+ * 对拨号 / 重启 / 锁频这类长动作，在客户端按操作语义给出更宽的上限，
+ * 对普通读给出更紧的上限，避免单次请求拖死整页。 */
+var DIRECT_RPC_TIMEOUT = 8000;    /* 普通读 / 短动作 */
 
 /* 给 promise 加客户端超时：超时/失败都返回 fallback，**永不 reject**。
  * 用于所有「读」路径 —— 读失败只该降级显示，不该让页面崩掉。 */
@@ -308,7 +302,7 @@ function withTimeout(promise, ms, fallback) {
 	});
 }
 
-/* 与 withTimeout 相同，但失败时 reject —— 用于任务链路，
+/* 与 withTimeout 相同，但失败时 reject —— 用于写动作链路，
  * 让 UI 能把「超时 / 失败」如实告诉用户而不是静默成功。 */
 function withTimeoutReject(promise, ms, message) {
 	return new Promise(function(resolve, reject) {
@@ -325,243 +319,10 @@ function withTimeoutReject(promise, ms, message) {
 			window.clearTimeout(timer);
 			resolve(v);
 		}, function(err) {
-			if (settled) return;
 			settled = true;
 			window.clearTimeout(timer);
 			reject(err instanceof Error ? err : new Error((err && err.message) || String(err)));
 		});
-	});
-}
-
-var snapshotStore = {};      /* section -> { ts, snap } */
-var snapshotInflight = {};   /* section -> Promise（并发去重） */
-var refreshQueued = {};      /* section|domains -> ts（客户端侧刷新去重） */
-var cacheBrokenAt = 0;       /* 缓存层探测失败的时间戳 */
-
-function cacheLayerUsable() {
-	return !cacheBrokenAt || (Date.now() - cacheBrokenAt > CACHE_RETRY_MS);
-}
-
-function snapshotCovers(snap, domains) {
-	if (!snap || !snap.domains) return false;
-	if (!domains || !domains.length) return true;
-	for (var i = 0; i < domains.length; i++)
-		if (!snap.domains[domains[i]]) return false;
-	return true;
-}
-
-/* 让下一次读取重新拉取（写操作完成后调用） */
-function touch(section) {
-	if (section) delete snapshotStore[section];
-}
-
-/* 读取快照。永不 reject：缓存层不可用时返回 null，由调用方降级。 */
-function fetchSnapshot(section, domains, force) {
-	if (!section)
-		return Promise.resolve(null);
-
-	var now = Date.now();
-	var cached = snapshotStore[section];
-
-	if (!force && cached && (now - cached.ts) < SNAPSHOT_TTL && snapshotCovers(cached.snap, domains))
-		return Promise.resolve(cached.snap);
-	/* 并发去重：同一 section 的多个 getter 共用一次 RPC，避免请求堆积 */
-	if (!force && snapshotInflight[section])
-		return snapshotInflight[section];
-
-	var p = withTimeoutReject(callSnapshot(section, (domains && domains.length) ? domains : null),
-		CACHE_RPC_TIMEOUT, 'snapshot timeout').then(function(snap) {
-			cacheBrokenAt = 0;
-			snapshotStore[section] = { ts: Date.now(), snap: snap || null };
-			delete snapshotInflight[section];
-			return snap || null;
-		}, function() {
-			delete snapshotInflight[section];
-			if (!snapshotStore[section])
-				cacheBrokenAt = Date.now();
-			return snapshotStore[section] ? snapshotStore[section].snap : null;
-		});
-
-	snapshotInflight[section] = p;
-	return p;
-}
-
-/* 缓存信封访问：{ updated, stale, status, ttl, error, data } */
-function envelopeOf(snap, domain) {
-	return (snap && snap.domains && snap.domains[domain]) || null;
-}
-
-function domainData(snap, domain) {
-	var env = envelopeOf(snap, domain);
-	return (env && env.data && typeof env.data === 'object') ? env.data : {};
-}
-
-function domainMeta(snap, domain) {
-	var env = envelopeOf(snap, domain) || {};
-	var now = (snap && snap.now) ? Number(snap.now) : Math.floor(Date.now() / 1000);
-	var updated = Number(env.updated) || 0;
-	var age = updated ? (now - updated) : -1;
-	var status = env.status || 'missing';
-	return {
-		updated: updated,
-		age: age,
-		status: status,
-		error: env.error || '',
-		stale: env.stale === true || status === 'missing' || status === 'offline' ||
-			(env.ttl > 0 && age > Number(env.ttl))
-	};
-}
-
-/* 后台补采：只在缺失/过期时排队一次，客户端 + 服务端（任务去重）双重防重复 */
-function requestRefresh(section, domains, force) {
-	if (!section || !cacheLayerUsable())
-		return Promise.resolve(null);
-
-	var key = section + '|' + (domains || []).join(',');
-	var now = Date.now();
-	if (!force && refreshQueued[key] && (now - refreshQueued[key]) < REFRESH_DEDUP_MS)
-		return Promise.resolve(null);
-	refreshQueued[key] = now;
-
-	return withTimeout(callTaskRefresh(section, (domains && domains.length) ? domains : null),
-		TASK_RPC_TIMEOUT, null);
-}
-
-/* 显式“刷新”必须等待后台采集结束；直接重载页面只会再次显示旧快照。 */
-function refreshPage(section, domains, button) {
-	if (button && button.disabled) return Promise.resolve(null);
-	if (!section) { window.location.reload(); return Promise.resolve(null); }
-	var label = button && button.textContent;
-	if (button) {
-		button.disabled = true;
-		button.textContent = _('正在刷新…');
-		button.setAttribute('aria-busy', 'true');
-	}
-	var refresh = cacheLayerUsable()
-		? runTask(function() { return callTaskRefresh(section, domains || null); }, 120000)
-		: Promise.resolve(null);
-	return refresh.then(function(result) {
-		touch(section);
-		window.location.reload();
-		return result;
-	}, function(err) {
-		notify(null, E('p', {}, _('刷新失败：%s').format((err && err.message) || String(err))), 'danger');
-		return null;
-	}).then(function(result) {
-		if (button) {
-			button.disabled = false;
-			button.textContent = label;
-			button.removeAttribute('aria-busy');
-		}
-		return result;
-	});
-}
-
-/*
- * 统一的「缓存优先」读取。
- *   命中缓存      → 直接返回（不产生任何 modem 访问）
- *   缓存缺失/过期 → 返回旧值/兜底值 + 后台排队补采
- *   缓存层不可用  → 退化为直连 QModem（带超时；调用方须传 nobatch 的声明）
- */
-function cachedValue(section, domain, key, fallback, directFn, transform) {
-	var map = transform || function(v) { return v; };
-
-	return fetchSnapshot(section, [domain]).then(function(snap) {
-		if (snap) {
-			var data = domainData(snap, domain);
-			var meta = domainMeta(snap, domain);
-			if (meta.status === 'missing' || meta.stale)
-				requestRefresh(section, [domain]);
-			var v = data[key];
-			return map(v === undefined || v === null ? fallback : v, meta);
-		}
-
-		/* 没有缓存层（旧固件 / 服务未启用）：直连，但必须有超时上限 */
-		if (typeof directFn === 'function')
-			return withTimeout(directFn(), DIRECT_RPC_TIMEOUT, fallback).then(function(v) {
-				return map(v === undefined || v === null ? fallback : v, { status: 'direct', stale: false });
-			});
-
-		return map(fallback, { status: 'missing', stale: true });
-	});
-}
-
-/* ------------------------------------------------------------------ */
-/* 后台任务（异步动作）                                                */
-/* ------------------------------------------------------------------ */
-
-/* 轮询任务状态：request → 完成 → 等待 → 下一次 request，绝不重叠、绝不堆积 */
-function waitForTask(taskId, timeoutMs) {
-	var started = Date.now();
-	var budget = timeoutMs || 120000;
-
-	return new Promise(function(resolve, reject) {
-		function expired() {
-			return (Date.now() - started) > budget;
-		}
-		function retry() {
-			if (expired()) { reject(new Error(_('Task timed out'))); return; }
-			window.setTimeout(step, TASK_POLL_INTERVAL);
-		}
-		function step() {
-			withTimeoutReject(callTaskGet(taskId), TASK_RPC_TIMEOUT, 'get_task timeout').then(function(task) {
-				if (!task || task.state === 'missing') { reject(new Error(_('Task not found'))); return; }
-				if (task.state === 'success') { touch(task.config_section); resolve(task.result); return; }
-				if (task.state === 'failed') {
-					touch(task.config_section);
-					reject(new Error(task.error || _('Task failed')));
-					return;
-				}
-				retry();
-			}, retry);
-		}
-		window.setTimeout(step, 150);
-	});
-}
-
-/* createFn 立即返回 { task_id }，随后轮询直到 success/failed */
-function runTask(createFn, timeoutMs) {
-	return withTimeoutReject(createFn(), TASK_RPC_TIMEOUT, _('Failed to create task')).then(function(res) {
-		if (!res || !res.task_id)
-			return Promise.reject(new Error((res && res.error) || _('Task rejected by backend')));
-		return waitForTask(res.task_id, timeoutMs);
-	});
-}
-
-/*
- * 把任意 QModem ubus 方法包装成后台任务执行。
- * 对调用方保持与旧版一致的语义：返回一个最终 resolve 出 ubus 结果的 Promise，
- * 但底层不再让 rpcd 同步等待 modem。缓存层不可用时自动退回直连。
- */
-function qmodemAction(section, method, args, directFn, timeoutMs) {
-	if (!cacheLayerUsable())
-		return withTimeoutReject(directFn(), DIRECT_RPC_TIMEOUT, _('Modem request timed out'));
-
-	/* 外层 config_section 供任务队列加锁；args 会原样交给 QModem，必须也带目标。 */
-	var payload = Object.assign({}, args || {}, { config_section: section });
-	return runTask(function() {
-		return callTaskAction(section, 'qmodem', method, payload);
-	}, timeoutMs || 150000).then(function(result) {
-		touch(section);
-		/* 命令执行完后让 worker 更新受影响的域，页面轮询才会看到新状态。 */
-		var domains = {
-			set_mode: [ 'network', 'status' ],
-			set_lockband: [ 'network', 'signal' ],
-			set_network_prefer: [ 'network', 'signal' ],
-			set_neighborcell: [ 'network', 'signal' ],
-			set_sim_slot: [ 'sim', 'status' ],
-			set_traffic_reset_schedule: [ 'stats' ],
-			clear_stats: [ 'stats' ],
-			clear_dial_log: [ 'status' ],
-			modem_dial: [ 'status', 'network' ],
-			modem_hang: [ 'status', 'network' ],
-			modem_redial: [ 'status', 'network' ]
-		}[method];
-		if (domains) requestRefresh(section, domains, true).catch(function() {});
-		return result;
-	}, function(err) {
-		touch(section);
-		return Promise.reject(err);
 	});
 }
 
@@ -585,6 +346,7 @@ function createPoller(opts) {
 	var timer = null;
 	var busy = false;
 	var stopped = false;
+	var lastOp = Promise.resolve();
 	var interval = opts.interval || 5000;
 	var hiddenInterval = opts.hiddenInterval || (interval * 4);
 
@@ -610,14 +372,17 @@ function createPoller(opts) {
 		if (busy) { schedule(); return; }   /* 绝不重叠 */
 
 		busy = true;
-		Promise.resolve().then(function() {
+		var op = Promise.resolve().then(function() {
 			return opts.fn();
 		}).catch(function() {
 			return null;                    /* 单次失败不影响后续轮询 */
-		}).then(function() {
+		}).then(function(result) {
 			busy = false;
 			schedule();
+			return result;
 		});
+		lastOp = op;
+		return op;
 	}
 
 	function start() {
@@ -630,9 +395,10 @@ function createPoller(opts) {
 		}
 	}
 	function kick() {
-		if (stopped || busy) return;
+		if (stopped) return lastOp;
+		if (busy) return lastOp;
 		if (timer !== null) { window.clearTimeout(timer); timer = null; }
-		tick();
+		return tick();
 	}
 	function stop() {
 		stopped = true;
@@ -644,8 +410,8 @@ function createPoller(opts) {
 
 /*
  * liveView —— 视图的通用 render：
- *   1) 立即用 load() 拿到的数据画出完整页面（骨架 + 已有数据）
- *   2) 启动安全轮询，后台数据到位后**局部重绘**（只替换本视图的子树）
+ *   1) 用 load() 拿到的数据画出完整页面
+ *   2) 启动安全轮询，周期执行 collect 并**局部重绘**（只替换本视图的子树）
  *   3) 视图节点被移除 / 页面卸载时自动停止轮询
  */
 function liveView(view, res, opts) {
@@ -710,26 +476,21 @@ function liveView(view, res, opts) {
 
 	var initialPaint = paint(res);
 
-	if (res && res.section && opts.paint && opts.domains) {
+	if (res && res.section && opts.paint && opts.collect) {
 		if (view.poller && view.poller.stop) view.poller.stop();
 		view.poller = createPoller({
 			node: holder,
 			interval: opts.interval || 5000,
 			fn: function() {
-				return fetchSnapshot(res.section, opts.domains, true).then(function(snap) {
-					if (!snap) return null;
-					/* 用与 load() 完全相同的 collect() 重新组装数据，
-					 * 保证首屏与轮询走的是同一条代码路径 */
-					var next = opts.collect.call(view, {
-						section: res.section,
-						sections: res.sections || [],
-						snap: snap,
-						errors: []
-					});
-					return Promise.resolve(next).then(function(data) {
-						if (editing()) return data;   /* 用户正在输入，本轮不重绘 */
-						return paint(data).then(function() { return data; });
-					});
+				/* 用与 load() 完全相同的 collect() 重新组装数据，
+				 * 保证首屏与轮询走的是同一条代码路径 */
+				return Promise.resolve(opts.collect.call(view, {
+					section: res.section,
+					sections: res.sections || [],
+					errors: []
+				})).then(function(data) {
+					if (editing()) return data;   /* 用户正在输入，本轮不重绘 */
+					return paint(data).then(function() { return data; });
 				});
 			}
 		});
@@ -747,6 +508,7 @@ function liveView(view, res, opts) {
 
 	if (view.poller)
 		registerLivePoller(view.poller);
+	activeLive = { view: view, poller: view.poller || null, holder: holder };
 
 	return holder;
 }
@@ -757,6 +519,7 @@ function liveView(view, res, opts) {
  * 于是切到第二个页面后 pagehide 停不掉它的轮询 —— 这里改成停掉全部。
  */
 var livePollers = [];
+var activeLive = null;
 
 function registerLivePoller(poller) {
 	livePollers = livePollers.filter(function(p) { return p && p.isRunning && p.isRunning(); });
@@ -778,6 +541,13 @@ function registerLivePoller(poller) {
 		window.addEventListener('pagehide', stopAll);
 		window.addEventListener('beforeunload', stopAll);
 	}
+}
+
+/* 立即重新采集并重绘当前视图（"刷新"按钮的执行体） */
+function kickPoller() {
+	if (activeLive && activeLive.poller && activeLive.poller.isRunning())
+		return Promise.resolve(activeLive.poller.kick());
+	return Promise.resolve(null);
 }
 
 /* ------------------------------------------------------------------ */
@@ -941,106 +711,165 @@ function evalConnectionStatus(opts) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 数据获取封装（返回 Promise）—— 全部改为「缓存优先」                 */
+/* 数据获取封装（返回 Promise）—— 直连官方 qmodem 接口                 */
 /* ------------------------------------------------------------------ */
-/*
- * 每个 getter 的语义与旧版完全一致（返回同样的数据形状），但数据来源变了：
- *
- *   旧：直接 ubus call qmodem <method>   → 每次都是一次 modem/AT 查询，
- *                                          首屏必须等它，modem 无响应就白屏
- *   新：qmodem_cache.snapshot            → 只读 /tmp/qmodem-cache 的 JSON 快照
- *                                          缺失/过期时后台补采，页面先显示旧值
- *
- * 只有在缓存层不可用（老固件没装 worker / rpcd 未重启）时，才退化为直连
- * QModem，且那条路径带 DIRECT_RPC_TIMEOUT 上限、不参与 HTTP 批量。
- */
 
 /* QModem 的信息类方法统一返回 { modem_info: [...] }，这里摊平成数组 */
-function modemInfo(v) {
-	return unwrapModemInfo(v);
-}
 function unwrapModemInfo(v) {
 	if (v && Array.isArray(v.modem_info)) return v.modem_info;
 	return Array.isArray(v) ? v : (v ? [v] : []);
 }
 
-/* 读取整个域名的 data（用于 qos / radio / support 这类「data 即结果」的域） */
-function cachedDomain(section, domain, fallback, directFn) {
-	return fetchSnapshot(section, [domain]).then(function(snap) {
-		if (snap) {
-			var env = envelopeOf(snap, domain);
-			var meta = domainMeta(snap, domain);
-			if (meta.status === 'missing' || meta.stale)
-				requestRefresh(section, [domain]);
-			if (!env || !env.data || typeof env.data !== 'object' || !Object.keys(env.data).length)
-				return fallback;
-			var out = {};
-			Object.keys(env.data).forEach(function(k) { out[k] = env.data[k]; });
-			out.cache_status = meta.status;
-			out.cache_age = meta.age;
-			out.cache_stale = meta.stale;
-			return out;
-		}
-		if (typeof directFn === 'function')
-			return withTimeout(directFn(), DIRECT_RPC_TIMEOUT, fallback);
-		return fallback;
+function getBaseInfo(section) { return callBaseInfo(section).then(unwrapModemInfo); }
+function getInfo(section) { return callInfo(section).then(unwrapModemInfo); }
+function getSimInfo(section) { return callSimInfo(section).then(unwrapModemInfo); }
+function getNetworkInfo(section) { return callNetworkInfo(section).then(unwrapModemInfo); }
+function getCellInfo(section) { return callCellInfo(section).then(unwrapModemInfo); }
+function getAtCfg(section) { return callGetAtCfg(section); }
+function getImei(section) { return callGetImei(section); }
+function getMode(section) { return callGetMode(section); }
+function getLockBand(section) { return callGetLockband(section); }
+function getNeighborCell(section) { return callGetNeighborcell(section); }
+
+/* 用户主动扫描时立即读取实时邻区信息（rpcd 侧 get_neighborcell 自带 10s 缓存） */
+function getNeighborCellFresh(section) {
+	return withTimeoutReject(callGetNeighborcell(section), 30000, _('扫描邻区超时'));
+}
+function getNetworkPrefer(section) { return callGetNetworkPrefer(section); }
+function getDns(section) { return callGetDns(section); }
+function getDisabledFeatures(section) { return callGetDisabledFeatures(section); }
+function getRebootCaps(section) { return callGetRebootCaps(section); }
+function getCopyright(section) { return callGetCopyright(section); }
+
+function getCurrentBand(section) {
+	return callGetCurrentBand(section).then(function(r) {
+		/* 部分模组返回 { status: "unsupported" }，统一为空载波列表 */
+		if (r && r.status === 'unsupported' && !Array.isArray(r.cells))
+			return { cells: [], status: 'unsupported' };
+		return r;
+	});
+}
+function getCurrentBandCapabilities(section) { return callGetCurrentBandCapabilities(section); }
+
+/* 兼容实机差异：部分 QModem 版本返回 connection_status 而非 connect_status */
+function getConnectStatus(section) {
+	return callGetConnectStatus(section).then(function(r) {
+		if (r && r.connection_status != null && r.connect_status == null)
+			r.connect_status = r.connection_status;
+		return r;
+	});
+}
+function getDialStatus(section) { return callGetDialStatus(section); }
+
+/* 拨号日志体量大且只在用户点开时读取；直读但带超时 */
+function getDialLog(section) {
+	return withTimeout(callGetDialLog(section), DIRECT_RPC_TIMEOUT, {});
+}
+
+function getSimSlot(section) { return callGetSimSlot(section); }
+function getSimSwitchCapabilities(section) { return callGetSimSwitchCapabilities(section); }
+function getUsageStats(section) { return callGetUsageStats(section); }
+function getTrafficResetSchedule(section) { return callGetTrafficResetSchedule(section); }
+
+/* 分天流量统计（采样由 qmodem-stats-collect 后台服务周期完成，这里只读结果） */
+function getDailyStats(section) {
+	return withTimeout(callDailyStats(section), DIRECT_RPC_TIMEOUT, null);
+}
+/* 清零本地分天记录并重建基准；rpcd 侧带硬超时，失败（{"success":false,"error":...}）
+ * 或超时都如实上抛，不能让确认弹窗误报成功。 */
+function statsReset(section) {
+	return withTimeoutReject(callStatsReset(section), 30000, _('清零流量记录超时')).then(function(res) {
+		if (!res || typeof res !== 'object' || res.success === false || res.error)
+			throw new Error(String((res && res.error) || _('流量记录清零未确认成功，请刷新后核对。')));
+		return res;
 	});
 }
 
-function getBaseInfo(section) {
-	return cachedValue(section, 'status', 'base_info', [], function() { return callBaseInfo(section); }, unwrapModemInfo);
-}
-function getInfo(section) {
-	return cachedValue(section, 'device', 'info', [], function() { return callInfo(section); }, unwrapModemInfo);
-}
-function getSimInfo(section) {
-	return cachedValue(section, 'sim', 'sim_info', [], function() { return callSimInfo(section); }, unwrapModemInfo);
-}
-function getNetworkInfo(section) {
-	return cachedValue(section, 'network', 'network_info', [], function() { return callNetworkInfo(section); }, unwrapModemInfo);
-}
-function getCellInfo(section) {
-	return cachedValue(section, 'signal', 'cell_info', [], function() { return callCellInfo(section); }, unwrapModemInfo);
-}
-function getAtCfg(section) {
-	return cachedValue(section, 'device', 'at_cfg', {}, function() { return callGetAtCfg(section); });
-}
-function getImei(section) {
-	return cachedValue(section, 'sim', 'imei', {}, function() { return callGetImei(section); });
-}
-function getMode(section) {
-	return cachedValue(section, 'network', 'mode', {}, function() { return callGetMode(section); });
-}
-function getLockBand(section) {
-	return cachedValue(section, 'network', 'lockband', {}, function() { return callGetLockband(section); });
-}
-function getNeighborCell(section) {
-	return cachedValue(section, 'network', 'neighborcell', {}, function() { return callGetNeighborcell(section); });
+/* 网络监测状态（qmodem_monitor 提供数据；未安装时返回空对象，页面显示未启用） */
+function getMonitorStatus(section) {
+	return withTimeout(callGetMonitorStatus(section), DIRECT_RPC_TIMEOUT, {});
 }
 
-/* 用户主动扫描时绕过定时缓存，由任务队列取得实时邻区信息；未安装缓存层时兼容直连旧 QModem。 */
-function getNeighborCellFresh(section) {
-	return qmodemAction(section, 'get_neighborcell', {},
-		function() { return withTimeoutReject(callGetNeighborcell(section), DIRECT_RPC_TIMEOUT, _('扫描邻区超时')); }, 120000);
+/* 5G LAN（部分模组支持；不支持时返回 { supported: false }） */
+function get5gLan(section) { return callGet5gLan(section); }
+
+/* 上联管理状态（qmodem-uplink-manager；未安装该服务时 ubus 对象不存在，返回空） */
+function getUplinkStatus() {
+	return withTimeout(callUplinkStatus(), DIRECT_RPC_TIMEOUT, {}).then(function(r) {
+		return (r && typeof r === 'object') ? r : {};
+	});
 }
-function getNetworkPrefer(section) {
-	return cachedValue(section, 'network', 'network_prefer', {}, function() { return callGetNetworkPrefer(section); });
+
+/* ------------------------------------------------------------------ */
+/* 模组支持库（qmodem_support rpcd；合并/探测均在 rpcd 侧带硬超时）      */
+/* ------------------------------------------------------------------ */
+
+function supportUnavailable() {
+	return { available: 0, path: '', added: [], skipped: [], missing: [],
+		error: 'qmodem_support 不可用（请确认 rpcd 已重启并已升级本插件）' };
 }
-function getDns(section) {
-	return cachedValue(section, 'status', 'dns', {}, function() { return callGetDns(section); });
+
+function getSupportStatus() {
+	return withTimeout(callSupportStatus(), 15000, supportUnavailable());
 }
+
+function syncSupport(section) {
+	/* 同步执行一次合并（rpcd 侧带超时并自动备份/回滚），完成后返回
+	 * { available, added, skipped, missing, error }。 */
+	return withTimeoutReject(callSupportSync(), 60000, _('同步支持库超时'));
+}
+
+function getSupportPorts() { return withTimeout(callSupportPorts(), 15000,
+	{ ports: [], error: '串口映射服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function getCustomModels() { return withTimeout(callCustomList(), 15000,
+	{ entries: [], error: '自定义模组服务未响应，请检查 rpcd 与本插件安装状态' }); }
+function saveCustomModel(data) {
+	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
+		data.platform, data.modes, data.pdp_index, data.wcdma_band, data.lte_band,
+		data.nsa_band, data.sa_band, data.edit || '0');
+}
+function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
+function probeSupportPort(port) { return withTimeoutReject(callProbePort(port), 30000, _('读取型号超时')); }
+
+/* ------------------------------------------------------------------ */
+/* 设备扫描 / 模组接入（官方 QModem 设置页同款接口）                    */
+/* ------------------------------------------------------------------ */
+
+/* kind: 'pcie' | 'usb' | 'all'。QModem 把请求排队给 modem_scand，结果靠 UCI 变化体现。 */
+function scanDevices(kind) {
+	var fn = kind === 'pcie' ? callScanPcie : kind === 'usb' ? callScanUsb : callScanAll;
+	return withTimeoutReject(fn(), 60000, _('扫描请求超时，请稍后刷新页面查看结果。'));
+}
+function getPcieDevices() { return withTimeout(callGetPcieDevices(), DIRECT_RPC_TIMEOUT, { devices: [] }); }
+function getUsbDevices() { return withTimeout(callGetUsbDevices(), DIRECT_RPC_TIMEOUT, { devices: [] }); }
+function getAvailableDevices() { return withTimeout(callGetAvailableDevices(), DIRECT_RPC_TIMEOUT, { devices: {} }); }
+function getTtyPorts() { return withTimeout(callGetTtyPorts(), DIRECT_RPC_TIMEOUT, { ports: [] }); }
+function getLeds() { return withTimeout(callGetLeds(), DIRECT_RPC_TIMEOUT, { leds: [] }); }
+function getNetworkInterfacesList() { return withTimeout(callGetNetworkInterfaces(), DIRECT_RPC_TIMEOUT, { interfaces: [] }); }
 
 /*
- * 旧版 QModem 没有 qmodem.sms 服务。有些固件的短信缓存一直为 missing，
- * 即使官方 qmodem.get_sms 可以正常读取。
- * 仅旧版且无有效缓存时直读，30 秒内复用结果与未完成请求，避免每轮轮询
- * 都占用 AT 串口；新版 qmodem.sms 数据库 / direct 模式逻辑不变。
+ * 移除模组配置节。官方 remove_modem 会先挂断连接、再删除 UCI 节并重建网络配置，
+ * 因此前端不能在确认后只删 UCI；返回 { status: "<退出码>" }（退出码语义，0=成功），
+ * 非零退出码必须如实报错，否则设置页会误报“已移除”。
+ */
+function removeModem(section) {
+	return withTimeoutReject(callRemoveModem(section), 60000, _('移除模组超时。'))
+		.then(function(res) { return requireExitCodeZero(res, _('移除模组')); });
+}
+
+/* ------------------------------------------------------------------ */
+/* 短信（官方 qmodem.sms 守护进程优先，qmodem.get_sms 直连兜底）        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 旧版 QModem 没有 qmodem.sms 服务，只有 qmodem.get_sms 直连 AT 读取。
+ * 30 秒内存 TTL + 在途去重，避免周期轮询占用 AT 串口；读取失败也限流。
  */
 var LEGACY_SMS_TTL = 30000;
 var LEGACY_SMS_TIMEOUT = 18000;
 var legacySmsStore = {};
 var legacySmsInFlight = {};
-var legacySmsLastAttempt = {};  /* 后台读取失败时也限流，防止每次轮询重试 */
+var legacySmsLastAttempt = {};
 var legacySmsError = {};
 
 function smsReadInFlight(section) {
@@ -1081,41 +910,14 @@ function readLegacySms(section) {
 	return legacySmsInFlight[section];
 }
 
-function getSms(section, legacyMode) {
-	return fetchSnapshot(section, ['sms']).then(function(snap) {
-		var env = envelopeOf(snap, 'sms');
-		var cached = env && env.data && env.data.get_sms;
-		var hasCache = cached && typeof cached === 'object' && Object.keys(cached).length;
+function invalidateLegacySms(section) {
+	delete legacySmsStore[section];
+	delete legacySmsLastAttempt[section];
+}
 
-		if (legacyMode) {
-			if (hasCache) {
-				/* stale-while-revalidate：缓存先返回，后台再向旧版 QModem 只读请求。
-				 * 请求完成后短存于内存，下轮 4 秒轮询显示新短信，不阻塞首屏。
-				 * 不通过 worker 同时采集，避免并发争抢模组 AT 端口。 */
-				readLegacySms(section).catch(function() { /* 后台失败时保留旧缓存 */ });
-				var fresh = legacySmsStore[section];
-				var cacheTime = Number(env.updated) * 1000 || 0;
-				return fresh && fresh.ts >= cacheTime ? fresh.value : cached;
-			}
-			/* 缓存缺失时也不能把旧版 QModem 的 AT 读取放到首屏 await。 */
-			readLegacySms(section).catch(function() {});
-			var latest = legacySmsStore[section];
-			return latest ? latest.value : legacySmsError[section]
-				? { error: legacySmsError[section] } : { _smsPending: true };
-		}
-
-		/* 新版 qmodem.sms/direct 维持原来的缓存优先逻辑。 */
-		if (hasCache) {
-			if (env.stale || env.status === 'missing') requestRefresh(section, ['sms']);
-			return cached;
-		}
-
-		if (!snap)
-			return withTimeout(callGetSms(section), DIRECT_RPC_TIMEOUT, {});
-
-		requestRefresh(section, ['sms']);
-		return {};
-	});
+/* 兼容导出：直读模组短信（旧通道） */
+function getSms(section) {
+	return readLegacySms(section);
 }
 
 var smsServiceMissingUntil = 0;
@@ -1144,7 +946,7 @@ function isMissingSmsService(err) {
 		/(?:error\s+)?(?:-32000|-32601)\s*:\s*(?:Object|Method) not found\b/i.test(message);
 }
 
-/* 只对“对象/方法不存在”降级；数据库损坏、无权限或超时都应显示原错误。 */
+/* 短信守护进程是否可用及其接收模式（direct / database_poll / database_urc） */
 function getSmsServiceConfig(section) {
 	if (Date.now() < smsServiceMissingUntil) return Promise.resolve(null);
 	return withTimeoutReject(callSmsConfig(section), 10000, _('读取短信服务超时')).then(function(result) {
@@ -1161,11 +963,28 @@ function getSmsServiceConfig(section) {
 	});
 }
 
+/* 守护进程服务状态 / 最近同步状态 / 模组配置列表（sms 设置卡片用） */
+function getSmsServiceStatus() {
+	return withTimeout(callSmsServiceStatus(), 10000, {}).then(function(r) {
+		return (r && typeof r === 'object' && r.status) ? r : null;
+	});
+}
+function getSmsSyncStatus() {
+	return withTimeout(callSmsSyncStatus(), 10000, {}).then(function(r) {
+		return (r && typeof r === 'object' && r.modem_id != null) ? r : null;
+	});
+}
+function getSmsModemList() {
+	return withTimeout(callSmsModemList(), 10000, {}).then(function(r) {
+		return (r && Array.isArray(r.modems)) ? r.modems : [];
+	});
+}
+
 function getSmsInbox(section) {
 	return getSmsServiceConfig(section).then(function(config) {
-		/* direct 模式仍读后台缓存，首屏不通过新服务同步访问串口。 */
+		/* direct 模式与旧版固件都直读模组（带 TTL 与在途去重）。 */
 		if (!config || config.mode === 'direct')
-			return getSms(section, !config).then(function(raw) {
+			return readLegacySms(section).then(function(raw) {
 				if (raw && raw.error) throw new Error(raw.error);
 				return Object.assign({}, Array.isArray(raw) ? { messages: raw } : (raw || {}), {
 					_smsSource: 'modem', _smsConfig: config
@@ -1195,15 +1014,10 @@ function getSmsInbox(section) {
 }
 
 function refreshSmsInbox(section, source) {
-	if (source !== 'database') return getSmsServiceConfig(section).then(function(config) {
-		if (!config) {
-			delete legacySmsStore[section];
-			delete legacySmsLastAttempt[section];
-			return readLegacySms(section);
-		}
-		return runTask(function() { return callTaskRefresh(section, [ 'sms' ]); }, 90000)
-			.then(function(result) { touch(section); return result; });
-	});
+	if (source !== 'database') {
+		invalidateLegacySms(section);
+		return readLegacySms(section);
+	}
 	return withTimeoutReject(callSmsSync(section), 45000, _('短信同步超时')).then(smsServiceAction);
 }
 
@@ -1267,18 +1081,17 @@ function deleteSmsMessage(section, message) {
 	/* 与 QModem 官方短信页一致，先删较大的槽位，避免较小槽位删除后
 	 * 模组重新编排索引而删错后续分段。 */
 	indexes.sort(function(a, b) { return Number(b) - Number(a); });
-	/* 先等已有读取结束，避免它在删除后把旧数据重新写入短信缓存。 */
+	/* 先等已有读取结束，避免它在删除后把旧数据重新写入内存缓存。 */
 	var reading = legacySmsInFlight[section];
 	return (reading ? reading.catch(function() {}) : Promise.resolve()).then(function() {
 		return deleteSms(section, indexes.join(' '));
 	}).then(function(result) {
 		modemSmsDeleteResult(result);
 		/* 官方旧界面的脚本可能只报告命令已执行；单条、多段均需回读确认。
-		 * 验证完成前保留页面原消息，不凭任务结束或 status=1 隐藏短信。 */
+		 * 验证完成前保留页面原消息，不凭 status=1 隐藏短信。 */
 		var previous = legacySmsInFlight[section];
 		return (previous ? previous.catch(function() {}) : Promise.resolve()).then(function() {
-			delete legacySmsStore[section];
-			delete legacySmsLastAttempt[section];
+			invalidateLegacySms(section);
 			return readLegacySms(section).then(function(fresh) {
 				var items = modemSmsItems(fresh);
 				if (!items) throw new Error(_('删除命令已发送，但无法核对模组短信列表。'));
@@ -1291,10 +1104,6 @@ function deleteSmsMessage(section, message) {
 				return result;
 			});
 		});
-	}).then(function(result) {
-		touch(section);
-		requestRefresh(section, [ 'sms' ], true).catch(function() {});
-		return result;
 	});
 }
 
@@ -1306,152 +1115,88 @@ function markSmsRead(section, messages) {
 	}, Promise.resolve());
 }
 
-function getDisabledFeatures(section) {
-	return cachedValue(section, 'network', 'disabled_features', {}, function() { return callGetDisabledFeatures(section); });
-}
-function getRebootCaps(section) {
-	return cachedValue(section, 'device', 'reboot_caps', {}, function() { return callGetRebootCaps(section); });
-}
-function getCopyright(section) {
-	return cachedValue(section, 'device', 'copyright', {}, function() { return callGetCopyright(section); });
-}
-function getCurrentBand(section) {
-	return cachedValue(section, 'signal', 'current_band', {}, function() { return callGetCurrentBand(section); },
-		function(r) {
-			/* 部分模组返回 { status: "unsupported" }，统一为空载波列表 */
-			if (r && r.status === 'unsupported' && !Array.isArray(r.cells))
-				return { cells: [], status: 'unsupported' };
-			return r;
-		});
-}
-function getCurrentBandCapabilities(section) {
-	return cachedValue(section, 'network', 'current_band_capabilities', {}, function() { return callGetCurrentBandCapabilities(section); });
-}
-
-/* 兼容实机差异：部分 QModem 版本返回 connection_status 而非 connect_status */
-function getConnectStatus(section) {
-	return cachedValue(section, 'status', 'connect_status', {}, function() { return callGetConnectStatus(section); },
-		function(r) {
-			if (r && r.connection_status != null && r.connect_status == null)
-				r.connect_status = r.connection_status;
-			return r;
-		});
-}
-function getDialStatus(section) {
-	return cachedValue(section, 'status', 'dial_status', {}, function() { return callGetDialStatus(section); });
-}
-
-/* 拨号日志体量大且只在用户点开时读取，不进周期缓存；直连但带超时 */
-function getDialLog(section) {
-	return withTimeout(callGetDialLog(section), DIRECT_RPC_TIMEOUT, {});
-}
-
-function getSimSlot(section) {
-	return cachedValue(section, 'sim', 'sim_slot', {}, function() { return callGetSimSlot(section); });
-}
-function getSimSwitchCapabilities(section) {
-	return cachedValue(section, 'sim', 'sim_switch_capabilities', {}, function() { return callGetSimSwitchCapabilities(section); });
-}
-function getUsageStats(section) {
-	return cachedValue(section, 'stats', 'usage', { available: 0 }, function() { return callGetUsageStats(section); });
-}
-function getDailyStats(section) {
-	return cachedValue(section, 'stats', 'daily', null, function() { return callDailyStats(section); });
-}
-
-/* 清零需要读一次模组计数器建立新基准 → 走后台任务，不让 rpcd 同步等 modem */
-function statsReset(section) {
-	if (!cacheLayerUsable())
-		return withTimeout(callStatsReset(section), DIRECT_RPC_TIMEOUT, null);
-	return runTask(function() { return callStatsResetTask(section); }, 60000).then(function(res) {
-		touch(section);
-		refreshQueued = {};
-		return res;
-	});
-}
-function getTrafficResetSchedule(section) {
-	return cachedValue(section, 'stats', 'traffic_reset_schedule', {}, function() { return callGetTrafficResetSchedule(section); });
-}
-
-/*
- * 模组支持库（/usr/share/qmodem/modem_support.json）注入状态与同步。
- * 该能力与具体模组无关，即使 QModem 尚未识别到任何模组也应可调用。
- * status 由 worker 周期写入缓存（内容是纯文件扫描结果）；
- * sync 改为后台任务：仍然返回 { available, added, skipped, missing, error }，
- * 调用方无需改动，但不再让 rpcd 同步执行文件合并。
- */
-function getSupportStatus() {
-	return supportFromAnySection();
-}
-
-function getSupportPorts() { return withTimeout(callSupportPorts(), DIRECT_RPC_TIMEOUT,
-	{ ports: [], error: '串口映射服务未响应，请检查 rpcd 与本插件安装状态' }); }
-function getCustomModels() { return withTimeout(callCustomList(), DIRECT_RPC_TIMEOUT,
-	{ entries: [], error: '自定义模组服务未响应，请检查 rpcd 与本插件安装状态' }); }
-function saveCustomModel(data) {
-	return callCustomSave(data.model, data.bus, data.manufacturer, data.manufacturer_id,
-		data.platform, data.modes, data.pdp_index, data.wcdma_band, data.lte_band,
-		data.nsa_band, data.sa_band, data.edit || '0');
-}
-function deleteCustomModel(model, bus) { return callCustomDelete(model, bus); }
-function probeSupportPort(port) { return callProbePort(port); }
-
-/* support 域与模组无关：从当前 section 的快照里取；拿不到再直连一次 */
-function supportFromAnySection() {
-	return resolveSection().then(function(section) {
-		if (!section)
-			return withTimeout(callSupportStatus(), DIRECT_RPC_TIMEOUT, supportUnavailable());
-		return fetchSnapshot(section, ['support']).then(function(snap) {
-			var env = envelopeOf(snap, 'support');
-			if (env && env.data && (env.data.available != null || env.data.path))
-				return env.data;
-			if (!snap)
-				return withTimeout(callSupportStatus(), DIRECT_RPC_TIMEOUT, supportUnavailable());
-			return withTimeout(callSupportStatus(), CACHE_RPC_TIMEOUT, supportUnavailable());
-		});
+/* 短信守护进程配置：mode / poll_interval / forwarding / auto_delete / country_code。
+ * 参照官方封装：先读当前配置补齐未提交项，再一次 configure 全量下发
+ * （官方 configure_method 允许 country_code 与其它字段并存，空串即清除国家码）。 */
+function configureSmsService(section, opts) {
+	opts = opts || {};
+	return getSmsServiceConfig(section).then(function(config) {
+		if (!config)
+			throw new Error(_('短信服务不可用（qmodem_smsd 未安装或未运行）。'));
+		return withTimeoutReject(callSmsConfigure(
+			section,
+			opts.mode || config.mode,
+			opts.pollInterval != null ? opts.pollInterval : (config.poll_interval != null ? config.poll_interval : null),
+			opts.forwarding !== undefined ? (opts.forwarding ? true : false) : !!config.forwarding,
+			opts.autoDelete !== undefined ? (opts.autoDelete ? true : false) : !!config.auto_delete,
+			opts.countryCode != null ? String(opts.countryCode).trim() : ''
+		), 15000, _('保存短信服务配置超时'));
+	}).then(function(result) {
+		result = smsServiceResult(result);
+		if (result.status === 'pending') return result;
+		return smsServiceAction(result);
 	});
 }
 
-function supportUnavailable() {
-	return { available: 0, path: '', added: [], skipped: [], missing: [],
-		error: 'qmodem_support 不可用（请确认 rpcd 已重启并已升级本插件）' };
+/* 短信存储：官方 storage_get 返回 AT+CPMS? 原始响应；storage_set 写入 ME/SM。
+ * 与官方封装一致的响应解析，供 UI 展示占用并提交更改。 */
+function parseSmsStorage(result) {
+	var storage = { mem1: (result && result.configured) || 'SM', mem2: 'SM', mem3: 'SM',
+		ME: { used: 0, total: 0 }, SM: { used: 0, total: 0 }, raw: '' };
+	var text = String((result && result.response) || '');
+	storage.raw = text;
+	var match = text.match(/\+CPMS:\s*"?([^",]+)"?,(\d+),(\d+),"?([^",]+)"?,(\d+),(\d+)(?:,"?([^",]+)"?,(\d+),(\d+))?/);
+	if (!match) return storage;
+	storage.mem1 = match[1]; storage.mem2 = match[4]; storage.mem3 = match[7] || match[4];
+	[ [ match[1], match[2], match[3] ], [ match[4], match[5], match[6] ], [ match[7], match[8], match[9] ] ].forEach(function(values) {
+		if (values[0] === 'SM' || values[0] === 'ME') storage[values[0]] = { used: +values[1] || 0, total: +values[2] || 0 };
+	});
+	return storage;
 }
-
-function syncSupport(section) {
-	var direct = function() { return withTimeout(callSupportSync(), DIRECT_RPC_TIMEOUT, supportUnavailable()); };
-	if (!cacheLayerUsable())
-		return direct();
-
-	var target = section || null;
-	return resolveSection().then(function(sec) {
-		target = section || sec || '';
-		return runTask(function() {
-			return callTaskAction(target, 'qmodem_support', 'sync', {});
-		}, 60000);
-	}).then(function(res) {
-		if (res && (res.available != null || res.added)) {
-			touch(target);
-			refreshQueued = {};
-			return res;
-		}
-		return direct();
-	}, direct);
+function getSmsStorageService(section) {
+	return withTimeoutReject(callSmsStorageGet(section), 15000, _('读取短信存储超时')).then(parseSmsStorage);
 }
-
+function setSmsStorageService(section, mem1, mem2, mem3) {
+	return withTimeoutReject(callSmsStorageSet(section, mem1, mem2, mem3 || mem2), 15000, _('设置短信存储超时')).then(smsServiceResult);
+}
 
 /* ------------------------------------------------------------------ */
-/* 控制动作封装（写操作，返回 Promise）                                */
+/* 控制动作封装（写操作，直连官方方法）                                 */
 /* ------------------------------------------------------------------ */
 
 /*
- * 所有会碰 modem 的写操作都改为「后台任务」：
- *   controls.xxx()  →  qmodem_cache.action（立即返回 task_id）
- *                   →  qmodem-task 在持有 AT 互斥锁的子进程里执行 ubus call
- *                   →  前端轮询 get_task，完成后 resolve 出 ubus 原始结果
- * 对调用方来说签名和返回值都没变，但 rpcd 不再同步等待 modem，
- * 而且同类任务自动去重（点两次「重启模组」不会真的重启两次）。
- * 缓存层不可用时自动退回直连（带超时）。
+ * 官方 QModem 写操作的失败信号并不统一（实测官方 rpcd 源码）：
+ *   clear_dial_log → {"result":{"status":"1"|"0"}}      status 语义，1=成功
+ *   set_sim_slot   → {"success":true|false,...}         success 布尔
+ *   set_mode       → {"result":"auto"}                  只回显，无状态字段
+ *   set_5g_lan / set_sms_storage / set_traffic_reset_schedule / clear_stats
+ *                  → 内部函数拼 JSON，失败以 {"error":...} 体现
+ * 这里只拦截明确的失败信号，不对缺少状态字段的响应误伤；
+ * 退出码语义（{"status":"<exit code>"}，0=成功）只有 remove_modem / scan_* 使用，
+ * 由 requireExitCodeZero 单独处理，两者不可混用。
  */
+function requireSuccess(raw, operation) {
+	if (raw == null)
+		throw new Error(operation + _('：QModem 未返回操作结果。'));
+	var body = raw.result && typeof raw.result === 'object' ? raw.result : raw;
+	var status = raw.status !== undefined ? raw.status : body.status;
+	var reason = raw.error || body.error || raw.modem_response || body.modem_response;
+	if (reason || raw.success === false || body.success === false ||
+		status === '0' || status === 0 || status === false ||
+		(typeof status === 'string' && /^(?:error|failed|failure)$/i.test(status)))
+		throw new Error(operation + _('失败：') + String(reason || body.message || _('QModem 拒绝执行该操作。')));
+	return raw;
+}
+
+/* remove_modem / scan_* 返回 {"status":"<退出码>"}：0 才是成功（与 status 语义方向相反） */
+function requireExitCodeZero(raw, operation) {
+	if (raw == null)
+		throw new Error(operation + _('：QModem 未返回操作结果。'));
+	var code = Number(raw.status !== undefined ? raw.status : (raw.result && raw.result.status));
+	if (!isFinite(code) || code !== 0)
+		throw new Error(operation + _('失败：') + String(raw.error || raw.message || ('exit ' + raw.status)));
+	return raw;
+}
 
 /* 兼容官方 at_cfg.res、平铺 response 及旧版 result 字符串。 */
 function atResponseText(raw) {
@@ -1492,65 +1237,39 @@ function sendAt(section, atPort, command, useUbus) {
 	var params = { at: command };
 	if (atPort) params.port = atPort;
 	if (useUbus !== undefined && useUbus !== null) params.use_ubus_flag = isEnabled(useUbus) ? '1' : '0';
-	var direct = function() { return withTimeoutReject(callSendAt(section, params), DIRECT_RPC_TIMEOUT, _('AT command timed out')); };
-
-	if (!cacheLayerUsable())
-		return direct().then(normalizeAtResult);
-
-	/* 无端口/无 use_ubus 时走 qmodem_cache.send_at（后端串行化 AT 通道） */
-	if (!atPort && (useUbus === undefined || useUbus === null)) {
-		var accepted = false;
-		return runTask(function() {
-			return callTaskSendAt(section, command).then(function(task) { accepted = !!(task && task.task_id); return task; });
-		}, 30000).then(function(res) {
-			touch(section);
-			return res;
-		}, function(err) {
-			if (accepted) throw err;
-			return direct();
-		}).then(normalizeAtResult);
-	}
-	return qmodemAction(section, 'send_at', { params: params }, direct, 30000).then(normalizeAtResult);
+	return withTimeoutReject(callSendAt(section, params), 30000, _('AT command timed out')).then(normalizeAtResult);
 }
 
 function sendSms(section, phoneNumber, content) {
-	var args = { phone_number: phoneNumber, message_content: content };
-	return qmodemAction(section, 'send_sms', { params: args },
-		function() { return withTimeoutReject(callSendSms(section, args), DIRECT_RPC_TIMEOUT, _('Sending SMS timed out')); }, 60000);
+	return withTimeoutReject(callSendSms(section, { phone_number: phoneNumber, message_content: content }),
+		60000, _('Sending SMS timed out'));
 }
 function sendRawPdu(section, command) {
-	return qmodemAction(section, 'send_raw_pdu', { cmd: command },
-		function() { return withTimeoutReject(callSendRawPdu(section, command), DIRECT_RPC_TIMEOUT, _('PDU request timed out')); }, 60000);
+	return withTimeoutReject(callSendRawPdu(section, command), 60000, _('PDU request timed out'));
 }
 function deleteSms(section, index) {
 	/* qmodem.delete_sms index 的 ubus 签名是 String，即便仅一个槽位也不能传数字。 */
 	var value = String(index);
 	if (!/^\d+(?: \d+)*$/.test(value))
 		return Promise.reject(new Error(_('无效的模组短信索引。')));
-	return qmodemAction(section, 'delete_sms', { index: value },
-		function() { return withTimeoutReject(callDeleteSms(section, value), DIRECT_RPC_TIMEOUT, _('删除模组短信超时')); }, 60000);
+	return withTimeoutReject(callDeleteSms(section, value), 60000, _('删除模组短信超时'));
 }
 function setMode(section, mode) {
-	return qmodemAction(section, 'set_mode', { mode: mode },
-		function() { return withTimeoutReject(callSetMode(section, mode), DIRECT_RPC_TIMEOUT, _('Setting mode timed out')); }, 120000);
+	return withTimeoutReject(callSetMode(section, mode), 120000, _('Setting mode timed out')).then(function(res) { return requireSuccess(res, _('切换网络模式')); });
 }
 function setImei(section, imei) {
-	return qmodemAction(section, 'set_imei', { imei: imei },
-		function() { return withTimeoutReject(callSetImei(section, imei), DIRECT_RPC_TIMEOUT, _('Setting IMEI timed out')); }, 120000).then(function(result) {
+	return withTimeoutReject(callSetImei(section, imei), 120000, _('Setting IMEI timed out')).then(function(result) {
 		var body = result && result.result && typeof result.result === 'object' ? result.result : result;
 		if (!result || result.error || body && (body.error || body.success === false || body.status === '0' || body.status === 0 || body.status === false))
 			throw new Error(String(result && (result.error || body && body.error) || _('QModem 拒绝写入 IMEI。')));
 		/* QModem 部分版本会回显提交值及 status=1，不能据此认为已生效。
-		 * 直接回读同一模组，避开尚未更新的 worker 快照。 */
+		 * 直接回读同一模组确认。 */
 		function readBack(retry) {
 			return withTimeoutReject(callGetImei(section), DIRECT_RPC_TIMEOUT,
 				_('IMEI 写入命令已完成，但模组回读超时，尚无法确认结果。')).then(function(fresh) {
 				var actual = String(fresh && fresh.imei || '').trim();
-				if (actual === imei) {
-					touch(section);
-					requestRefresh(section, [ 'sim' ], true).catch(function() {});
+				if (actual === imei)
 					return { imei: actual };
-				}
 				if (retry) return new Promise(function(resolve) { window.setTimeout(resolve, 800); }).then(function() { return readBack(false); });
 				throw new Error(_('写入命令已完成，但模组回读的 IMEI 仍为 %s，尚未确认生效。').format(actual || '--'));
 			});
@@ -1559,46 +1278,36 @@ function setImei(section, imei) {
 	});
 }
 function setLockBand(section, params) {
-	return qmodemAction(section, 'set_lockband', { params: params },
-		function() { return withTimeoutReject(callSetLockband(section, params), DIRECT_RPC_TIMEOUT, _('Locking band timed out')); }, 120000);
+	return withTimeoutReject(callSetLockband(section, params), 120000, _('Locking band timed out')).then(function(res) { return requireSuccess(res, _('锁定频段')); });
 }
 function setNetworkPrefer(section, params) {
-	return qmodemAction(section, 'set_network_prefer', { params: params },
-		function() { return withTimeoutReject(callSetNetworkPrefer(section, params), DIRECT_RPC_TIMEOUT, _('Setting network preference timed out')); }, 120000);
+	return withTimeoutReject(callSetNetworkPrefer(section, params), 120000, _('Setting network preference timed out')).then(function(res) { return requireSuccess(res, _('设置网络优选')); });
 }
 function setSimSlot(section, slot) {
-	return qmodemAction(section, 'set_sim_slot', { slot: slot },
-		function() { return withTimeoutReject(callSetSimSlot(section, slot), DIRECT_RPC_TIMEOUT, _('Switching SIM slot timed out')); }, 120000);
+	return withTimeoutReject(callSetSimSlot(section, slot), 120000, _('Switching SIM slot timed out')).then(function(res) { return requireSuccess(res, _('切换 SIM 卡槽')); });
 }
 function doReboot(section, method) {
-	var args = { method: method || 'soft' };
-	return qmodemAction(section, 'do_reboot', { params: args },
-		function() { return withTimeoutReject(callDoReboot(section, args), DIRECT_RPC_TIMEOUT, _('Reboot request timed out')); }, 180000);
+	return withTimeoutReject(callDoReboot(section, { method: method || 'soft' }), 180000, _('Reboot request timed out')).then(function(res) { return requireSuccess(res, _('重启模组')); });
 }
 function clearDialLog(section) {
-	return qmodemAction(section, 'clear_dial_log', {},
-		function() { return withTimeoutReject(callClearDialLog(section), DIRECT_RPC_TIMEOUT, _('Clearing log timed out')); }, 60000);
+	return withTimeoutReject(callClearDialLog(section), 30000, _('Clearing log timed out')).then(function(res) { return requireSuccess(res, _('清除拨号日志')); });
 }
 function clearStats(section) {
-	return qmodemAction(section, 'clear_stats', {},
-		function() { return withTimeoutReject(callClearStats(section), DIRECT_RPC_TIMEOUT, _('Clearing counters timed out')); }, 60000);
+	return withTimeoutReject(callClearStats(section), 60000, _('Clearing counters timed out')).then(function(res) { return requireSuccess(res, _('清零流量计数')); });
 }
 function setTrafficResetSchedule(section, params) {
-	return qmodemAction(section, 'set_traffic_reset_schedule', { params: params },
-		function() { return withTimeoutReject(callSetTrafficResetSchedule(section, params), DIRECT_RPC_TIMEOUT, _('Saving schedule timed out')); }, 60000);
+	return withTimeoutReject(callSetTrafficResetSchedule(section, params), 60000, _('Saving schedule timed out')).then(function(res) { return requireSuccess(res, _('保存流量清零计划')); });
 }
 function setNeighborCell(section, params) {
-	return qmodemAction(section, 'set_neighborcell', { params: params },
-		function() { return withTimeoutReject(callSetNeighborCell(section, params), DIRECT_RPC_TIMEOUT, _('Neighbour cell request timed out')); }, 120000);
+	return withTimeoutReject(callSetNeighborCell(section, params), 120000, _('Neighbour cell request timed out')).then(function(res) { return requireSuccess(res, _('锁小区')); });
 }
 function setSmsStorage(section, storage) {
-	return qmodemAction(section, 'set_sms_storage', { storage: storage },
-		function() { return withTimeoutReject(callSetSmsStorage(section, storage), DIRECT_RPC_TIMEOUT, _('Setting SMS storage timed out')); }, 60000);
+	return withTimeoutReject(callSetSmsStorage(section, storage), 60000, _('Setting SMS storage timed out')).then(function(res) { return requireSuccess(res, _('切换短信存储')); });
 }
+
 /*
  * 官方 QModem 对拨号/挂断/重拨的响应为 {"result":{"status":"1"|"0"}}。
- * task 成功只代表 ubus 请求执行完，不能误认 status=0 的失败为成功。
- * 在旧固件缺少任务层时，这三种操作使用较长直连超时，不被普通 8s RPC 截断。
+ * rpc 完成只代表 ubus 请求执行完，不能误认 status=0 的失败为成功。
  */
 function requireDialActionSuccess(raw, operation) {
 	var result = raw && raw.result && typeof raw.result === 'object' ? raw.result : raw;
@@ -1614,57 +1323,107 @@ function requireDialActionSuccess(raw, operation) {
 		throw new Error(operation + _('：QModem 未确认操作成功。'));
 	return raw;
 }
-function modemConnectionAction(section, method, directFn, timeoutMs, label) {
-	var action = cacheLayerUsable()
-		? qmodemAction(section, method, {}, directFn, timeoutMs)
-		: withTimeoutReject(directFn(), timeoutMs, label + _('超时，操作可能仍在执行，请检查连接状态。'));
-	return action.then(function(result) {
-		var accepted = requireDialActionSuccess(result, label);
-		touch(section);
-		return accepted;
-	});
-}
 function modemDial(section) {
-	return modemConnectionAction(section, 'modem_dial', function() { return callModemDial(section); }, 120000, _('开始拨号'));
+	return withTimeoutReject(callModemDial(section), 120000, _('开始拨号超时，操作可能仍在执行，请检查连接状态。'))
+		.then(function(result) { return requireDialActionSuccess(result, _('开始拨号')); });
 }
 function modemHang(section) {
-	return modemConnectionAction(section, 'modem_hang', function() { return callModemHang(section); }, 90000, _('挂断连接'));
+	return withTimeoutReject(callModemHang(section), 90000, _('挂断连接超时，操作可能仍在执行，请检查连接状态。'))
+		.then(function(result) { return requireDialActionSuccess(result, _('挂断连接')); });
 }
 function modemRedial(section) {
-	return modemConnectionAction(section, 'modem_redial', function() { return callModemRedial(section); }, 120000, _('重新拨号'));
+	return withTimeoutReject(callModemRedial(section), 120000, _('重新拨号超时，操作可能仍在执行，请检查连接状态。'))
+		.then(function(result) { return requireDialActionSuccess(result, _('重新拨号')); });
 }
 
-/* 与 modem 无关：直接调用即可 */
+/* 开启模组流量计数自动落盘（官方 save_stats；部分厂商不支持时返回 error） */
+function saveStats(section) {
+	return withTimeoutReject(callSaveStats(section), 30000, _('保存流量统计超时')).then(function(res) {
+		var body = res && res.result && typeof res.result === 'object' ? res.result : res;
+		if (!res || res.error || (body && (body.status === '0' || body.status === 0 || body.success === false)))
+			throw new Error(String((res && res.error) || (body && body.error) || _('模组不支持自动统计上报。')));
+		return res;
+	});
+}
+
+/* 5G LAN 开关（仅支持的模组返回 supported=true） */
+function set5gLan(section, enabled) {
+	return withTimeoutReject(callSet5gLan(section, !!enabled), 60000, _('设置 5G LAN 超时')).then(function(res) {
+		if (res && res.supported === false)
+			throw new Error(String(res.error || _('当前模组不支持 5G LAN。')));
+		return res;
+	});
+}
+
+/* procd 服务 */
 function rcList(name) { return withTimeout(callRcList(name), DIRECT_RPC_TIMEOUT, {}); }
+/* luci.setInitAction 成功返回 result:true（不同版本可能是裸 true 或 {"result":...}）；
+ * 失败如 restart 不存在的服务时必须报错，不能提示“已执行”。 */
+function setInitAction(name, action) {
+	return callSetInitAction(name, action).then(function(res) {
+		var ok = res === true || (res && typeof res === 'object' &&
+			(res.result === true || res.success === true || res.status === 'success'));
+		if (!ok)
+			throw new Error(_('服务操作未被确认成功（%s / %s）。').format(name, action));
+		return res;
+	});
+}
 function getDeviceStatus(name) { return withTimeout(callDeviceStatus(name), DIRECT_RPC_TIMEOUT, {}); }
 
 /*
- * 物理网口状态：worker 已在 status 域里一并采好（network.device status），
- * 视图应优先用这个缓存版本，避免为了拿一个 MTU 再发一次 RPC。
+ * 解析某个模组配置节对应的 netifd 逻辑接口。
+ * QModem 会为每个模组自动创建 IPv4 / IPv6 两个逻辑接口（命名由配置节派生，与模组
+ * 型号无关），因此这里不写死任何型号，按以下顺序自动推导、适配所有模组：
+ *   1) /etc/config/network 中 modem_config 指向该配置节的接口（QModem 的标准关联方式）
+ *   2) 回退：与配置节同名及 <section>v6 后缀的接口（兼容旧命名规则）
+ *   3) 回退：三层设备等于 qmodem 配置中物理网口（network 选项）的接口
+ * 返回 { names: [接口名...], entries: [各接口的 status 对象...] }
  */
-function getDeviceStatusCached(section) {
-	return cachedValue(section, 'status', 'device', {}, function() { return Promise.resolve({}); });
-}
+function getModemInterfaces(section) {
+	return withTimeout(uci.load('network'), DIRECT_RPC_TIMEOUT, null).then(function() {
+		return withTimeout(callInterfaceDump(), DIRECT_RPC_TIMEOUT, []);
+	}).then(function(dump) {
+		dump = Array.isArray(dump) ? dump : [];
+		var byName = {};
+		dump.forEach(function(e) { if (e && e.interface) byName[e.interface] = e; });
 
-/* QoS / 调制信息：AT 探测已搬到 qmodem-worker，这里只读缓存。
- * 默认信封只描述「空态」，不把未知的 QCI/5QI 伪装成 0；具体是否有效由后端
- * qmodem-at-probe 判断（qci/five_qi 用 null 表示未获取到）。 */
-function getQosInfo(section) {
-	return cachedDomain(section, 'qos', {
-		qci: null, qci_source: null, five_qi: null, five_qi_source: null,
-		downlink_rate_kbps: null, uplink_rate_kbps: null, rate_source: null,
-		apn: '', cid: null, domain: 'LTE', status: 'no_data'
-	}, function() { return callQosInfo(section); });
-}
-function getRadioInfo(section) {
-	return cachedDomain(section, 'radio', { status: 'unavailable' },
-		function() { return callRadioInfo(section); });
+		var names = [];
+		try {
+			uci.sections('network', 'interface', function(s) {
+				if (s && s['.name'] && s.modem_config === section && byName[s['.name']])
+					names.push(s['.name']);
+			});
+		} catch (e) { names = []; }
+
+		if (!names.length)
+			[section, section + 'v6'].forEach(function(n) { if (byName[n]) names.push(n); });
+
+		if (!names.length) {
+			var dev = '';
+			try { dev = uci.get('qmodem', section, 'network') || ''; } catch (e) { dev = ''; }
+			if (dev)
+				dump.forEach(function(e) {
+					if ((e.l3_device === dev || e.device === dev) && names.indexOf(e.interface) === -1)
+						names.push(e.interface);
+				});
+		}
+
+		return { names: names, entries: names.map(function(n) { return byName[n]; }) };
+	});
 }
 
 /*
- * 把 worker 采集到的 { names: [...], entries: { name: <status> } } 合并成
- * 单一接口视图。QModem 为同一模组生成的 IPv4 与 IPv6 地址分布在两个逻辑接口上，
- * 这里把地址/前缀/DNS 等合并，UI 直接取字段展示即可。
+ * 取模组数据接口的合并状态：把 IPv4 / IPv6 两个逻辑接口的地址、DNS、
+ * 在线状态等合并为单一视图，UI 直接取字段展示。
+ */
+function getInterfaceStatus(section) {
+	return getModemInterfaces(section).then(function(r) {
+		return mergeIfaceEntries(r.entries, r.names);
+	});
+}
+
+/*
+ * 把 netifd 接口状态合并成单一接口视图。
  */
 function mergeIfaceEntries(entries, names) {
 	var merged = {};
@@ -1703,86 +1462,6 @@ function mergeIfaceEntries(entries, names) {
 		merged.interface = names[0];
 
 	return merged;
-}
-
-/*
- * 解析某个模组配置节对应的 netifd 逻辑接口。
- * QModem 会为每个模组自动创建 IPv4 / IPv6 两个逻辑接口（命名由配置节派生，与模组
- * 型号无关），因此这里不写死任何型号，按以下顺序自动推导、适配所有模组：
- *   1) /etc/config/network 中 modem_config 指向该配置节的接口（QModem 的标准关联方式）
- *   2) 回退：与配置节同名及 <section>v6 后缀的接口（兼容旧命名规则）
- *   3) 回退：三层设备等于 qmodem 配置中物理网口（network 选项）的接口
- * 返回 { names: [接口名...], entries: [各接口的 status 对象...] }
- *
- * 解析结果由 qmodem-worker 周期写入 status 域的 ifaces 字段，
- * 这里优先读缓存；缓存层不可用时才回退到「uci.load('network') + interface dump」。
- */
-function getModemInterfaces(section) {
-	return fetchSnapshot(section, ['status']).then(function(snap) {
-		if (snap) {
-			var ifaces = domainData(snap, 'status').ifaces || {};
-			var names = Array.isArray(ifaces.names) ? ifaces.names : [];
-			var entries = [];
-			Object.keys(ifaces.entries || {}).forEach(function(n) { entries.push(ifaces.entries[n]); });
-			return { names: names, entries: entries };
-		}
-		return resolveModemInterfacesDirect(section);
-	});
-}
-
-/* 缓存层不可用时的原始解析路径（带超时，绝不无限等待） */
-function resolveModemInterfacesDirect(section) {
-	return Promise.all([
-		withTimeout(uci.load('network'), DIRECT_RPC_TIMEOUT, null),
-		withTimeout(callInterfaceDump(), DIRECT_RPC_TIMEOUT, [])
-	]).then(function(res) {
-		var dump = Array.isArray(res[1]) ? res[1] : [];
-		var byName = {};
-		dump.forEach(function(e) { if (e && e.interface) byName[e.interface] = e; });
-
-		var names = [];
-		try {
-			uci.sections('network', 'interface', function(s) {
-				if (s && s['.name'] && s.modem_config === section && byName[s['.name']])
-					names.push(s['.name']);
-			});
-		} catch (e) { names = []; }
-
-		if (!names.length)
-			[section, section + 'v6'].forEach(function(n) { if (byName[n]) names.push(n); });
-
-		if (!names.length) {
-			var dev = '';
-			try { dev = uci.get('qmodem', section, 'network') || ''; } catch (e) { dev = ''; }
-			if (dev)
-				dump.forEach(function(e) {
-					if ((e.l3_device === dev || e.device === dev) && names.indexOf(e.interface) === -1)
-						names.push(e.interface);
-				});
-		}
-
-		return { names: names, entries: names.map(function(n) { return byName[n]; }) };
-	});
-}
-
-/*
- * 取模组数据接口的合并状态：优先用 worker 已采集好的 status.ifaces（纯缓存读），
- * 缓存层不可用时才现场解析 netifd。
- */
-function getInterfaceStatus(section) {
-	return fetchSnapshot(section, ['status']).then(function(snap) {
-		if (snap) {
-			var data = domainData(snap, 'status');
-			var ifaces = data.ifaces || {};
-			var merged = mergeIfaceEntries(ifaces.entries, ifaces.names);
-			if (!merged.l3_device && !merged.device && ifaces.netdev)
-				merged.l3_device = ifaces.netdev;
-			return merged;
-		}
-		return resolveModemInterfacesDirect(section).then(function(r) {
-			return mergeIfaceEntries(r.entries, r.names);
-		});
-	});
 }
 
 /* ------------------------------------------------------------------ */
@@ -2057,11 +1736,8 @@ function formatDuration(seconds) {
 	return (days ? days + _('d') + ' ' : '') + (hours ? hours + _('h') + ' ' : '') + minutes + _('min');
 }
 
-/* 签约速率格式化。后端统一以 kbps 上报（见 qmodem-at-probe 的 norm_kbps），
- * 前端只负责展示，不再猜测单位。
- * 折算约定：1 Mbps = 1024 kbps、1 Gbps = 1024×1024 kbps
- * （因此 102400 kbps → 100 Mbps、51200 kbps → 50 Mbps，与验收标准一致）。
- * null / 0 / 非数字一律显示 '--'，绝不把「未知」显示成有效速率。 */
+/* 签约速率（AMBR）格式化：后端统一以 kbps 上报（QModem network_info 的 AMBR 为
+ * Mbps，视图换算后传入）。null / 0 / 非数字一律显示 '--'，绝不把「未知」显示成有效速率。 */
 function formatRate(value) {
 	var n = Number(value);
 	if (!isFinite(n) || n <= 0) return '--';
@@ -2177,35 +1853,21 @@ function operatorInfo(name, mcc, mnc) {
 /* ------------------------------------------------------------------ */
 
 /*
- * bootstrap(domains) —— 所有视图 load() 的统一入口。
+ * bootstrap() —— 所有视图 load() 的统一入口。
  *
- * 只做两件**都不会碰 modem** 的事：
- *   1) uci.load('qmodem')         读配置（本地文件，毫秒级）
- *   2) qmodem_cache.snapshot      读状态缓存（纯文件 IO，正常 < 50 ms）
- * 两者都带客户端超时，且**永不 reject** —— 无论 QModem 是否已识别模组、
- * modem 是否失联、worker 是否在跑，页面框架都能立刻渲染出来。
- *
- * 返回 { section, sections, snap, errors }。
- * 若缓存缺失/过期，会自动排一个后台 refresh 任务，由页面的轮询补上数据。
+ * 只读 UCI 配置（本地文件，毫秒级），解析当前模组配置节；
+ * 页面数据由各视图在 collect() 里直连官方 qmodem 接口获取。
+ * 返回 { section, sections, errors }，永不 reject —— 无论 QModem 是否已
+ * 识别模组，页面框架都能立刻渲染出来。
  */
-function bootstrap(domains) {
-	var ctx = { section: null, sections: [], snap: null, errors: [] };
+function bootstrap() {
+	var ctx = { section: null, sections: [], errors: [] };
 
-	return withTimeout(uci.load('qmodem'), CACHE_RPC_TIMEOUT, null).then(function() {
+	return withTimeout(uci.load('qmodem'), DIRECT_RPC_TIMEOUT, null).then(function() {
 		ctx.sections = getModemSectionsSync();
 		return resolveSection();
 	}).then(function(section) {
 		ctx.section = section || null;
-		if (!ctx.section)
-			return ctx;
-
-		return fetchSnapshot(ctx.section, domains).then(function(snap) {
-			ctx.snap = snap;
-			if (!snap || !snapshotCovers(snap, domains))
-				requestRefresh(ctx.section, domains, true);
-			return ctx;
-		});
-	}).then(function() {
 		return ctx;
 	}, function(err) {
 		ctx.errors.push((err && err.message) || String(err));
@@ -2213,47 +1875,54 @@ function bootstrap(domains) {
 	});
 }
 
-/*
- * 缓存健康度汇总，供页面顶部显示「离线 / 数据过期」而不是白屏。
- * 返回 { offline, stale, oldest, statuses: { domain: meta } }
- */
-function dataStatus(snap, domains) {
-	var out = { offline: false, stale: false, oldest: -1, statuses: {}, available: !!snap };
-	(domains || []).forEach(function(d) {
-		var meta = domainMeta(snap, d);
-		out.statuses[d] = meta;
-		if (meta.status === 'offline') out.offline = true;
-		if (meta.stale) out.stale = true;
-		if (meta.age > out.oldest) out.oldest = meta.age;
-	});
-	return out;
+/* ------------------------------------------------------------------ */
+/* 视图刷新                                                            */
+/* ------------------------------------------------------------------ */
+
+/* 立即重新采集并重绘；没有轮询器的页面（如静态表单页）退化为整页刷新。
+ * 第二个参数为 3.0.0 前的缓存域列表，已废弃，仅为兼容既有调用保留占位。 */
+function refreshPage(section, domains, button) {
+	if (button && button.disabled) return Promise.resolve(null);
+	var live = activeLive;
+	if (live && live.poller && live.poller.isRunning()) {
+		var label = button && button.textContent;
+		if (button) {
+			button.disabled = true;
+			button.textContent = _('正在刷新…');
+			button.setAttribute('aria-busy', 'true');
+		}
+		return Promise.resolve(live.poller.kick()).then(function() {
+			if (button) {
+				button.disabled = false;
+				button.textContent = label || _('刷新');
+				button.removeAttribute('aria-busy');
+			}
+			return null;
+		}, function() {
+			if (button) {
+				button.disabled = false;
+				button.textContent = label || _('刷新');
+				button.removeAttribute('aria-busy');
+			}
+			return null;
+		});
+	}
+	window.location.reload();
+	return Promise.resolve(null);
 }
 
 return baseclass.extend({
-	/* ---- 异步化基础设施（视图直接复用，避免各自实现轮询/超时） ---- */
+	/* ---- 基础设施（视图直接复用，避免各自实现轮询/超时） ---- */
 	bootstrap: bootstrap,
-	dataStatus: dataStatus,
-	fetchSnapshot: fetchSnapshot,
-	snapshotCovers: snapshotCovers,
-	envelopeOf: envelopeOf,
-	domainData: domainData,
-	domainMeta: domainMeta,
-	requestRefresh: requestRefresh,
-	refreshPage: refreshPage,
-	notify: notify,
-	touch: touch,
-	cacheLayerUsable: cacheLayerUsable,
-	runTask: runTask,
-	waitForTask: waitForTask,
-	qmodemAction: qmodemAction,
-	createPoller: createPoller,
 	liveView: liveView,
+	createPoller: createPoller,
+	refreshPage: refreshPage,
+	kickPoller: kickPoller,
+	notify: notify,
 	withTimeout: withTimeout,
 	withTimeoutReject: withTimeoutReject,
 	commitConfig: commitConfig,
 	mergeIfaceEntries: mergeIfaceEntries,
-	modemInfo: modemInfo,
-	getDeviceStatusCached: getDeviceStatusCached,
 
 	findEntry: findEntry,
 	entryList: entryList,
@@ -2282,6 +1951,14 @@ return baseclass.extend({
 	sendSmsInbox: sendSmsInbox,
 	deleteSmsMessage: deleteSmsMessage,
 	markSmsRead: markSmsRead,
+	getSmsServiceConfig: getSmsServiceConfig,
+	getSmsServiceStatus: getSmsServiceStatus,
+	getSmsSyncStatus: getSmsSyncStatus,
+	getSmsModemList: getSmsModemList,
+	configureSmsService: configureSmsService,
+	getSmsStorageService: getSmsStorageService,
+	setSmsStorageService: setSmsStorageService,
+	parseSmsStorage: parseSmsStorage,
 	getDisabledFeatures: getDisabledFeatures,
 	getRebootCaps: getRebootCaps,
 	getCopyright: getCopyright,
@@ -2293,9 +1970,14 @@ return baseclass.extend({
 	getSimSlot: getSimSlot,
 	getSimSwitchCapabilities: getSimSwitchCapabilities,
 	getUsageStats: getUsageStats,
+	saveStats: saveStats,
 	getDailyStats: getDailyStats,
 	statsReset: statsReset,
 	getTrafficResetSchedule: getTrafficResetSchedule,
+	getMonitorStatus: getMonitorStatus,
+	get5gLan: get5gLan,
+	getUplinkStatus: getUplinkStatus,
+
 	getSupportStatus: getSupportStatus,
 	syncSupport: syncSupport,
 	getSupportPorts: getSupportPorts,
@@ -2303,6 +1985,16 @@ return baseclass.extend({
 	saveCustomModel: saveCustomModel,
 	deleteCustomModel: deleteCustomModel,
 	probeSupportPort: probeSupportPort,
+
+	/* 设备扫描 / 模组接入 */
+	scanDevices: scanDevices,
+	getPcieDevices: getPcieDevices,
+	getUsbDevices: getUsbDevices,
+	getAvailableDevices: getAvailableDevices,
+	getTtyPorts: getTtyPorts,
+	getLeds: getLeds,
+	getNetworkInterfaces: getNetworkInterfacesList,
+	removeModem: removeModem,
 
 	sendAt: sendAt,
 	atResponseText: atResponseText,
@@ -2324,11 +2016,10 @@ return baseclass.extend({
 	modemHang: modemHang,
 	modemRedial: modemRedial,
 	rcList: rcList,
+	setInitAction: setInitAction,
 	getModemInterfaces: getModemInterfaces,
 	getInterfaceStatus: getInterfaceStatus,
 	getDeviceStatus: getDeviceStatus,
-	getQosInfo: getQosInfo,
-	getRadioInfo: getRadioInfo,
 
 	getModemSections: getModemSections,
 	resolveSection: resolveSection,

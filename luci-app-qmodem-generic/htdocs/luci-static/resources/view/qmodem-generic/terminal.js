@@ -47,17 +47,16 @@ function portList(raw) {
 
 return view.extend({
 	/*
-	 * AT 终端只读缓存拿端口配置，首屏不碰 modem。
+	 * AT 终端数据来自官方 qmodem get_at_cfg（rpcd 自带 10 秒缓存，首屏也很快）。
 	 * 本页**不做轮询重绘**：输出区是用户的 AT 会话日志，重绘会把它清掉。
-	 * AT 命令下发经 controls.sendAt → 后台任务队列（AT 通道串行化 + 超时）。
+	 * AT 命令下发经 controls.sendAt → 官方 qmodem send_at。
 	 */
-	DOMAINS: [ 'device', 'status' ],
 
 	load: function() {
 		var self = this;
 		var errors = [];
 
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			var section = ctx.section;
 
@@ -72,7 +71,12 @@ return view.extend({
 				var at = (cfg && cfg.at_cfg) ? cfg.at_cfg : (cfg || {});
 				var ports = portList(at.ports);
 				var port = at.at_port || controls.findEntry(base, 'at_port') || '';
-				return { section: section, port: port, ports: ports, base: base, errors: errors };
+				/* QModem 官方快捷命令表（at_commands_zh/en.json），按系统语言选择 */
+				var cmds = Array.isArray(at.cmds) ? at.cmds.filter(function(item) {
+					return item && typeof item.name === 'string' && typeof item.value === 'string' &&
+						item.name && item.value;
+				}) : [];
+				return { section: section, port: port, ports: ports, cmds: cmds, base: base, errors: errors };
 			});
 		});
 	},
@@ -323,6 +327,12 @@ return view.extend({
 				this.quickButton(_('Signal'), 'AT+CSQ', input, output),
 				this.quickButton(_('Operator'), 'AT+COPS?', input, output)
 			]),
+			/* QModem 官方快捷命令（get_at_cfg.cmds，随固件语言与模组平台变化） */
+			(res.cmds || []).length ? E('div', { 'class': 'qmodem-generic-quick' }, [
+				res.cmds.map(function(item) {
+					return self.quickButton(item.name, item.value, input, output);
+				})
+			]) : null,
 			controls.supportsTdTechAt(this.section, res.base) ? E('div', { 'class': 'qmodem-generic-quick' }, [
 				this.quickButton(_('Temperature'), 'AT^CHIPTEMP?', input, output),
 				this.quickButton(_('Cell Info'), 'AT^MONSC', input, output),

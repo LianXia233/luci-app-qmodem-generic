@@ -275,12 +275,11 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [ 'network', 'signal', 'device', 'status', 'sim' ],
 	POLL_INTERVAL: 8000,
 
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			return self.collect(ctx);
 		});
@@ -1032,7 +1031,6 @@ return view.extend({
 
 	render: function(res) {
 		return controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect
@@ -1201,7 +1199,7 @@ return view.extend({
 			E('div', { 'style': 'display:flex;gap:10px;margin:16px 0' }, [
 				E('button', {
 					'type': 'button', 'class': 'btn cbi-button-action',
-					'click': function(ev) { return controls.refreshPage(section, [ 'network', 'signal', 'sim', 'device' ], ev.currentTarget); }
+					'click': function(ev) { return controls.refreshPage(section, null, ev.currentTarget); }
 				}, _('刷新状态'))
 			]),
 

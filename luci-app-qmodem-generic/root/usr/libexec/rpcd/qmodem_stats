@@ -2,52 +2,40 @@
 # QModem 流量统计 rpcd 服务 — 暴露持久化的分天流量记录给 LuCI。
 # 存储：/etc/qmodem-stats/<section>.stats，重启保留；日期按中国时区（UTC+8）切分。
 #
-# ⚠️ 异步化改造：本插件**不再在 RPC 里采样**。
-#
-# 改造前：
-#   daily_stats → /usr/bin/qmodem-stats-collect run
-#                   → ubus call qmodem get_stats（一次 modem/AT 查询！）
-#   概览页 load() 里 Promise.all 会等它，于是「打开页面」变成「先采样一次流量」，
-#   modem 无响应时整批 RPC 一起卡到超时。
-#
-# 改造后（采样完全后台化）：
-#   /etc/init.d/qmodem-stats-collect + qmodem-stats-loop   每 60 秒后台采样落盘
-#   /etc/init.d/qmodem-worker + qmodem-worker              把最新结果写进缓存
-#   本插件只读缓存 / 只读 .stats 文件（纯文件 IO，毫秒级），
-#   数据偏旧时排一个后台 collect_stats 任务，立即返回旧值，绝不现场采样。
+# 采样架构（自包含，只依赖 QModem 官方 `qmodem get_stats` 接口）：
+#   /etc/init.d/qmodem-stats-collect + qmodem-stats-loop   每 60 秒后台采样落盘，
+#                                                          页面未打开时也持续累计。
+#   本插件只读 .stats 文件（纯文件 IO，毫秒级，绝不访问 modem）；
+#   数据偏旧时在后台拉一次采样进程补齐，立即返回现有值。
+#   唯一例外是 stats_reset：清零需要读一次模组计数器建立新基准，
+#   由用户显式点击触发，同步执行但带硬超时（采集器内部 8 秒 ubus 超时）。
 #
 # 方法：
-#   daily_stats   读取统计（缓存优先，回退 .stats 文件），必要时后台补采
-#   stats_history 仅读取已存储的统计（不触发采样，行为不变）
-#   stats_reset   清零：改为后台任务（需要读一次模组计数器建立新基准），
-#                 立即返回 task_id；结果由 qmodem_cache.get_task 查询
+#   daily_stats   读取统计（只读文件，必要时后台补采）
+#   stats_history 仅读取已存储的统计（不触发采样）
+#   stats_reset   清零本地分天记录并重建基准（同步，带硬超时）
 
-. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
-
-TASK_BIN="$QMODEM_BIN_DIR/qmodem-task"
-COLLECT_BIN="$QMODEM_BIN_DIR/qmodem-stats-collect"
+COLLECT_BIN="/usr/bin/qmodem-stats-collect"
 STALE_AFTER="${QMODEM_STATS_STALE:-150}"
+RESET_TIMEOUT="${QMODEM_STATS_RESET_TIMEOUT:-15}"
 
 j_str() {
-	printf '"%s"' "$(printf '%s' "$1" | qm_json_escape)"
+	_v=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\011\013-\037')
+	printf '"%s"' "$_v"
 }
 
-cache_data() {
-	_body=$(qm_read_domain "$1" stats 2>/dev/null) || return 1
-	[ -n "$_body" ] || return 1
-	case "$_body" in *'"data":'*) ;; *) return 1 ;; esac
-	printf '%s' "${_body##*\"data\":}" | sed 's/}$//'
+qm_now() {
+	date +%s
 }
 
-# 取缓存里的 daily 子对象（qmodem-worker 写入的是 collect show 的原始输出）
-cache_daily() {
-	_data=$(cache_data "$1") || return 1
-	printf '%s' "$_data" | jsonfilter -e '@.daily' 2>/dev/null
+qm_init_dirs() {
+	mkdir -p /etc/qmodem-stats 2>/dev/null || true
 }
 
+# 数据偏旧时在后台补采一次（fire-and-forget，不影响本 RPC 返回）
 queue_collect() {
-	[ -n "$1" ] && [ -f "$TASK_BIN" ] || return 0
-	sh "$TASK_BIN" new collect_stats "$1" '{}' >/dev/null 2>&1 &
+	[ -f "$COLLECT_BIN" ] || return 0
+	( sh "$COLLECT_BIN" run "$1" >/dev/null 2>&1 & ) 2>/dev/null
 	return 0
 }
 
@@ -70,17 +58,7 @@ case "$1" in
 
 		case "$2" in
 			daily_stats)
-				# 1) 首选：qmodem-worker 写好的缓存（纯 cat）
-				_daily=$(cache_daily "$config_section" 2>/dev/null)
-				if [ -n "$_daily" ]; then
-					_updated=$(printf '%s' "$_daily" | jsonfilter -e '@.updated_at' 2>/dev/null)
-					case "$_updated" in ''|*[!0-9]*) _updated=0 ;; esac
-					[ $(( $(qm_now) - _updated )) -gt "$STALE_AFTER" ] && queue_collect "$config_section"
-					printf '%s\n' "$_daily"
-					exit 0
-				fi
-
-				# 2) 回退：直接读 .stats 文件（show 不采样、不碰 modem）
+				# 只读 .stats 文件（show 不采样、不碰 modem）；偏旧时后台补采
 				if [ -f "$COLLECT_BIN" ]; then
 					_out=$(sh "$COLLECT_BIN" show "$config_section" 2>/dev/null)
 					case "$_out" in
@@ -94,7 +72,7 @@ case "$1" in
 					esac
 				fi
 
-				# 3) 什么都没有：立即返回空统计 + 后台补采
+				# 什么都没有：立即返回空统计 + 后台补采
 				queue_collect "$config_section"
 				printf '{"config_section":%s,"updated_at":0,"available":0,"today_rx":0,"today_tx":0,"total_rx":0,"total_tx":0,"swapped":0,"days":[],"stale":true}\n' \
 					"$(j_str "$config_section")"
@@ -110,16 +88,16 @@ case "$1" in
 				;;
 
 			stats_reset)
-				# 清零需要读一次模组计数器作为新基准 → 交给后台任务，
-				# 立即返回 task_id，避免 RPC 同步等待 modem。
-				if [ -f "$TASK_BIN" ]; then
-					_r=$(sh "$TASK_BIN" new collect_stats_reset "$config_section" '{"reset":1}' 2>/dev/null)
-					case "$_r" in
-						\{*) printf '%s\n' "$_r" ;;
-						*)   printf '{"config_section":%s,"result":0,"success":false,"error":"failed to create task"}\n' "$(j_str "$config_section")" ;;
+				# 清零需要读一次模组计数器作为新基准；用户显式触发，同步执行，
+				# 采集器内部对 ubus 有 8 秒硬超时，这里再兜一层 timeout。
+				if [ -f "$COLLECT_BIN" ]; then
+					_out=$(timeout "$RESET_TIMEOUT" sh "$COLLECT_BIN" reset "$config_section" 2>/dev/null)
+					case "$_out" in
+						\{*) printf '%s\n' "$_out" ;;
+						*)   printf '{"config_section":%s,"result":0,"success":false,"error":"stats reset timed out"}\n' "$(j_str "$config_section")" ;;
 					esac
 				else
-					printf '{"config_section":%s,"result":0,"success":false,"error":"qmodem-task missing"}\n' "$(j_str "$config_section")"
+					printf '{"config_section":%s,"result":0,"success":false,"error":"stats collector missing"}\n' "$(j_str "$config_section")"
 				fi
 				;;
 

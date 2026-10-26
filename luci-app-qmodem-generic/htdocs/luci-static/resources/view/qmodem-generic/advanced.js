@@ -130,14 +130,13 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [ 'network', 'device', 'status', 'support' ],
-	/* 支持库/硬件拓扑不需要每十秒重建一次；普通模组状态仍来自已有缓存。 */
+	/* 支持库/硬件拓扑不需要每十秒重建一次。 */
 	POLL_INTERVAL: 90000,
 	AUX_CACHE_MS: 120000,
 
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			/* 大型 JSON 支持库和串口映射通过单独 Promise 后台加载，不阻塞首屏。 */
 			self.initialAuxPromise = self.loadAuxiliary();
@@ -458,8 +457,8 @@ return view.extend({
 				E('div', { 'class': 'mt-control-actions' }, [
 					E('button', { 'type':'button', 'class':'btn cbi-button-apply',
 						'click': function(ev) { return self.supportSync(ev.currentTarget); } }, _('同步自定义库')),
-				E('button', { 'type':'button', 'class':'btn',
-						'click': function(ev) { return controls.refreshPage(this.section, this.DOMAINS, ev.currentTarget); }.bind(this) }, _('刷新状态'))
+					E('button', { 'type':'button', 'class':'btn',
+							'click': function(ev) { return controls.refreshPage(this.section, null, ev.currentTarget); }.bind(this) }, _('刷新状态'))
 				])
 			], true);
 	},
@@ -769,7 +768,6 @@ return view.extend({
 	render: function(res) {
 		var self = this;
 		var holder = controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect
@@ -1010,7 +1008,7 @@ return view.extend({
 					E('a', { 'class': 'btn cbi-button-action', 'href': L.url('admin/modem/qmodem-generic/terminal') }, _('AT 控制台')),
 					E('button', {
 						'type': 'button', 'class': 'btn',
-						'click': function(ev) { return controls.refreshPage(res.section, [ 'network', 'device', 'status', 'support' ], ev.currentTarget); }
+						'click': function(ev) { return controls.refreshPage(res.section, null, ev.currentTarget); }
 					}, _('刷新状态'))
 				])
 			]),

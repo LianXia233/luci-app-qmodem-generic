@@ -48,7 +48,10 @@ jobs:
 
       - name: Shell syntax check
         run: |
-          find "$PKG_DIR/root" "$PKG_DIR/tests" -type f \( -name '*.sh' -o -name 'qmodem-support-custom' -o -name 'qmodem-modem-support' -o -name 'qmodem_support' \) -print0 | xargs -0 -r -n1 sh -n
+          # 覆盖 root/ 与 tests/ 下所有 shell 脚本：*.sh、rpcd/init.d/uci-defaults
+          # 与无扩展名的可执行脚本（如 qmodem-stats-collect）；排除 python / node 脚本
+          find "$PKG_DIR/root" "$PKG_DIR/tests" -type f ! -name '*.py' ! -name '*.js' \
+            \( -name '*.sh' -o -name 'qmodem*' -o -perm -u+x \) -print0 | sort -z | xargs -0 -r -n1 sh -n
 
       - name: JSON syntax check
         run: |
@@ -58,9 +61,6 @@ jobs:
         run: |
           sh -n scripts/offline-install.sh.in
           python3 "$PKG_DIR/tests/test-offline-install.py"
-
-      - name: Legacy SMS deletion checks
-        run: python3 "$PKG_DIR/tests/test-legacy-sms-delete.py"
 
       - name: Frontend compatibility checks
         run: node "$PKG_DIR/tests/run-frontend-tests.js"

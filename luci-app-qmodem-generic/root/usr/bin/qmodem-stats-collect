@@ -32,13 +32,11 @@ SWAP_MIN_BYTES=$((50 * 1024 * 1024))
 # 那是一次真正的 modem/AT 查询 —— 绝不允许无限等待，否则后台循环会被拖死。
 STATS_UBUS_TIMEOUT="${QMODEM_STATS_UBUS_TIMEOUT:-8}"
 
-# 公共库提供带超时的 ubus 封装（qm_ubus）；缺失时退化为裸 ubus call
-if [ -f /usr/lib/qmodem/qmodem-lib.sh ]; then
-	. /usr/lib/qmodem/qmodem-lib.sh
-	qm_stats_ubus() { qm_ubus "$1" "$2" "$3" "$STATS_UBUS_TIMEOUT"; }
-else
-	qm_stats_ubus() { ubus call "$1" "$2" "$3" 2>/dev/null; }
-fi
+# 带硬超时的 ubus 封装（本组件自包含，不依赖任何插件私有库）：
+# timeout 命令保证 modem 失联时采样调用也会按时失败，绝不无限等待。
+qm_stats_ubus() {
+	timeout "$STATS_UBUS_TIMEOUT" ubus call "$1" "$2" "$3" 2>/dev/null
+}
 
 # jshn（json_* 函数）：OpenWrt 固件自带；缺失时回退到内置的纯 shell JSON 生成器
 if [ -f /usr/share/libubox/jshn.sh ]; then

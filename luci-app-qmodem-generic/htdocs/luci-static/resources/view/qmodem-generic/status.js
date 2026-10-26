@@ -66,12 +66,11 @@ function svgNode(xmlString) {
 }
 
 return view.extend({
-	DOMAINS: [ 'status', 'network', 'signal', 'sim', 'stats', 'qos', 'radio' ],
-	POLL_INTERVAL: 5000,
+	POLL_INTERVAL: 6000,
 
 	load: function() {
 		var self = this;
-		return controls.bootstrap(this.DOMAINS).then(function(ctx) {
+		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
 			return self.collect(ctx);
 		});
@@ -106,16 +105,14 @@ return view.extend({
 			guard(controls.getCurrentBand(section), _('载波聚合状态'), {}),
 			guard(controls.getInterfaceStatus(section), _('移动 IP'), {}),
 			guard(controls.getNetworkInfo(section), _('网络'), []),
-			guard(controls.getQosInfo(section), 'QOS', {}),
 			guard(controls.getTrafficResetSchedule(section), _('流量清零计划'), {}),
-			guard(controls.getRadioInfo(section), _('调制方式'), {}),
 			guard(controls.getDailyStats(section), _('每日流量'), null)
 		]).then(function(r) {
 			var iface = r[7] || {};
 			var ifname = iface.interface || '';
 			var devName = iface.l3_device || iface.device || '';
 			var devPromise = devName
-				? guard(controls.getDeviceStatusCached(section), _('设备速率'), {})
+				? guard(controls.getDeviceStatus(devName), _('设备状态'), {})
 				: Promise.resolve({});
 			return devPromise.then(function(devStatus) {
 				var allInfo = [].concat(r[0] || [], r[1] || [], r[2] || [], r[8] || []);
@@ -129,13 +126,11 @@ return view.extend({
 					conn: r[3],
 					dns: r[4],
 					usage: r[5],
-					trafficResetSchedule: r[10],
+					trafficResetSchedule: r[9],
 					currentBand: r[6],
 					iface: r[7],
 					net: r[8],
-					qosInfo: r[9] || {},
-					radioInfo: r[11] || {},
-					daily: r[12] || null,
+					daily: r[10] || null,
 					devStatus: devStatus,
 					allInfo: allInfo,
 					errors: errors
@@ -149,19 +144,13 @@ return view.extend({
 		var base = res.base || [], cell = res.cell || [], sim = res.sim || [],
 		    conn = res.conn || [], net = res.net || [];
 
-		var atQos = res.qosInfo || {};
-		/* 后端契约：签名速率统一为 kbps，未知用 null（绝不伪装成 0）。
-		 * QCI（LTE）与 5QI（5G）是两个独立维度，前端必须分开承接，不能互相覆盖。 */
-		function posNum(v) {
-			var n = Number(v);
-			return isFinite(n) && n > 0 ? n : null;
-		}
+		/* QoS 数据仅来自 QModem 官方 network_info（modem_info 条目）：
+		 * QCI（LTE）与 5QI（5G）是两个独立维度，前端分开承接，不互相覆盖。
+		 * 签约速率（AMBR）单位为 Mbps，换算为 kbps 后交给订阅速率展示。 */
 		function mbpsToKbps(v) {
 			var n = parseFloat(v);
 			return isNaN(n) || n <= 0 ? null : Math.round(n * 1000);
 		}
-		/* QModem 原生 modem_info 字段优先（QCI 属于 LTE、5QI 属于 5G），
-		 * 且必须确认字段属于当前注册网络/当前 APN（worker 已按 CID 校准）。 */
 		var qmQci = parseInt(find(net, 'QCI') || find(base, 'QCI') ||
 			find(cell, 'QCI') || find(sim, 'QCI') ||
 			find(net, 'QCI Index') || find(base, 'QCI Index'), 10);
@@ -170,25 +159,15 @@ return view.extend({
 			find(net, '5QI Index') || find(base, '5QI Index'), 10);
 		qmQci = isFinite(qmQci) && qmQci > 0 ? qmQci : null;
 		qm5qi = isFinite(qm5qi) && qm5qi > 0 ? qm5qi : null;
-		var qmUl = mbpsToKbps(find(net, 'AMBR UL'));
-		var qmDl = mbpsToKbps(find(net, 'AMBR DL'));
-
-		var atQci = posNum(atQos.qci);
-		var at5qi = posNum(atQos.five_qi);
-		var atDl = posNum(atQos.downlink_rate_kbps);
-		var atUl = posNum(atQos.uplink_rate_kbps);
 
 		var qosInfo = {
-			qci: qmQci != null ? qmQci : atQci,
-			qci_source: qmQci != null ? 'qmodem.network_info' : (atQci != null ? String(atQos.qci_source || 'qmodem.modem_info') : null),
-			five_qi: qm5qi != null ? qm5qi : at5qi,
-			five_qi_source: qm5qi != null ? 'qmodem.network_info' : (at5qi != null ? String(atQos.five_qi_source || 'qmodem.modem_info') : null),
-			downlink_rate_kbps: qmDl != null ? qmDl : atDl,
-			uplink_rate_kbps: qmUl != null ? qmUl : atUl,
-			rate_source: (qmDl != null || qmUl != null) ? 'qmodem.network_info' : String(atQos.rate_source || ''),
-			apn: atQos.apn || find(net, 'APN') || '',
-			domain: String(atQos.domain || (qm5qi != null ? 'NR' : 'LTE')),
-			status: String(atQos.status || 'no_data')
+			qci: qmQci,
+			five_qi: qm5qi,
+			downlink_rate_kbps: mbpsToKbps(find(net, 'AMBR DL')),
+			uplink_rate_kbps: mbpsToKbps(find(net, 'AMBR UL')),
+			apn: find(net, 'APN') || '',
+			domain: qm5qi != null ? 'NR' : 'LTE',
+			status: qmQci != null || qm5qi != null ? 'ok' : 'no_data'
 		};
 
 		var data = {};
@@ -422,22 +401,6 @@ return view.extend({
 		var mode = raw.network_mode || find(cell, 'network_mode') || '';
 		var cells = Array.isArray(raw.cells) ? raw.cells : [];
 
-		var ri = res.radioInfo || {};
-		var stripCtl = function(v) { return v == null ? '' : String(v).replace(/[\x00-\x1f\x7f]+/g, '').trim(); };
-		var rat = stripCtl(ri.rat);
-		if (!rat)
-			rat = /NR/i.test(mode) ? 'NR' : (/LTE/i.test(mode) || /LTE/i.test(stripCtl(find(cell, 'Network Type')) || stripCtl(find(res.net || [], 'Network Type'))) ? 'LTE' : '');
-		function modLine(mcs, mod) {
-			if ((mcs == null || mcs === '') && (!mod || /^unknown$/i.test(mod)))
-				return '';
-			var parts = [ rat ];
-			if (mcs != null && mcs !== '')
-				parts.push('MCS ' + mcs);
-			if (mod && !/^unknown$/i.test(mod))
-				parts.push(mod);
-			return parts.filter(Boolean).join(' · ');
-		}
-
 		var carriers = cells.map(function(item) {
 			return {
 				role: item.role || '',
@@ -477,8 +440,6 @@ return view.extend({
 			band: find(cell, 'Band') || (carriers[0] ? carriers[0].band : ''),
 			dlBandwidth: find(cell, 'DL Bandwidth') || sumBandwidth(carriers, 'dlBandwidth'),
 			ulBandwidth: find(cell, 'UL Bandwidth') || sumBandwidth(carriers, 'ulBandwidth'),
-			dlModulation: modLine(ri.dl_mcs, ri.dl_modulation),
-			ulModulation: modLine(ri.ul_mcs, ri.ul_modulation),
 			carriers: carriers
 		};
 	},
@@ -970,9 +931,14 @@ return view.extend({
 					_('QModem 将更新定时任务，使流量统计按设定时间自动清零。是否继续？'),
 					function() { return controls.setTrafficResetSchedule(section, params); });
 			}),
+			controls.action(_('开启模组自动统计'), function() {
+				controls.confirmModal(_('开启模组自动统计'),
+					_('开启后模组将周期保存流量计数（部分厂商固件支持），路由器重启后计数不丢失。是否继续？'),
+					function() { return controls.saveStats(section); });
+			}),
 			controls.action(_('立即清零流量统计'), function() {
 				controls.confirmModal(_('立即清零流量统计'),
-					_('此操作会立即清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？'),
+					_('此操作会清零该模组的流量计数，并同步清零本机分天流量记录。是否继续？'),
 					function() {
 						return Promise.resolve(controls.clearStats(section)).catch(function() { return null; })
 							.then(function() { return controls.statsReset(section); });
@@ -1001,7 +967,6 @@ return view.extend({
 
 	render: function(res) {
 		return controls.liveView(this, res, {
-			domains: this.DOMAINS,
 			interval: this.POLL_INTERVAL,
 			paint: this.paintContent,
 			collect: this.collect
@@ -1071,7 +1036,7 @@ return view.extend({
 						connected ? _('已连接') : reachable ? _('在线') : _('不可用')
 					]),
 				E('button', { 'type': 'button', 'class': 'qm-refresh-btn',
-					'click': function(ev) { return controls.refreshPage(res.section, [ 'status', 'signal', 'sim', 'stats', 'qos', 'radio' ], ev.currentTarget); }
+					'click': function(ev) { return controls.refreshPage(res.section, null, ev.currentTarget); }
 				}, _('刷新'))
 				])
 			]),

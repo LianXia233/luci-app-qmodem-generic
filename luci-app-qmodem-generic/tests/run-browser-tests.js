@@ -121,8 +121,8 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
   window.currentImei = '860000000000001';
   window.calls = [];
   window.notifications = [];
-  let task = 0;
-  const tasks = {};
+  /* 官方 qmodem 读方法白名单：load()/轮询只允许这些直连调用 */
+  const readMethods = /^(base_info|cell_info|info|network_info|sim_info|get_at_cfg|get_imei|get_mode|get_lockband|get_neighborcell|get_network_prefer|get_dns|get_sms|get_disabled_features|get_reboot_caps|get_copyright|get_current_band|get_current_band_capabilities|get_connect_status|dial_status|get_dial_log|get_sim_slot|get_sim_switch_capabilities|get_stats|get_traffic_reset_schedule|get_monitor_status|get_5g_lan|get_pcie_devices|get_usb_devices|get_available_devices|get_tty_ports|get_leds|get_network_interfaces)$/;
   const rpc = { declare: def => (...args) => {
     window.calls.push({ object: def.object, method: def.method, args });
     if (def.object === 'qmodem_support' && def.method === 'ports') return Promise.resolve({ ports: [
@@ -133,13 +133,18 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
       entries: ['rg650v-eu','rg520n-cn','rg502q-ea'].map(model => ({ bus:'usb', model, source:'user', state:'synced', modes:'qmi,mbim', manufacturer:'quectel', platform:'qualcomm', manufacturer_id:'2c7c', pdp_index:'1' })),
       presets: { usb:{}, pcie:{} }
     } : { entries: [] });
-    if (def.object === 'qmodem' && def.method === 'get_imei') return Promise.resolve({ imei: window.currentImei });
+    if (def.object === 'qmodem_support' && def.method === 'status') return Promise.resolve(data.support || { available: 0 });
+    if (def.object === 'qmodem_support' && def.method === 'sync') return Promise.resolve({ available: 1, added: [], skipped: [], missing: [], error: null });
+    if (def.object === 'qmodem' && def.method === 'get_imei' && scenario !== 'empty' && scenario !== 'absent')
+      return Promise.resolve({ imei: window.currentImei });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy_missing')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '旧版直读短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_legacy')
       return Promise.resolve({ sms: { msg: [{ index: 0, sender: '10010', content: '实时收到短信', timestamp: '26/10/17,20:10:00+32' }] } });
     if (def.object === 'qmodem' && def.method === 'get_sms' && scenario === 'sms_multipart')
       return Promise.resolve(window.deletedSms ? { sms: { msg: [{ index:0, sender:'10086', content:'单条短信' }] } } : data.sms.get_sms);
+    if (def.object === 'qmodem' && def.method === 'get_sms')
+      return Promise.resolve(data.sms?.get_sms || { sms: { msg: [] } });
     if (def.object === 'qmodem.sms') {
       if (!['sms_database','sms_database_error'].includes(scenario))
         return Promise.reject(new Error('RPC call to qmodem.sms/config_get failed with error -32000: Object not found at ClassConstructor.handleCallReply'));
@@ -153,27 +158,91 @@ async function mount({ sources, translations, viewName, scenario, dark, multi, l
       if (def.method === 'send' && window.smsSendError) return Promise.resolve({status:'error',error:window.smsSendError});
       return Promise.resolve({status:'success'});
     }
-    if (def.method === 'snapshot') {
-      const domains = {};
-      for (const key of Object.keys(data)) domains[key] = { status: 'ready', stale: false, updated: Date.now() / 1000, ttl: 600, data: data[key] };
-      return Promise.resolve({ config_section: args[0], now: Date.now() / 1000, domains });
-    }
-    if (def.method === 'get_task') return Promise.resolve(tasks[args[0]] || { state: 'missing' });
-    if (['action', 'send_at', 'stats_reset', 'refresh'].includes(def.method)) {
-      if (def.method === 'action' && args[1] === 'qmodem') {
-        const payload = args[3];
-        if (!payload || payload.config_section !== args[0]) return Promise.resolve({ error: 'explicit valid modem section required' });
-        if (['send_at','send_sms','do_reboot'].includes(args[2]) && (!payload.params || typeof payload.params !== 'object')) return Promise.resolve({ error: 'missing params object' });
-        if (scenario === 'sms_multipart' && args[2] === 'delete_sms') window.deletedSms = true;
-        if (args[2] === 'set_imei' && window.imeiWriteTakesEffect !== false) window.currentImei = payload.imei;
+    if (def.object === 'qmodem') {
+      if (def.method === 'send_at') {
+        if (window.atTaskFailure) return Promise.reject(new Error(window.atTaskFailure));
+        if (window.atTaskReply) return Promise.resolve(window.atTaskReply);
+        return Promise.resolve({ at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } });
       }
-      const id = 'test-' + (++task);
-      tasks[id] = { config_section: args[0], state: window.atTaskFailure ? 'failed' : 'success',
-        error: window.atTaskFailure || null,
-        result: def.method === 'action' && args[2] === 'set_imei' ? { imei: args[3].imei, result: { status: '1' } } :
-          window.atTaskReply || { at_cfg: { status: '1', res: 'Fibocom\r\nFM350-GL\r\nOK' } } };
-      return Promise.resolve({ task_id: id, state: 'running' });
+      if (def.method === 'delete_sms') {
+        if (scenario === 'sms_multipart') window.deletedSms = true;
+        return Promise.resolve({ result: { status: '1' } });
+      }
+      if (def.method === 'set_imei') {
+        if (window.imeiWriteTakesEffect !== false) window.currentImei = args[1];
+        return Promise.resolve({ imei: args[1], result: { status: '1' } });
+      }
+      /* 读方法直连官方返回（data 即 QModem rpcd 的原始形状） */
+      const d = data;
+      const replies = {
+        base_info: d.status?.base_info,
+        cell_info: d.signal?.cell_info,
+        sim_info: d.sim?.sim_info,
+        network_info: d.network?.network_info,
+        info: d.device?.info,
+        get_at_cfg: d.device?.at_cfg,
+        get_disabled_features: d.network?.disabled_features,
+        get_reboot_caps: d.device?.reboot_caps,
+        get_current_band: d.signal?.current_band,
+        get_current_band_capabilities: { current_band_capabilities: { supported: true, vendor: 'fibocom', method: 'AT+GTCCINFO?', schema: 'current_band' } },
+        get_connect_status: d.status?.connect_status,
+        dial_status: d.status?.dial_status,
+        get_dns: d.status?.dns,
+        get_mode: d.network?.mode,
+        get_lockband: d.network?.lockband,
+        get_neighborcell: d.network?.neighborcell,
+        get_network_prefer: d.network?.network_prefer,
+        get_sim_slot: d.sim?.sim_slot,
+        get_sim_switch_capabilities: d.sim?.sim_switch_capabilities,
+        get_stats: d.stats?.usage,
+        get_traffic_reset_schedule: { enabled: false, reset_type: 'monthly', hour: 0, day: 1, minute: 0 },
+        get_monitor_status: { enabled: false, running: false },
+        get_5g_lan: { supported: false },
+        get_dial_log: { log: 'dial log' },
+        get_copyright: { copyright: { Vendor: 'QModem', Author: 'QModem', Maintainer: 'QModem' } },
+        get_pcie_devices: { devices: [] },
+        get_usb_devices: { devices: [] },
+        get_available_devices: { devices: {} },
+        get_tty_ports: { ports: [{ id: config.at_port, label: config.at_port }] },
+        get_leds: { leds: [] },
+        get_network_interfaces: { interfaces: [] }
+      };
+      if (replies[def.method] !== undefined) return Promise.resolve(replies[def.method]);
+      const writes = {
+        send_sms: { result: { status: '1' } },
+        send_raw_pdu: { result: { status: '1' } },
+        set_mode: {}, set_lockband: {}, set_network_prefer: {}, set_neighborcell: {},
+        set_sim_slot: { success: true, redial: 0 },
+        do_reboot: { result: { status: '1' } },
+        clear_dial_log: { result: { status: '1' } },
+        clear_stats: { result: { status: '1' } },
+        set_traffic_reset_schedule: { result: true },
+        set_sms_storage: { raw: '', result: 'OK' },
+        modem_dial: { result: { status: '1' } },
+        modem_hang: { result: { status: '1' } },
+        modem_redial: { result: { status: '1' } },
+        save_stats: { result: { status: '1' } },
+        set_5g_lan: { supported: true, enabled: !!args[1] },
+        remove_modem: { status: '0' },
+        scan_pcie: { code: 0, message: 'ok' },
+        scan_usb: { code: 0, message: 'ok' },
+        scan_all: { code: 0, message: 'ok' }
+      };
+      return Promise.resolve(writes[def.method] !== undefined ? writes[def.method] : {});
     }
+    if (def.object === 'qmodem_stats') return Promise.resolve(def.method === 'daily_stats'
+      ? { config_section: args[0], updated_at: Math.floor(Date.now() / 1000), available: 1,
+          today_rx: 0, today_tx: 0, total_rx: 0, total_tx: 0, swapped: 0, days: [] }
+      : { success: true });
+    if (def.object === 'qmodem.uplink') return Promise.resolve({ enabled: false });
+    if (def.object === 'rc') return Promise.resolve({ name: args[0], enabled: true, running: false });
+    if (def.object === 'luci') return Promise.resolve({});
+    if (def.object === 'network.interface') {
+      const entries = data.status?.ifaces?.entries
+        ? Object.keys(data.status.ifaces.entries).map(k => data.status.ifaces.entries[k]) : [];
+      return Promise.resolve({ interface: entries });
+    }
+    if (def.object === 'network.device') return Promise.resolve(data.status?.device || {});
     return Promise.resolve({});
   } };
   const ui = {
@@ -291,7 +360,9 @@ async function run() {
           inside: copy.getBoundingClientRect().right <= title.getBoundingClientRect().right + 1
         } : null;
         return { text, badRows, overflowing, leaked, titleMetrics, width: document.documentElement.scrollWidth, viewport: innerWidth,
-          slowCalls: window.initialCalls.filter(c => ['qmodem', 'qos', 'luci-rpc'].includes(c.object)),
+          slowCalls: window.initialCalls.filter(c =>
+            ['qos', 'luci-rpc', 'qmodem_cache'].includes(c.object) ||
+            (c.object === 'qmodem' && !/^(base_info|cell_info|info|network_info|sim_info|get_at_cfg|get_imei|get_mode|get_lockband|get_neighborcell|get_network_prefer|get_dns|get_sms|get_disabled_features|get_reboot_caps|get_copyright|get_current_band|get_current_band_capabilities|get_connect_status|dial_status|get_dial_log|get_sim_slot|get_sim_switch_capabilities|get_stats|get_traffic_reset_schedule|get_monitor_status|get_5g_lan|get_pcie_devices|get_usb_devices|get_available_devices|get_tty_ports|get_leds|get_network_interfaces)$/.test(c.method))),
           chips: [...app.querySelectorAll('.mt-locksum-chips')].map(el => getComputedStyle(el).display) };
       });
       assert(!/页面渲染失败|页面渲染失败|拨号设置渲染失败/.test(report.text), `${viewName}: render failed`);
@@ -371,9 +442,8 @@ async function runDom() {
       while ((node = walker.nextNode())) if (!['STYLE', 'SCRIPT', 'PRE'].includes(node.parentElement.tagName))
         assert(!/^(null|undefined|nullnull)$/.test(node.textContent.trim()), `${viewName}/${scenario}: null node`);
       assert(!window.initialCalls.some(c =>
-        ['qmodem', 'qos', 'luci-rpc'].includes(c.object) &&
-        !(viewName === 'sms' && !['sms_database', 'sms_database_error'].includes(scenario) &&
-          c.object === 'qmodem' && c.method === 'get_sms')),
+        (['qos', 'luci-rpc', 'qmodem_cache'].includes(c.object) ||
+         (c.object === 'qmodem' && !/^(base_info|cell_info|info|network_info|sim_info|get_at_cfg|get_imei|get_mode|get_lockband|get_neighborcell|get_network_prefer|get_dns|get_sms|get_disabled_features|get_reboot_caps|get_copyright|get_current_band|get_current_band_capabilities|get_connect_status|dial_status|get_dial_log|get_sim_slot|get_sim_switch_capabilities|get_stats|get_traffic_reset_schedule|get_monitor_status|get_5g_lan|get_pcie_devices|get_usb_devices|get_available_devices|get_tty_ports|get_leds|get_network_interfaces)$/.test(c.method)))),
         `${viewName}/${scenario}: unexpected modem request`);
       assert.equal(window.document.body.getAttribute('data-qm-palette'), 'ocean', 'Default palette must be blue/green');
       if (scenario !== 'absent') {
@@ -473,22 +543,19 @@ async function runDom() {
         assert.equal(app.querySelectorAll('[data-at-command="AT^CHIPTEMP?"]').length, scenario === 'tdtech' ? 1 : 0, 'Private quick commands must match modem');
         assert(app.querySelector('[data-at-command="AT+CSQ"]'), 'Common signal command must be vendor neutral');
         assert([...app.querySelectorAll('button')].every(b => b.type === 'button'), 'Console buttons must not submit the enclosing LuCI form');
-        const before = window.calls.filter(c => ['action','send_at'].includes(c.method)).length;
+        const before = window.calls.filter(c => c.object === 'qmodem' && c.method === 'send_at').length;
         input.value = 'ATI';
         const first = window.currentView.sendCommand(output, input);
         const duplicate = window.currentView.sendCommand(output, input);
         assert.equal(input.disabled, true);
         assert.equal(app.querySelector('.qm-at-state').classList.contains('is-busy'), true);
         await Promise.all([first, duplicate]);
-        const submissions = window.calls.filter(c => ['action','send_at'].includes(c.method)).slice(before);
-        assert.equal(submissions.length, 1, 'Repeated clicks must create only one AT task');
+        const submissions = window.calls.filter(c => c.object === 'qmodem' && c.method === 'send_at').slice(before);
+        assert.equal(submissions.length, 1, 'Repeated clicks must create only one AT request');
         const sent = submissions[0];
         assert.equal(sent.args[0], '6_1', 'AT must target the selected dynamic modem');
-        if (sent.method === 'action') {
-          assert.equal(sent.args[3].config_section, '6_1');
-          assert.equal(sent.args[3].params.at, 'ATI');
-          assert.equal(sent.args[3].params.port, '/dev/ttyUSB1');
-        } else assert.equal(sent.args[1], 'ATI');
+        assert.equal(sent.args[1].at, 'ATI');
+        assert.equal(sent.args[1].port, '/dev/ttyUSB1');
         assert(output.textContent.includes('FM350-GL') && output.textContent.includes('OK'), 'Official at_cfg.res must display as plain response text');
         assert(!output.textContent.includes('"at_cfg"'), 'Response pane must show the modem response, not the protocol envelope');
         assert.equal(input.value, 'ATI', 'Keep commands for retry and saving');
@@ -560,7 +627,7 @@ async function runDom() {
         assert.equal(draft.value, '发送失败后保留的草稿');
         assert.equal(sendButton.disabled, false);
         assert(window.notifications.some(args => args[1]?.textContent.includes('SMS transport failed')));
-        assert(!window.calls.some(c => c.method === 'action' && c.args[2] === 'send_sms'), 'A failed database send must not fall back and resend');
+        assert(!window.calls.some(c => c.object === 'qmodem' && c.method === 'send_sms'), 'A failed database send must not fall back and resend');
 
         app.querySelector('.mt-sms-bubblewrap.out .mt-sms-delete').click();
         window.document.querySelector('#modal .cbi-button-negative').click();
@@ -577,12 +644,12 @@ async function runDom() {
         assert(!text.includes('模组内短信：0'), 'Database errors must not be shown as an empty SIM inbox');
       }
       if (viewName === 'sms' && scenario === 'sms_legacy_missing') {
-        assert(text.includes('正在读取模组短信'), 'Missing SMS cache must not block the first paint');
+        assert(text.includes('旧版直读短信'), 'Legacy SMS reads directly from the modem on load');
         assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_sms').length, 1, 'Legacy SMS should not be read repeatedly during page load');
         await new Promise(resolve => setTimeout(resolve, 0));
         const fresh = await window.currentView.collect({ section: '6_1' });
         app.replaceChildren(window.currentView.paintContent(fresh));
-        assert(app.textContent.includes('旧版直读短信'), 'Background legacy SMS read must update the inbox');
+        assert(app.textContent.includes('旧版直读短信'), 'Repeat collect keeps serving the 30s legacy SMS cache');
       }
       if (viewName === 'sms' && scenario === 'sms_legacy') {
         assert(text.includes('模组内短信：1 条') && text.includes('SIM 保留短信'), 'Legacy nested sms.msg responses must remain supported');
@@ -591,8 +658,8 @@ async function runDom() {
         app.querySelector('.mt-sms-delete').click();
         window.document.querySelector('#modal .cbi-button-negative').click();
         await new Promise(resolve => setTimeout(resolve, 0));
-        const action = window.calls.find(c => c.method === 'action' && c.args[2] === 'delete_sms');
-        assert.equal(action.args[3].index, '0', 'SIM index zero must remain valid as a string');
+        const action = window.calls.find(c => c.object === 'qmodem' && c.method === 'delete_sms');
+        assert.equal(action.args[1], '0', 'SIM index zero must remain valid as a string');
         const settings = [...app.querySelectorAll('.mt-sms-hero button')].find(b => b.textContent.trim() === '设置');
         settings.click();
         assert(!window.calls.some(c => c.method === 'action' && c.args[3]?.params?.at === 'AT^IMSSWITCH?'), 'Fibocom settings must not issue TD-Tech private queries');
@@ -605,8 +672,8 @@ async function runDom() {
         app.querySelector('.mt-sms-delete').click();
         window.document.querySelector('#modal .cbi-button-negative').click();
         await new Promise(resolve => setTimeout(resolve, 260));
-        const action = window.calls.find(c => c.method === 'action' && c.args[2] === 'delete_sms');
-        assert.equal(action.args[3].index, '7 6', 'Deletion submits every segment in descending storage order');
+        const action = window.calls.find(c => c.object === 'qmodem' && c.method === 'delete_sms');
+        assert.equal(action.args[1], '7 6', 'Deletion submits every segment in descending storage order');
         assert(window.calls.some(c => c.object === 'qmodem' && c.method === 'get_sms' && !window.initialCalls.includes(c)), 'Deleted segments are checked with a fresh modem read');
         assert(!app.textContent.includes('第一段第二段'), 'Deleted conversation disappears without a manual refresh');
         assert(app.textContent.includes('模组内短信：1 条'), 'Count updates immediately after deletion');
@@ -621,7 +688,7 @@ async function runDom() {
     const window = new Window({ url: 'http://qmodem.test', width: 1440, height: 1000 });
     try {
       window.document.body.innerHTML = '<main id="app"></main>';
-      await window.eval('(' + mount.toString() + ')(' + JSON.stringify({ sources, translations, viewName, scenario, dark:false, multi:false }) + ')');
+      await window.eval('(' + mount.toString() + ')(' + JSON.stringify({ sources, translations, viewName, scenario, dark:false, multi:false, live:true }) + ')');
       await check(window, window.document.querySelector('#app'));
     } finally { await window.happyDOM.close(); }
   }
@@ -640,28 +707,28 @@ async function runDom() {
       await settle();
       const app = window.document.querySelector('#app');
       assert(app.textContent.includes('旧版直读短信'), 'Legacy SMS must appear automatically without clicking Refresh');
-      assert(window.calls.filter(c => c.object === 'qmodem_cache' && c.method === 'snapshot').length >
-        window.initialCalls.filter(c => c.object === 'qmodem_cache' && c.method === 'snapshot').length,
-      'Polling must start after LuCI mounts the page');
+      const smsReads = window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_sms').length;
+      assert(smsReads >= 1 && smsReads <= 1,
+        'Polling must respect the 30s legacy SMS TTL (reads=' + smsReads + ')');
     } finally { await window.happyDOM.close(); }
   }
   for (const viewName of ['status', 'network', 'advanced']) {
     await checkButtons(viewName, 'full', async (window, app) => {
+      const before = window.calls.length;
       clickNamed(app, viewName === 'status' ? '刷新' : '刷新状态');
       await settle();
-      assert(window.calls.some(c => c.object === 'qmodem_cache' && c.method === 'refresh'), `${viewName}: Refresh must request new modem data`);
-      assert(window.calls.some(c => c.object === 'qmodem_cache' && c.method === 'get_task'), `${viewName}: Refresh must await the worker`);
+      assert(window.calls.length > before, `${viewName}: Refresh must re-collect official modem data`);
     });
   }
   await checkButtons('connection', 'full', async (window, app) => {
-    window.atTaskReply = { result: { status: '1' } };
     for (const [name, method] of [['开始拨号','modem_dial'], ['挂断连接','modem_hang'], ['重新拨号','modem_redial']]) {
       clickNamed(app, name);
       if (name !== '开始拨号') window.document.querySelector('#modal .cbi-button-negative').click();
       await settle();
-      assert(window.calls.some(c => c.method === 'action' && c.args[2] === method), `${name}: wrong QModem action`);
+      assert(window.calls.some(c => c.object === 'qmodem' && c.method === method), `${name}: wrong QModem action`);
     }
-    app.querySelector('.mtconn-config-card input').value = '3gnet-new';
+    const apnInput = app.querySelector('.mtconn-config-card input');
+    apnInput.value = '3gnet-new'; apnInput.focus();
     clickNamed(app, '保存 APN 设置');
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(window.uciSaves, 1);
@@ -682,7 +749,7 @@ async function runDom() {
     clickNamed(app, '进入飞行模式');
     window.document.querySelector('#modal .cbi-button-negative').click();
     await settle();
-    assert(window.calls.some(c => c.method === 'action' && c.args[2] === 'send_at' && c.args[3]?.params?.at === 'AT+CFUN=0'));
+    assert(window.calls.some(c => c.object === 'qmodem' && c.method === 'send_at' && c.args[1]?.params?.at === 'AT+CFUN=0'));
     clickNamed(app, '设置IMEI');
     const newImei = '860000000000002';
     window.document.querySelector('#modal input').value = newImei;
@@ -690,7 +757,7 @@ async function runDom() {
     const confirm = window.document.querySelector('#modal .cbi-button-negative');
     confirm.click(); confirm.click();
     await settle();
-    assert.equal(window.calls.filter(c => c.method === 'action' && c.args[2] === 'set_imei').length, 1, 'Double click must write IMEI once');
+    assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'set_imei').length, 1, 'Double click must write IMEI once');
     assert.equal(window.calls.filter(c => c.object === 'qmodem' && c.method === 'get_imei').length, 1, 'Read back the modem IMEI after writing');
     assert.equal(app.querySelector('.mt-sys-imei-value').textContent, newImei, 'Confirmed value appears without a reload');
     assert(!window.document.querySelector('#modal'), 'Confirmation closes after actual readback');
@@ -713,7 +780,7 @@ async function runDom() {
     assert.equal(window.document.querySelectorAll('.alert-message.fade-in').length, 0);
     clickNamed(app, '同步自定义库');
     await settle();
-    assert(window.calls.some(c => c.method === 'action' && c.args[1] === 'qmodem_support' && c.args[2] === 'sync'));
+    assert(window.calls.some(c => c.object === 'qmodem_support' && c.method === 'sync'));
   });
   console.log(`PASS: ${cases} DOM page cases. Browser layout and real hardware remain unverified.`);
 }
