@@ -17,12 +17,18 @@
 # 行为约定
 # --------
 # - 幂等：支持库中已存在的型号一律跳过，绝不重复写入。
+# - 结构安全：解析、判重、写入全部交给 jq 按 JSON 结构处理。早年的实现是
+#   按「4 空格缩进」扫文本，而官方支持库里有若干缩进异常的块（例如 RM520N
+#   的 settings 里出现 8 空格的 "sms": { / },），文本扫描会在那里提前收敛，
+#   导致后半部分的型号「看不见」，进而重复注入同名键；JSON 出现重复键时
+#   谁生效取决于解析器，等于静默改坏支持库。现在不再依赖任何缩进假设。
 # - 安全：写入前生成 /usr/share/qmodem/modem_support.json.bak；
-#         写入后用 jsonfilter（若存在）校验，校验失败自动回滚备份。
+#         先校验临时文件再落盘，落盘后复核，失败自动回滚备份。
 # - 保守：QModem 未安装（支持库文件不存在）时直接退出 0，不创建任何文件。
+#         缺少 jq 时拒绝写入（jq 是本包 Makefile 里的硬依赖）。
 #
 # 数据源位于 /usr/share/qmodem-generic/extra_modem_support.json，
-# 结构与 QModem 的 modem_support.json 完全一致（4 空格缩进）：
+# 结构与 QModem 的 modem_support.json 完全一致：
 #   { "modem_support": { "usb": { "<model>": { ... } }, "pcie": { ... } } }
 
 TAG='qmodem-modem-support'
@@ -31,7 +37,16 @@ EXTRA="${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_suppor
 CUSTOM_DIR="${QMODEM_CUSTOM_SUPPORT_DIR:-/etc/qmodem-generic/modems}"
 BACKUP="$TARGET.bak"
 TMP="$TARGET.tmp.$$"
+# 待写入计划（每行 "组\t型号\t数据源"）与按数据源聚合后的写入批次
+PLAN_FILE="${TMPDIR:-/tmp}/qmodem-plan.$$"
+GROUPS_FILE="${TMPDIR:-/tmp}/qmodem-groups.$$"
 LOCKDIR="${QMODEM_SUPPORT_LOCKDIR:-/var/run/qmodem-modem-support.lock}"
+# 锁最多持有时间（秒）：超过且持锁进程已不存在时视为崩溃残留，可强行清理
+LOCK_RETRY="${QMODEM_SUPPORT_LOCK_RETRY:-5}"
+# 锁目录存在但 pid 文件缺失/不可解析时的宽限期（秒）
+LOCK_GRACE="${QMODEM_SUPPORT_LOCK_GRACE:-5}"
+
+JQ="$(command -v jq 2>/dev/null)"
 
 JSON_OUT=0
 STATUS_ONLY=0
@@ -46,6 +61,7 @@ ADDED=''
 SKIPPED=''
 MISSING=''
 DETAILS=''
+APPLIED=''
 ERR=''
 BACKED_UP=0
 LOCKED=0
@@ -55,12 +71,18 @@ log() {
 	logger -t "$TAG" "$1" 2>/dev/null || true
 }
 
-# 空格分隔列表 → JSON 数组内容（型号名均为 [a-z0-9._-]，无需转义）
+# JSON 字符串转义：去掉控制字符，再转义反斜杠和双引号
+json_str() {
+	printf '%s' "$1" | tr -d '\000-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# 空格分隔列表 → JSON 数组内容（列表元素已按 "bus/model" 形式去重）
 json_array() {
 	local out='' first=1 item
 	for item in $1; do
-		if [ "$first" = 1 ]; then out="\"$item\""; first=0
-		else out="$out,\"$item\""; fi
+		[ -n "$item" ] || continue
+		if [ "$first" = 1 ]; then out="\"$(json_str "$item")\""; first=0
+		else out="$out,\"$(json_str "$item")\""; fi
 	done
 	printf '%s' "$out"
 }
@@ -68,121 +90,90 @@ json_array() {
 emit() {
 	local available="$1"
 	printf '{"available":%s,"path":"%s","added":[%s],"skipped":[%s],"missing":[%s],"details":[%s],"error":%s}\n' \
-		"$available" "$TARGET" "$(json_array "$ADDED")" "$(json_array "$SKIPPED")" \
+		"$available" "$(json_str "$TARGET")" "$(json_array "$ADDED")" "$(json_array "$SKIPPED")" \
 		"$(json_array "$MISSING")" "$DETAILS" \
-		"$( [ -n "$ERR" ] && printf '"%s"' "$ERR" || printf 'null' )"
+		"$( [ -n "$ERR" ] && printf '"%s"' "$(json_str "$ERR")" || printf 'null' )"
 }
 
 detail() {
 	[ -z "$DETAILS" ] || DETAILS="$DETAILS,"
-	DETAILS="$DETAILS{\"bus\":\"$1\",\"model\":\"$2\",\"state\":\"$3\"}"
+	DETAILS="$DETAILS{\"bus\":\"$(json_str "$1")\",\"model\":\"$(json_str "$2")\",\"state\":\"$3\"}"
 }
 
-# 枚举数据源中的待处理型号，每行输出 "<group> <model>"（只处理 usb / pcie 组）
-# 注意：正则里用字面空格而不是 {8}/{12} 区间表达式 —— busybox awk 支持区间，
-# 但 mawk 等实现默认不支持，会让整个匹配静默失效。
+# 空格分隔列表中是否已有该元素（列表带前导空格，不能用 grep -Fx 整行匹配）
+in_list() {
+	local _item
+	for _item in $2; do
+		[ "$_item" = "$1" ] && return 0
+	done
+	return 1
+}
+
+append_list() {
+	# $1 = 元素；返回 0 表示列表中已存在（调用方据此跳过重复的 details 记录）
+	local _item
+	for _item in $SKIPPED; do
+		[ "$_item" = "$1" ] && return 0
+	done
+	SKIPPED="$SKIPPED $1"
+	return 1
+}
+
+# 列出 "<group> <model>"（只处理 usb / pcie 分组，保持文件内的原始顺序）
 list_models() {
-	awk '
-		/^        "(usb|pcie)": \{[ \t]*$/ {
-			grp = $0
-			sub(/^[ \t]*"/, "", grp)
-			sub(/".*$/, "", grp)
-			next
-		}
-		grp != "" && /^            "[^"]+": \{[ \t]*$/ {
-			mdl = $0
-			sub(/^[ \t]*"/, "", mdl)
-			sub(/".*$/, "", mdl)
-			print grp " " mdl
-		}
-	' "$1"
+	[ -n "$JQ" ] || return 1
+	jq -r '
+		def bus($b): ((.modem_support // {})[$b]) as $g
+			| if ($g | type) == "object"
+			  then ($g | keys_unsorted[]) as $m | "\($b) \($m)"
+			  else empty end;
+		bus("usb"), bus("pcie")
+	' "$1" 2>/dev/null
 }
 
-# 打印目标文件中指定分组的内容（不含 "usb": { 这一行本身）
-group_body() {
-	awk -v grp="$1" '
-		BEGIN { out = 0 }
-		out == 0 {
-			if ($0 ~ "^        \"" grp "\": \\{[ \t]*$") { out = 1; next }
-			next
-		}
-		out == 1 {
-			if ($0 ~ /^        \}[,]?[ \t]*$/) exit
-			print
-		}
-	' "$TARGET"
+# 数据源中该型号的定义是否存在且为对象
+has_def() {
+	jq -e --arg g "$1" --arg m "$2" \
+		'(.modem_support // {})[$g][$m] | type == "object"' "$3" >/dev/null 2>&1
 }
 
-# 目标文件的指定分组里是否已有该型号（只在该分组内查找，避免跨组误判）
-has_model() {
-	group_body "$1" | grep -q "\"$2\"[ \t]*:[ \t]*{"
+# 把一批型号定义插到目标文件指定分组的最前面（新的在前，与历史行为一致），
+# 结果写入 $TMP；分组不存在时会在 modem_support 下新建该分组。
+# $1 = 数据源文件，$2 = [{"g":"usb","m":"rg200u-cn"}, ...]
+#
+# 同一数据源的型号合并成一次 jq：支持库只能整体重写，内置源有上百个型号，
+# 逐个型号各写一遍就是上百次全文件解析 + 落盘。
+inject_models() {
+	jq --indent 4 --slurpfile src "$1" --argjson pairs "$2" '
+		reduce $pairs[] as $p (.;
+			((.modem_support // {})[$p.g][$p.m]) as $old
+			| ($src[0].modem_support[$p.g][$p.m]) as $def
+			| if ($def | type) == "object" then
+				.modem_support = ((.modem_support // {})
+					| .[$p.g] = ( ( { ($p.m): $def } )
+						+ ( ((.[$p.g] // {}) | if $old == null then . else del(.[$p.m]) end) ) ))
+			  else . end)
+	' "$TARGET" > "$TMP" 2>/dev/null
 }
 
-# 从数据源中抽取该型号的完整定义块（保留原缩进）
-model_block() {
-	awk -v mdl="$1" -v grp="$2" '
-		BEGIN { out = 0; indent = 0; in_group = 0 }
-		/^        "(usb|pcie)": \{[ \t]*$/ {
-			in_group = ($0 ~ "^        \"" grp "\": \\{")
-			next
-		}
-		in_group && out == 0 {
-			p = index($0, "\"" mdl "\": {")
-			if (p > 1) {
-				out = 1
-				indent = p - 1
-				print
-			}
-			next
-		}
-		out == 1 {
-			pre = substr($0, 1, indent)
-			rest = substr($0, indent + 1)
-			if (pre ~ /^[ \t]*$/ && substr(rest, 1, 1) == "}") {
-				sub(/,[ \t]*$/, "")
-				print
-				exit
-			}
-			print
-		}
-	' "$3"
+# 写入计划里同一数据源是否已全部落库（用于批量写入后的复核）
+all_injected() {
+	[ -s "$1" ] || return 1
+	jq -e --argjson pairs "$2" '
+		.modem_support as $ms
+		| [ $pairs[] | ($ms[.g][.m] | type) == "object" ] | all
+	' "$1" >/dev/null 2>&1
 }
 
-# 把块插到目标文件指定分组的开头；返回值非 0 表示未找到该分组
-insert_block() {
-	awk -v grp="$1" -v blk="$2" '
-		BEGIN { done = 0; pending = 0 }
-		{
-			# 空分组："group": {} 同一行收尾（QModem 在没有任何该类型模组时
-			# 会生成空分组）。展开为带新型号的组。
-			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*\\}[ \t]*,?[ \t]*$") {
-				print "        \"" grp "\": {"
-				print blk
-				print "        }"
-				done = 1
-				next
-			}
-			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*$") {
-				print $0
-				pending = 1
-				done = 1
-				next
-			}
-			if (pending) {
-				# 空分组首个条目不能有尾随逗号。
-				if ($0 ~ /^        \}[,]?[ \t]*$/) print blk
-				else print blk ","
-				pending = 0
-			}
-			print
-		}
-		END { if (done == 0) exit 3 }
-	' "$TARGET" > "$TMP"
+# 结构校验：必须是合法 JSON 且 modem_support 为对象
+validate_json() {
+	[ -s "$1" ] || return 1
+	jq -e '(.modem_support | type) == "object"' "$1" >/dev/null 2>&1
 }
 
-# 写入后校验：文件非空、以 } 收尾、jsonfilter（若有）能解析出 modem_support
-validate() {
-	[ -s "$TARGET" ] || return 1
+# 落盘后的额外校验：保留原有的「以 } 收尾 + jsonfilter 可解析」检查
+validate_target() {
+	validate_json "$TARGET" || return 1
 	tail -n 1 "$TARGET" 2>/dev/null | grep -q '}[ \t]*$' || return 1
 	if command -v jsonfilter >/dev/null 2>&1; then
 		jsonfilter -i "$TARGET" -e '@.modem_support' 2>/dev/null | grep -q . || return 1
@@ -190,7 +181,18 @@ validate() {
 	return 0
 }
 
+cleanup_tmp() {
+	rm -f "$TMP" 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------- 前置检查
+if [ -z "$JQ" ]; then
+	ERR="缺少 jq 依赖，无法安全解析 $TARGET，请安装 jq 后重试"
+	log "$ERR"
+	emit 0
+	exit 1
+fi
+
 if [ ! -f "$EXTRA" ]; then
 	ERR="内置模组定义缺失：$EXTRA"
 	log "$ERR"
@@ -205,17 +207,30 @@ if [ ! -f "$TARGET" ]; then
 	exit 0
 fi
 
-if ! validate; then
+if ! validate_json "$TARGET"; then
 	ERR="现有支持库无法解析，已放弃修改：$TARGET"
 	log "$ERR"
 	emit 1
 	exit 1
 fi
 
+# 支持库现有型号清单：一次成型，后续用 grep -F 做字面判重（避免把型号名里的
+# 「.」当成正则通配符，也避免旧实现按缩进扫全文的漏判）
+EXISTING_FILE="${TMPDIR:-/tmp}/qmodem-existing.$$"
+EXISTING_LIST=''
+if list_models "$TARGET" > "$EXISTING_FILE" 2>/dev/null; then
+	EXISTING_LIST=$(cat "$EXISTING_FILE")
+else
+	rm -f "$EXISTING_FILE"
+	ERR="解析支持库失败：$TARGET"
+	log "$ERR"
+	emit 1
+	exit 1
+fi
+
 # ---------------------------------------------------------------- 遍历型号
-BACKED_UP=0
-# 先枚举用户源，再枚举插件预设。这里必须真正执行循环；heredoc 中的
-# 普通文本会被 read 当作型号，导致 status 为空且同步误报成功。
+# 先枚举用户自定义源，再枚举插件预设：同名型号以用户配置为准，预设中的
+# 同名条目会被记为 skipped（旧实现会把同一个型号注入两次并在列表里重复）。
 SOURCE_ENTRIES=$(
 	for _source in "$CUSTOM_DIR"/usb/*.json "$CUSTOM_DIR"/pcie/*.json; do
 		[ -f "$_source" ] || continue
@@ -228,68 +243,103 @@ SOURCE_ENTRIES=$(
 		printf '%s %s %s\n' "$_g" "$_m" "$EXTRA"
 	done
 )
+
+# 判断型号是否已在本次运行中处理过（跨数据源去重；APPLIED 每行一条 "组 型号"）
+seen_entry() {
+	[ -n "$APPLIED" ] || return 1
+	printf '%s\n' "$APPLIED" | grep -Fxq "$1 $2"
+}
+
+seen_or_existing() {
+	printf '%s\n' "$EXISTING_LIST" | grep -Fxq "$1 $2"
+}
+
 while read -r GROUP MODEL SOURCE; do
 	[ -n "$GROUP" ] && [ -n "$MODEL" ] || continue
 
-	if has_model "$GROUP" "$MODEL"; then
-		SKIPPED="$SKIPPED $MODEL"
+	# 型号名只允许安全字符：带空格或斜杠的键会让 "组 型号" 的行格式失真，
+	# 也不该出现在 QModem 的型号名里
+	case "$GROUP" in usb|pcie) ;; *) continue ;; esac
+	case "$MODEL" in
+		''|*[!a-zA-Z0-9._-]*)
+			log "型号名称不合法，跳过：$MODEL"
+			continue ;;
+	esac
+
+	if seen_or_existing "$GROUP" "$MODEL"; then
+		append_list "$GROUP/$MODEL" && continue
 		detail "$GROUP" "$MODEL" skipped
 		log "支持库已包含 $MODEL（$GROUP），跳过"
 		continue
 	fi
 
+	if seen_entry "$GROUP" "$MODEL"; then
+		append_list "$GROUP/$MODEL" && continue
+		detail "$GROUP" "$MODEL" skipped
+		log "多个数据源包含 $MODEL（$GROUP），保留先出现的定义"
+		continue
+	fi
+
+	if ! has_def "$GROUP" "$MODEL" "$SOURCE"; then
+		log "数据源 $SOURCE 中未能提取 $MODEL（$GROUP）的定义，跳过"
+		continue
+	fi
+
 	if [ "$STATUS_ONLY" = "1" ]; then
-		MISSING="$MISSING $MODEL"
+		entry="$GROUP/$MODEL"
+		in_list "$entry" "$MISSING" && continue
+		MISSING="$MISSING $entry"
 		detail "$GROUP" "$MODEL" missing
 		continue
 	fi
 
-	BLOCK=$(model_block "$MODEL" "$GROUP" "$SOURCE")
-	if [ -z "$BLOCK" ]; then
-		log "内置定义中未能提取 $MODEL，跳过"
-		continue
-	fi
-
-	# 首个需要写入的型号处取锁，避免开机服务与安装脚本并发改写同一文件。
-	# 锁目录内写 pid + 时间戳：上一轮同步若被强杀会残留空锁目录，
-	# 若不回收则后续同步会被永久误判为"另一个同步进程正在运行"。
+	# 首个需要写入的型号处取锁，避免开机服务与安装脚本并发改写同一文件
 	if [ "$LOCKED" = "0" ]; then
 		mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || true
-		if ! mkdir "$LOCKDIR" 2>/dev/null; then
-			_lock_pid=$(cat "$LOCKDIR/sync_pid" 2>/dev/null)
-			_lock_ts=$(cat "$LOCKDIR/sync_ts" 2>/dev/null)
-			_lock_age=$(( $(qm_now) - ${_lock_ts:-0} ))
-			_lock_live=0
-			if [ -n "$_lock_pid" ] && kill -0 "$_lock_pid" 2>/dev/null; then _lock_live=1; fi
-			if [ "$_lock_live" != "1" ] && [ "$_lock_age" -gt 600 ]; then
-				# 持有者已死或超时：强抢锁，避免同步永久卡死
-				rm -rf "$LOCKDIR" 2>/dev/null
-				mkdir "$LOCKDIR" 2>/dev/null || {
-					ERR="无法获取同步锁（残留锁清理失败）"
-					log "$ERR"
-					emit 1
-					exit 1
-				}
-			elif [ "$_lock_live" = "1" ]; then
-				ERR="另一个同步进程正在运行，已跳过本次写入"
-				log "$ERR"
-				emit 1
-				exit 0
-			else
-				rm -rf "$LOCKDIR" 2>/dev/null
-				mkdir "$LOCKDIR" 2>/dev/null || {
-					ERR="无法获取同步锁（残留锁清理失败）"
-					log "$ERR"
-					emit 1
-					exit 1
-				}
+		_try=0
+		while [ "$_try" -lt "$LOCK_RETRY" ]; do
+			if mkdir "$LOCKDIR" 2>/dev/null; then
+				LOCKED=1
+				break
 			fi
+			# 持锁进程已经消失（异常断电、被 kill）时清掉残留锁。
+			# pid 文件格式与 /usr/sbin/qmodem-support-custom 共用："<pid> <epoch>"，
+			# 只取第一段，避免带 epoch 的锁被当成"无法解析"而永久卡住同步。
+			#
+			# pid 文件缺失或不可解析同样要能回收：3.0.0-4 及更早的锁写的是
+			# sync_pid / sync_ts，升级时若残留（断电、kill -9），按旧逻辑会一直
+			# 报"另一个同步进程正在运行"。这类锁给 LOCK_GRACE 秒宽限——刚
+			# mkdir 成功、尚未写 pid 的进程不会被误抢。
+			_raw=$(cat "$LOCKDIR/pid" 2>/dev/null)
+			_pid=${_raw%% *}
+			case "$_pid" in
+				''|*[!0-9]*)
+					_age=$(( $(date +%s) - $(stat -c %Y "$LOCKDIR" 2>/dev/null || echo 0) ))
+					if [ "$_age" -gt "$LOCK_GRACE" ]; then
+						rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
+						rmdir "$LOCKDIR" 2>/dev/null || true
+						[ -d "$LOCKDIR" ] || continue
+					fi
+					;;
+				*)
+					if ! kill -0 "$_pid" 2>/dev/null; then
+						rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
+						rmdir "$LOCKDIR" 2>/dev/null || true
+						[ -d "$LOCKDIR" ] || continue
+					fi ;;
+			esac
+			_try=$((_try + 1))
+			sleep 1
+		done
+		if [ "$LOCKED" = "0" ]; then
+			ERR="另一个同步进程正在运行，已跳过本次写入"
+			log "$ERR"
+			cleanup_tmp
+			emit 1
+			exit 0
 		fi
-		LOCKED=1
-		printf '%s' "$$" > "$LOCKDIR/sync_pid" 2>/dev/null
-		qm_now > "$LOCKDIR/sync_ts" 2>/dev/null
-		# 锁目录现在非空，trap 必须用 rm -rf（rmdir 只能删空目录）
-		trap 'rm -rf "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+		printf '%s %s\n' "$$" "$(date +%s)" > "$LOCKDIR/pid" 2>/dev/null || true
+		trap 'cleanup_tmp; rm -f "$PLAN_FILE" "$GROUPS_FILE" 2>/dev/null; rm -f "$LOCKDIR/pid" 2>/dev/null; rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
 	fi
 
 	if [ "$BACKED_UP" = "0" ]; then
@@ -297,36 +347,88 @@ while read -r GROUP MODEL SOURCE; do
 		BACKED_UP=1
 	fi
 
-	if ! insert_block "$GROUP" "$BLOCK"; then
-		rm -f "$TMP"
-		ERR="在 $TARGET 中未找到分组 $GROUP，已放弃修改"
-		log "$ERR"
-		emit 1
-		exit 1
+	# 只登记写入计划：同一数据源的型号在遍历结束后一次性合并，避免上百次
+	# 全文件重写。记入 APPLIED 是为了让后续型号（含其它数据源的重复项）去重。
+	printf '%s\t%s\t%s\n' "$GROUP" "$MODEL" "$SOURCE" >> "$PLAN_FILE"
+	if [ -n "$APPLIED" ]; then
+		APPLIED="$APPLIED
+$GROUP $MODEL"
+	else
+		APPLIED="$GROUP $MODEL"
 	fi
-
-	# 用 cat 覆盖而不是 mv，保留原文件的 inode 与权限位
-	cat "$TMP" > "$TARGET" 2>/dev/null || true
-	rm -f "$TMP"
-
-	if ! validate; then
-		[ -f "$BACKUP" ] && cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
-		ERR="写入后校验失败，已回滚：$TARGET"
-		log "$ERR"
-		emit 1
-		exit 1
-	fi
-
-	ADDED="$ADDED $MODEL"
-	detail "$GROUP" "$MODEL" added
-	log "已向支持库（$GROUP）注入 $MODEL，原文件备份为 $BACKUP"
 done <<EOF
 $SOURCE_ENTRIES
 EOF
 
+cleanup_tmp
+[ -f "$EXISTING_FILE" ] && rm -f "$EXISTING_FILE"
+
+# ---------------------------------------------------------------- 批量写入
+# 支持库只能整体重写，因此按数据源聚合：一个源里的全部型号共用一次 jq。
+if [ -s "$PLAN_FILE" ]; then
+	if ! jq -R -s 'split("\n") | map(select(length > 0) | split("\t"))
+		| group_by(.[2])
+		| map({ src: .[0][2], pairs: map({ g: .[0], m: .[1] }) })' \
+		"$PLAN_FILE" > "$GROUPS_FILE" 2>/dev/null || [ ! -s "$GROUPS_FILE" ]; then
+		rm -f "$PLAN_FILE" "$GROUPS_FILE"
+		ERR="生成写入计划失败，已放弃修改：$TARGET"
+		log "$ERR"
+		emit 1
+		exit 1
+	fi
+
+	_batch_n=$(jq 'length' "$GROUPS_FILE" 2>/dev/null)
+	case "$_batch_n" in ''|*[!0-9]*) _batch_n=0 ;; esac
+	_batch_i=0
+	while [ "$_batch_i" -lt "$_batch_n" ]; do
+		_batch_src=$(jq -r ".[$_batch_i].src" "$GROUPS_FILE" 2>/dev/null)
+		_batch_pairs=$(jq -c ".[$_batch_i].pairs" "$GROUPS_FILE" 2>/dev/null)
+		_batch_i=$((_batch_i + 1))
+
+		if [ -z "$_batch_src" ] || [ -z "$_batch_pairs" ]; then
+			_batch_err="写入计划损坏，已放弃修改：$TARGET"
+		elif ! inject_models "$_batch_src" "$_batch_pairs"; then
+			_batch_err="合并 $_batch_src 的型号定义时 jq 报错，已回滚：$TARGET"
+		elif ! validate_json "$TMP"; then
+			_batch_err="生成的临时文件无效，已回滚：$TARGET"
+		elif ! all_injected "$TMP" "$_batch_pairs"; then
+			_batch_err="临时文件缺少预期型号（$_batch_src），已回滚：$TARGET"
+		elif ! cat "$TMP" > "$TARGET" 2>/dev/null; then
+			_batch_err="写入失败（文件系统只读？），已回滚：$TARGET"
+		elif ! validate_target; then
+			_batch_err="写入后校验失败，已回滚：$TARGET"
+		else
+			_batch_err=''
+		fi
+		cleanup_tmp
+
+		if [ -n "$_batch_err" ]; then
+			rm -f "$PLAN_FILE" "$GROUPS_FILE"
+			if [ "$BACKED_UP" = "1" ] && [ -f "$BACKUP" ]; then
+				cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
+			fi
+			ERR="$_batch_err"
+			log "$ERR"
+			emit 1
+			exit 1
+		fi
+	done
+	rm -f "$GROUPS_FILE"
+
+	# 全部批次写入成功后才登记新增型号：中途失败已经回滚，不能报告成已注入
+	while IFS="$(printf '\t')" read -r _b_g _b_m _b_s; do
+		[ -n "$_b_g" ] && [ -n "$_b_m" ] || continue
+		ADDED="$ADDED $_b_g/$_b_m"
+		detail "$_b_g" "$_b_m" added
+		log "已向支持库（$_b_g）注入 $_b_m，原文件备份为 $BACKUP"
+	done < "$PLAN_FILE"
+fi
+rm -f "$PLAN_FILE"
+
 # ---------------------------------------------------------------- 结果输出
 if [ -n "$ADDED" ]; then
-	log "本次新增 $(echo "$ADDED" | wc -w | tr -d ' ') 个型号；QModem 需重启或重启设备后生效"
+	# 列表元素形如 usb/rg200u-cn，不含空格，wc -w 即为型号数
+	log "本次新增 $(printf '%s\n' "$ADDED" | wc -w | tr -d ' ') 个型号；QModem 需重启或重启设备后生效"
 fi
 
 emit 1

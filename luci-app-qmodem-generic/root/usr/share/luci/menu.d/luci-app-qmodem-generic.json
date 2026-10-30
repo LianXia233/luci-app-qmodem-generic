@@ -45,6 +45,8 @@
 		"action": { "type": "view", "path": "qmodem-generic/system" }
 	},
 	"admin/modem/qmodem-generic/terminal": {
+		"title": "AT Console",
+		"order": 55,
 		"action": { "type": "view", "path": "qmodem-generic/terminal" }
 	},
 	"admin/modem/qmodem-generic/advanced": {
@@ -53,6 +55,8 @@
 		"action": { "type": "view", "path": "qmodem-generic/advanced" }
 	},
 	"admin/modem/qmodem-generic/settings": {
+		"title": "Settings",
+		"order": 70,
 		"action": { "type": "view", "path": "qmodem-generic/settings" },
 		"depends": {
 			"acl": [ "luci-app-qmodem-generic" ]

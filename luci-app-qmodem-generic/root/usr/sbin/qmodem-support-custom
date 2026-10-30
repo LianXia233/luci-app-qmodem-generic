@@ -27,6 +27,53 @@ EXTRA="$QMODEM_EXTRA_SUPPORT_FILE"
 LOCKDIR="$QMODEM_SUPPORT_LOCKDIR"
 [ -n "$LOCKDIR" ] || LOCKDIR=/var/run/qmodem-modem-support.lock
 
+# 与 /usr/sbin/qmodem-modem-support 共用同一把锁，协议必须完全一致：
+# 锁目录里的 pid 文件写 "<pid> <epoch>"，两边都按第一段判断持锁进程是否
+# 还存在；只认单一格式会让对方把对方的正常锁误判成"无法解析"而永久卡住。
+qm_sup_stale() {
+	_raw=$(cat "$LOCKDIR/pid" 2>/dev/null)
+	_pid=${_raw%% *}
+	case "$_pid" in
+		''|*[!0-9]*)
+			# pid 文件缺失/不可解析：旧版本（3.0.0-4 及更早）只 mkdir 不写 pid，
+			# 崩溃残留的空目录在这里会被判成"同步进行中"而永久卡住。给
+			# LOCK_GRACE 秒宽限，避免抢走刚 mkdir 尚未写 pid 的正常锁。
+			_age=$(( $(date +%s) - $(stat -c %Y "$LOCKDIR" 2>/dev/null || echo 0) ))
+			[ "$_age" -gt "${QMODEM_SUPPORT_LOCK_GRACE:-5}" ] || return 1
+			;;
+		*)
+			kill -0 "$_pid" 2>/dev/null && return 1
+			;;
+	esac
+	rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
+	rmdir "$LOCKDIR" 2>/dev/null
+	[ -d "$LOCKDIR" ] && return 1
+	return 0
+}
+
+qm_sup_lock() {
+	_try=0
+	while [ "$_try" -lt "${QMODEM_SUPPORT_LOCK_RETRY:-5}" ]; do
+		if mkdir "$LOCKDIR" 2>/dev/null; then
+			printf '%s %s\n' "$$" "$(date +%s)" > "$LOCKDIR/pid" 2>/dev/null || true
+			return 0
+		fi
+		# 上一次同步进程崩溃留下的残留锁：回收后立刻重试，不消耗等待次数，
+		# 否则锁明明已经破掉，这一轮却直接返回"同步进行中"
+		if qm_sup_stale; then
+			continue
+		fi
+		_try=$((_try + 1))
+		[ "$_try" -lt "${QMODEM_SUPPORT_LOCK_RETRY:-5}" ] && sleep 1
+	done
+	return 1
+}
+
+qm_sup_unlock() {
+	rm -f "$LOCKDIR/pid" 2>/dev/null || true
+	rmdir "$LOCKDIR" 2>/dev/null || true
+}
+
 has_entry() {
 	jq -e --arg bus "$2" --arg model "$3" '.modem_support[$bus] | type == "object" and has($model)' "$1" >/dev/null 2>&1
 }
@@ -35,26 +82,30 @@ matches_source() {
 		'$official[0].modem_support[$bus][$model] == $source[0].modem_support[$bus][$model]' >/dev/null 2>&1
 }
 apply_custom() {
-	[ -f "$SUPPORT" ] && jq -e '.modem_support.usb and .modem_support.pcie' "$SUPPORT" >/dev/null 2>&1 ||
-		{ rm -f "$_tmp"; error 'QModem 支持库不存在或 JSON 格式错误'; return; }
+	# jq 缺失时必须直说：早先的实现把「jq 不存在」和「支持库损坏」混成同一条
+	# 报错，用户照着提示去重装 QModem 也解决不了问题。
+	command -v jq >/dev/null 2>&1 || { rm -f "$_tmp"; error '缺少 jq 依赖，无法写入支持库，请先安装 jq'; return; }
+	[ -f "$SUPPORT" ] || { rm -f "$_tmp"; error "QModem 支持库不存在：$SUPPORT"; return; }
+	jq -e '.modem_support.usb and .modem_support.pcie' "$SUPPORT" >/dev/null 2>&1 ||
+		{ rm -f "$_tmp"; error "QModem 支持库 JSON 格式错误：$SUPPORT"; return; }
 	mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || { rm -f "$_tmp"; error '无法创建锁目录'; return; }
-	mkdir "$LOCKDIR" 2>/dev/null || { rm -f "$_tmp"; error '支持库同步正在进行，请稍后重试'; return; }
+	qm_sup_lock || { rm -f "$_tmp"; error '支持库同步正在进行，请稍后重试'; return; }
 	# 不触碰其它配置项，编辑期间拒绝并发同步；正常/失败均释放锁
 	_original=''
 	[ -f "$_dest" ] && _original="$_dest"
 	if [ -z "$_original" ] && [ -f "$EXTRA" ] && has_entry "$EXTRA" "$_bus" "$_model"; then _original="$EXTRA"; fi
 	if [ "$_edit" = 1 ] && [ -z "$_original" ]; then
 		error '只能编辑自定义库中已收录的型号，不能修改 QModem 官方原生型号'
-		rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+		rm -f "$_tmp"; qm_sup_unlock; return
 	fi
 	if [ "$_edit" != 1 ] && [ -n "$_original" ]; then
 		error '自定义库已存在该型号，请选择编辑'
-		rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+		rm -f "$_tmp"; qm_sup_unlock; return
 	fi
 	if has_entry "$SUPPORT" "$_bus" "$_model"; then
 		if [ -z "$_original" ] || ! matches_source "$SUPPORT" "$_original" "$_bus" "$_model"; then
 			error '官方支持库条目与自定义源不同，禁止覆盖，请先检查冲突'
-			rm -f "$_tmp"; rmdir "$LOCKDIR"; return
+			rm -f "$_tmp"; qm_sup_unlock; return
 		fi
 	fi
 	_target_tmp="$SUPPORT.custom.$$"
@@ -62,30 +113,30 @@ apply_custom() {
 		'.modem_support[$bus][$model] = $data[0].modem_support[$bus][$model]' "$SUPPORT" > "$_target_tmp" 2>/dev/null ||
 		! jq -e --arg bus "$_bus" --arg model "$_model" \
 		'.modem_support[$bus][$model].modes | type == "array"' "$_target_tmp" >/dev/null 2>&1; then
-		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		rm -f "$_tmp" "$_target_tmp"; qm_sup_unlock
 		error '生成支持库失败，原始文件未更改'; return
 	fi
 	# 备份是更新的前置条件；原来 QModem 的其它型号都由 jq 原样保留
 	if ! cp -p "$SUPPORT" "$SUPPORT.bak" 2>/dev/null; then
-		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		rm -f "$_tmp" "$_target_tmp"; qm_sup_unlock
 		error '无法备份 QModem 支持库，已取消'; return
 	fi
 	if [ -f "$_dest" ] && ! cp -p "$_dest" "$_dest.bak" 2>/dev/null; then
-		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		rm -f "$_tmp" "$_target_tmp"; qm_sup_unlock
 		error '无法备份自定义 JSON，已取消'; return
 	fi
 	if ! cat "$_target_tmp" > "$SUPPORT" 2>/dev/null ||
 		! jq -e '.modem_support.usb and .modem_support.pcie' "$SUPPORT" >/dev/null 2>&1; then
 		cp -p "$SUPPORT.bak" "$SUPPORT" 2>/dev/null || true
-		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		rm -f "$_tmp" "$_target_tmp"; qm_sup_unlock
 		error '更新 QModem 支持库失败，已尝试回滚备份'; return
 	fi
 	if ! mv -f "$_tmp" "$_dest" 2>/dev/null; then
 		cp -p "$SUPPORT.bak" "$SUPPORT" 2>/dev/null || true
-		rm -f "$_tmp" "$_target_tmp"; rmdir "$LOCKDIR"
+		rm -f "$_tmp" "$_target_tmp"; qm_sup_unlock
 		error '保存自定义 JSON 失败，已尝试恢复 QModem 备份'; return
 	fi
-	rm -f "$_target_tmp"; rmdir "$LOCKDIR"
+	rm -f "$_target_tmp"; qm_sup_unlock
 	printf '{"success":true,"bus":"%s","model":"%s","updated":%s,"synced":true}\n' "$_bus" "$_model" "$_edit"
 }
 

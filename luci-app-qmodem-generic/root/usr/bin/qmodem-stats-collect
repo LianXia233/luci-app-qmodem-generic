@@ -59,46 +59,45 @@ fi
 
 # ---- 工具函数 -------------------------------------------------------------
 
-# 分天采样锁：后台循环与 rpcd 补采都可能触发 run，无锁并发时双方基于
-# 同一旧基准计算增量，后写者覆盖前写者（丢失更新）。用 mkdir 原子加锁，
-# 与 qmodem-stats-loop 的锁互不冲突。
-collect_lock() {
-	_qm_lockdir="/tmp/qmodem-stats-collect.${1}.lock"
-	mkdir -p /tmp 2>/dev/null || true
-	if mkdir "$_qm_lockdir" 2>/dev/null; then
-		printf '%s\n' "$$" > "$_qm_lockdir/pid" 2>/dev/null
-		return 0
-	fi
-	_qm_pid=$(cat "$_qm_lockdir/pid" 2>/dev/null)
-	if [ -n "$_qm_pid" ] && ! kill -0 "$_qm_pid" 2>/dev/null; then
-		rm -rf "$_qm_lockdir" 2>/dev/null
-		mkdir "$_qm_lockdir" 2>/dev/null || return 1
-		printf '%s\n' "$$" > "$_qm_lockdir/pid" 2>/dev/null
-		return 0
-	fi
-	return 1
+# epoch 秒 → 中国时区（UTC+8）的「日序号」，即该日距 1970-01-01 的天数
+cn_day_index() {
+	awk -v t="$1" 'BEGIN{
+		i = t + 28800
+		if (i >= 0) print int(i / 86400)
+		else print int((i - 86399) / 86400)
+	}'
 }
 
-collect_unlock() {
-	_qm_lockdir="/tmp/qmodem-stats-collect.${1}.lock"
-	[ "$(cat "$_qm_lockdir/pid" 2>/dev/null)" = "$$" ] && rm -rf "$_qm_lockdir" 2>/dev/null
-	return 0
-}
-
+# epoch 秒 → 中国时区日期 YYYY-MM-DD。
+# 只用整数运算，不调用 awk 的 strftime/mktime：busybox awk 没有 mktime，
+# mawk 两个都没有；一旦静默失败，跨日归属和保留期裁剪就会算错。
+# 日期换算用 civil_from_days 算法，已对照参考实现全量校验。
 cn_day_of() {
-	# epoch 秒 → 中国时区日期 YYYY-MM-DD（awk strftime 第三参 1 = UTC，避免依赖系统时区）
-	awk -v t="$1" 'BEGIN{print strftime("%Y-%m-%d", t + 28800, 1)}'
+	awk -v t="$1" '
+		BEGIN {
+			i = t + 28800
+			if (i >= 0) z = int(i / 86400); else z = int((i - 86399) / 86400)
+			z += 719468
+			era = int((z >= 0 ? z : z - 146096) / 146097)
+			doe = z - era * 146097
+			yoe = int((doe - int(doe / 1460) + int(doe / 36524) - int(doe / 146096)) / 365)
+			y = yoe + era * 400
+			doy = doe - (365 * yoe + int(yoe / 4) - int(yoe / 100))
+			mp = int((5 * doy + 2) / 153)
+			d = doy - int((153 * mp + 2) / 5) + 1
+			m = mp + (mp < 10 ? 3 : -9)
+			y = y + (m <= 2 ? 1 : 0)
+			printf "%04d-%02d-%02d\n", y, m, d
+		}'
 }
 
 cn_span_days() {
 	# 两个时刻之间相差的中国日期天数（同日为 0）
 	awk -v a="$1" -v b="$2" 'BEGIN{
-		da = strftime("%Y-%m-%d", a + 28800, 1);
-		db = strftime("%Y-%m-%d", b + 28800, 1);
-		if (da == db) { print 0; exit }
-		y1 = substr(da,1,4)+0; m1 = substr(da,6,2)+0; d1 = substr(da,9,2)+0;
-		y2 = substr(db,1,4)+0; m2 = substr(db,6,2)+0; d2 = substr(db,9,2)+0;
-		print int((mktime(y2" "m2" "d2" 12 0 0") - mktime(y1" "m1" "d1" 12 0 0")) / 86400);
+		sa = a + 28800; sb = b + 28800
+		if (sa >= 0) ia = int(sa / 86400); else ia = int((sa - 86399) / 86400)
+		if (sb >= 0) ib = int(sb / 86400); else ib = int((sb - 86399) / 86400)
+		print ib - ia
 	}'
 }
 
@@ -147,7 +146,8 @@ load_stats() {
 
 save_stats() {
 	now="$2"
-	tmp="${1}.tmp"
+	tmp="${1}.tmp.$$"
+	tmp2="${1}.tmp2.$$"
 	{
 		echo "last_ts=$now"
 		echo "last_rx=$last_rx"
@@ -161,7 +161,7 @@ save_stats() {
 			eval "v=\"\${${vp}_tx}\""; is_num "$v" && echo "dayx_${d}=$v"
 		done
 	} > "$tmp"
-	cutoff=$(awk -v t="$now" -v k="$KEEP_DAYS" 'BEGIN{print strftime("%Y-%m-%d", t + 28800 - k * 86400, 1)}')
+	cutoff=$(cn_day_of "$((now - KEEP_DAYS * 86400))")
 	{
 		grep -Ev '^day' "$tmp"
 		while IFS='=' read -r key val; do
@@ -176,8 +176,8 @@ save_stats() {
 					;;
 			esac
 		done < "$tmp"
-	} > "${tmp}.2"
-	mv "${tmp}.2" "$1"
+	} > "$tmp2"
+	mv "$tmp2" "$1"
 	rm -f "$tmp"
 }
 
@@ -195,6 +195,71 @@ add_delta() {
 	case " $day " in *" $_d "*) ;; *) day="$day $_d" ;; esac
 	total_rx=$((total_rx + _dr))
 	total_tx=$((total_tx + _dt))
+}
+
+# ---- 互斥锁 ---------------------------------------------------------------
+# 「读计数器 → 算增量 → 落盘」必须整体互斥：后台 60 秒循环和 rpcd 在数据
+# 偏旧时拉起的补采进程会同时跑 run，两边都按同一份基准算增量、再各自写回，
+# 结果是流量被记两次、且 ${FILE}.tmp 互相覆盖。这里用 mkdir 原子性做锁，
+# pid + 时间戳写在锁内，便于回收崩溃残留的锁。
+
+# 锁按模组节隔离：不同 section 各写各的 .stats 文件，互不相干。共用一把全局锁
+# 会让多模组并行采样退化成串行（第 3 个可能等满重试次数直接跳过），A 模组采样
+# 期间点 B 模组的清零也会被误判为 busy。LOCK_DIR 由 do_run / do_reset 按节设置。
+LOCK_BASE="${QMODEM_STATS_LOCKDIR:-/var/lock/qmodem-stats.lock}"
+LOCK_DIR=''
+LOCK_RETRY="${QMODEM_STATS_LOCK_RETRY:-10}"
+# 锁目录已存在但 pid 文件不可解析时，超过这个秒数才认定为崩溃残留
+LOCK_GRACE=5
+HELD_LOCK=0
+
+lock_owner_dead() {
+	# 返回 0 表示「可回收」。两种残留：
+	#   1) pid 文件缺失/不可解析（崩溃在 mkdir 与写 pid 之间，或旧版遗留）；
+	#      刚创建的锁不抢，避免与尚未写入 pid 的进程双持。
+	#   2) pid 可信但进程已不存在。
+	# 注意：pid 存活时一律不回收。持锁时间长不代表可以抢占——一次慢采样
+	# （ubus 8 秒超时叠加 AT 重试）可能超过任何固定阈值，抢锁会造成双写。
+	_p=''; _t=''
+	[ -f "$LOCK_DIR/pid" ] && read -r _p _t < "$LOCK_DIR/pid" 2>/dev/null
+	case "$_p" in
+		''|*[!0-9]*)
+			_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0) ))
+			[ "$_age" -gt "$LOCK_GRACE" ]
+			return
+			;;
+	esac
+	kill -0 "$_p" 2>/dev/null && return 1
+	return 0
+}
+
+acquire_lock() {
+	local _try=0
+	mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
+	while [ "$_try" -lt "$LOCK_RETRY" ]; do
+		if mkdir "$LOCK_DIR" 2>/dev/null; then
+			printf '%s %s\n' "$$" "$(date +%s)" > "$LOCK_DIR/pid" 2>/dev/null || true
+			HELD_LOCK=1
+			trap 'release_lock' EXIT INT TERM
+			return 0
+		fi
+		if lock_owner_dead; then
+			rm -f "$LOCK_DIR/pid" "$LOCK_DIR/sync_pid" "$LOCK_DIR/sync_ts" 2>/dev/null || true
+			rmdir "$LOCK_DIR" 2>/dev/null || true
+			# 目录真的没了才免计次重试；否则退回普通等待，避免忙等死循环
+			[ -d "$LOCK_DIR" ] || continue
+		fi
+		_try=$((_try + 1))
+		sleep 1
+	done
+	return 1
+}
+
+release_lock() {
+	[ "$HELD_LOCK" = 1 ] || return 0
+	HELD_LOCK=0
+	rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+	rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 
 # ---- 当前计数器读取 -------------------------------------------------------
@@ -236,7 +301,16 @@ do_run() {
 	config_section="$1"
 	mkdir -p "$STATS_DIR"
 	FILE="$STATS_DIR/${config_section}.stats"
-	[ -f "$FILE" ] && load_stats "$FILE"
+	LOCK_DIR="$LOCK_BASE.$config_section"
+
+	# 取不到锁说明已有采集进程在写同一份文件：本次只输出当前值，绝不重复计数
+	if ! acquire_lock; then
+		do_show "$config_section"
+		return 0
+	fi
+
+	# 必须在锁内 load：等锁期间另一个进程可能已经推进了基准
+	load_stats "$FILE"
 	now=$(date +%s)
 
 	# 首次运行（无状态文件）时 load_stats 未执行，这里统一补齐默认值，
@@ -244,37 +318,36 @@ do_run() {
 	last_ts=${last_ts:-0}; last_rx=${last_rx:-0}; last_tx=${last_tx:-0}
 	total_rx=${total_rx:-0}; total_tx=${total_tx:-0}; swapped=${swapped:-0}
 
-	# 后台循环与 rpcd 补采可能并发触发 run：拿不到锁说明已有实例在写，
-	# 本轮直接跳过采样，只输出现有统计（show 是纯读）。
-	collect_lock "$config_section" || { do_show "$config_section"; return 0; }
-
 	if read_counters "$config_section"; then
-		# 计数器只返回单边值时兜底为上一次基准，避免空值参与算术导致整轮崩溃
+		# 只有一侧计数器可读时补齐不可读侧：必须沿用上一次基准，绝不能写 0。
+		# 写成 0 会让本轮的 last_rx 落盘成 0，等计数器恢复可读时把模组整个
+		# 生命周期的累计流量当成「本次新增」记进当天（与 reset 里同一类错误）。
 		is_num "$cur_rx" || cur_rx=$last_rx
 		is_num "$cur_tx" || cur_tx=$last_tx
 		today=$(cn_day_of "$now")
 
 		if [ "$last_ts" -gt 0 ]; then
 			last_day=$(cn_day_of "$last_ts")
+			# 计数器回绕/重置（模组重拨、驱动重置）时，新值小于旧值 →
+			# 增量从 0 起算，新计数值即为本轮新增流量。
 			dr=$((cur_rx - last_rx)); [ "$dr" -lt 0 ] && dr=$cur_rx
 			dt=$((cur_tx - last_tx)); [ "$dt" -lt 0 ] && dt=$cur_tx
+
 			if [ "$today" = "$last_day" ]; then
-			add_delta "$today" "$dr" "$dt"
+				add_delta "$today" "$dr" "$dt"
 			else
-				# 跨日界：采样间隔内的流量无法精确归属到具体某天，
-				# 均匀拆分到跨越的各天（60 秒采样周期下极少发生）。
+				# 跨日界：采样间隔内的流量无法精确归属，按跨越的天数均分，
+				# 余数记在今天，保证各天之和恰好等于本次增量。
 				n=$(cn_span_days "$last_ts" "$now")
 				[ "$n" -ge 1 ] || n=1
-				i=0
-				while [ "$i" -lt "$n" ]; do
-					d_i=$(cn_day_of $((now - (n - i - 1) * 86400)))
-					if [ "$i" -eq 0 ]; then
-						add_delta "$d_i" "$dr" "$dt"
-					else
-						add_delta "$d_i" 0 0
-					fi
-					i=$((i + 1))
+				_pr=$((dr / n))
+				_pt=$((dt / n))
+				_i=1
+				while [ "$_i" -lt "$n" ]; do
+					add_delta "$(cn_day_of $((now - _i * 86400)))" "$_pr" "$_pt"
+					_i=$((_i + 1))
 				done
+				add_delta "$today" $((dr - _pr * (n - 1))) $((dt - _pt * (n - 1)))
 			fi
 		else
 			: # 首次采样：只记基准点，不计增量
@@ -284,8 +357,7 @@ do_run() {
 		last_rx=$cur_rx
 		last_tx=$cur_tx
 
-		# 方向自动识别：累计流量足够大且 tx > rx，视为该驱动上下行相反。
-		# 采集器只置位 swapped 标记，交换在前端展示层完成（daily_stats 的 swapped 字段）。
+		# 方向自动识别：累计流量足够大且 tx > rx，视为该驱动上下行相反
 		if [ "$total_rx" -gt "$SWAP_MIN_BYTES" ] && [ "$total_tx" -gt "$total_rx" ]; then
 			swapped=1
 		fi
@@ -293,7 +365,7 @@ do_run() {
 		save_stats "$FILE" "$now"
 	fi
 
-	collect_unlock "$config_section"
+	release_lock
 	do_show "$config_section"
 }
 
@@ -339,27 +411,44 @@ do_reset() {
 	config_section="$1"
 	FILE="$STATS_DIR/${config_section}.stats"
 	mkdir -p "$STATS_DIR"
-	# 与 run 共用同一把锁：清零与采样并发时以先到者为准，避免互相覆盖
-	collect_lock "$config_section" || {
-		printf '{"config_section":"%s","result":0,"success":false,"error":"stats busy"}\n' "$config_section"
-		return 0
-	}
-	# 保留当前计数器基准：清零后下一轮采样不会把（清零前的）差额误记为新流量
-	read_counters "$config_section" || true
-	is_num "$cur_rx" || cur_rx=0
-	is_num "$cur_tx" || cur_tx=0
+	LOCK_DIR="$LOCK_BASE.$config_section"
+
+	if ! acquire_lock; then
+		json_init
+		json_add_string config_section "$config_section"
+		json_add_boolean result 0
+		json_add_boolean success false
+		json_add_string error "another stats collection is running, try again later"
+		json_dump
+		return 1
+	fi
+
+	# 默认沿用文件里的基准：读不到模组计数器时（modem 失联、AT 口忙、超时），
+	# 绝不能把基准写成 0 —— 否则下一次采样会把模组自开机以来的全部累计流量
+	# 当成「本次新增」记进今天，图表上表现为一个巨大的尖峰。
+	base_rx=0
+	base_tx=0
+	load_stats "$FILE"
+	base_rx=$last_rx
+	base_tx=$last_tx
+	if read_counters "$config_section"; then
+		is_num "$cur_rx" || cur_rx=$base_rx
+		is_num "$cur_tx" || cur_tx=$base_tx
+		base_rx=$cur_rx
+		base_tx=$cur_tx
+	fi
+
 	now=$(date +%s)
 	{
 		echo "last_ts=$now"
-		echo "last_rx=${cur_rx:-0}"
-		echo "last_tx=${cur_tx:-0}"
+		echo "last_rx=$base_rx"
+		echo "last_tx=$base_tx"
 		echo "total_rx=0"
 		echo "total_tx=0"
 		echo "swapped=0"
-	} > "$FILE.tmp"
-	mv "$FILE.tmp" "$FILE"
-
-	collect_unlock "$config_section"
+	} > "$FILE.tmp.$$"
+	mv "$FILE.tmp.$$" "$FILE"
+	release_lock
 
 	json_init
 	json_add_string config_section "$config_section"

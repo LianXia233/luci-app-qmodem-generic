@@ -33,8 +33,18 @@ qm_init_dirs() {
 }
 
 # 数据偏旧时在后台补采一次（fire-and-forget，不影响本 RPC 返回）
+# 注意：页面每几秒轮询一次，这里必须自带节流，否则会不断堆叠采集进程；
+# 采集器内部有 mkdir 锁，锁被占用时它会直接跳过，不会重复计数。
 queue_collect() {
 	[ -f "$COLLECT_BIN" ] || return 0
+	_mark="/tmp/qmodem-collect-$1.stamp"
+	_now=$(date +%s)
+	if [ -f "$_mark" ]; then
+		_last=$(cat "$_mark" 2>/dev/null)
+		case "$_last" in ''|*[!0-9]*) _last=0 ;; esac
+		[ $((_now - _last)) -lt "${QMODEM_STATS_COLLECT_GAP:-30}" ] && return 0
+	fi
+	printf '%s\n' "$_now" > "$_mark" 2>/dev/null || true
 	( sh "$COLLECT_BIN" run "$1" >/dev/null 2>&1 & ) 2>/dev/null
 	return 0
 }
@@ -81,7 +91,21 @@ case "$1" in
 			stats_history)
 				# 语义不变：只读已存储的统计，从不采样
 				if [ -f "$COLLECT_BIN" ]; then
-					sh "$COLLECT_BIN" show "$config_section"
+					_out=$(sh "$COLLECT_BIN" show "$config_section" 2>/dev/null)
+					# 只转发结构完整的 JSON：采集器异常中断时 stdout 可能是
+					# 半截对象，以 { 开头并不代表能解析
+					case "$_out" in
+						\{*)
+							if printf '%s' "$_out" | jsonfilter -e '@.config_section' >/dev/null 2>&1; then
+								printf '%s\n' "$_out"
+							else
+								printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"
+							fi
+							;;
+						*)
+							printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"
+							;;
+					esac
 				else
 					printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"
 				fi

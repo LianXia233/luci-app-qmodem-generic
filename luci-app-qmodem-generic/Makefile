@@ -3,7 +3,10 @@ include $(TOPDIR)/rules.mk
 # 本项目是 QModem 的通用美化版 Web UI：全部数据与控制动作直连 QModem 官方的
 # `qmodem` / `qmodem.sms` / `qmodem.uplink` ubus 接口（与官方 luci-app-qmodem-next
 # 相同的接线方式），对任意 QModem 支持的模组生效，不绑定特定型号。
-# 本包不再携带任何私有 rpcd 插件或后台守护进程，运行时依赖 qmodem。
+# 本包不接管 modem 数据面，只是读取与展示官方接口。为补齐官方没有的两个能力，
+# 随包附带自有组件：rpcd 插件 qmodem_stats（分天流量）+ 60 秒周期采样服务，
+# rpcd 插件 qmodem_support（自定义模组支持库）+ 开机执行一次的合并服务。
+# 运行时依赖 qmodem。
 #
 # 保留关闭 JS 压缩：本包视图使用较新的 JS 语法（箭头函数、模板字符串等），
 # 关闭 jsmin 可避免部分模式被误改写导致运行时白屏。
@@ -11,14 +14,16 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=3.0.0
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
 LUCI_TITLE:=Modem management (QModem beautified UI)
-LUCI_DESCRIPTION:=Generic beautified LuCI Web UI wired entirely to the official \
-	QModem ubus interfaces (qmodem, qmodem.sms, qmodem.uplink). No private \
-	rpcd plugins or daemons are shipped.
+LUCI_DESCRIPTION:=Generic beautified LuCI Web UI for QModem: all modem data and \
+	control actions go through the official ubus interfaces (qmodem, qmodem.sms, \
+	qmodem.uplink). Two extra rpcd plugins are shipped to fill gaps the official \
+	API does not cover: per-day traffic stats (qmodem_stats) and custom modem \
+	support definitions (qmodem_support), each with its own backend script.
 # 兼容 23.05 / 24.10 的 opkg/IPK 与 25.12+ 的 apk；依赖由各版本 SDK 解析。
 # jq/jsonfilter 为模组支持库与流量统计脚本直接使用，显式声明。
 LUCI_DEPENDS:=+luci-base +qmodem +jq +jsonfilter
