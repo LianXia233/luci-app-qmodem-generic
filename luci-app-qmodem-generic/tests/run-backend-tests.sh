@@ -29,10 +29,14 @@ cat > "$T/bin/jsonfilter" << 'JFEOF'
 import json, sys
 args = sys.argv[1:]
 src = None
+expr = None
 i = 0
 while i < len(args):
     if args[i] == '-i':
         src = open(args[i + 1]).read()
+        i += 2
+    elif args[i] == '-s':
+        src = args[i + 1]
         i += 2
     elif args[i] == '-e':
         expr = args[i + 1]
@@ -81,7 +85,7 @@ exit 0
 UCEOF
 chmod 755 "$T/bin/uci"
 
-ENVQ="PATH=$T/bin:$PATH QMODEM_SUPPORT_LOCKDIR=$T/locks QMODEM_STATS_COLLECT=$T/bin/qmodem-stats-collect QMODEM_SBIN_DIR=$T/sbin QMODEM_BIN_DIR=$T/bin QMODEM_LIB_DIR=$T/lib/qmodem QMODEM_CACHE_DIR=$T/cache QMODEM_STATS_DIR=$T/etc/qmodem-stats QMODEM_SUPPORT_FILE=$T/share/qmodem/modem_support.json QMODEM_EXTRA_SUPPORT_FILE=$T/share/qmodem-generic/extra_modem_support.json QMODEM_CUSTOM_SUPPORT_DIR=$T/etc/qmodem-generic/modems"
+ENVQ="PATH=$T/bin:$PATH QMODEM_SUPPORT_LOCKDIR=$T/locks QMODEM_STATS_LOCKDIR=$T/lock-stats QMODEM_STATS_COLLECT=$T/bin/qmodem-stats-collect QMODEM_SBIN_DIR=$T/sbin QMODEM_BIN_DIR=$T/bin QMODEM_LIB_DIR=$T/lib/qmodem QMODEM_CACHE_DIR=$T/cache QMODEM_STATS_DIR=$T/etc/qmodem-stats QMODEM_SUPPORT_FILE=$T/share/qmodem/modem_support.json QMODEM_EXTRA_SUPPORT_FILE=$T/share/qmodem-generic/extra_modem_support.json QMODEM_CUSTOM_SUPPORT_DIR=$T/etc/qmodem-generic/modems"
 
 # ---------------------------------------------------------------- 1. 支持库合并脚本
 echo "== 1. qmodem-modem-support =="
@@ -189,7 +193,8 @@ grep -q 'total_rx=0' "$T/etc/qmodem-stats/modem1.stats" && ok "reset 已清零" 
 ( env PATH="$T/bin:$PATH" $ENVQ sh "$T/bin/qmodem-stats-collect" run modem2 >/dev/null 2>&1 & ) 2>/dev/null
 ( env PATH="$T/bin:$PATH" $ENVQ sh "$T/bin/qmodem-stats-collect" run modem2 >/dev/null 2>&1 & ) 2>/dev/null
 sleep 2
-[ ! -d /tmp/qmodem-stats-collect.modem2.lock ] && ok "并发 run 后锁目录已清理" || bad "锁目录残留"
+[ ! -d "$T/lock-stats" ] && ok "并发 run 后采集锁已清理" || bad "采集锁残留：$T/lock-stats"
+[ ! -d /tmp/qmodem-stats-collect.modem2.lock ] && ok "旧锁路径不再使用" || bad "仍在写旧锁路径"
 [ -f "$T/etc/qmodem-stats/modem2.stats" ] && ok "并发 run 已落盘" || bad "并发 run 未落盘"
 
 # ---------------------------------------------------------------- 5. stats-loop 节删除自查
@@ -232,6 +237,160 @@ sleep 7
 kill -0 $LOOP_PID 2>/dev/null && bad "节删除后循环未退出" || ok "节删除后循环自动退出"
 kill $LOOP_PID 2>/dev/null
 grep -q "section removed" /tmp/qmtest/loop.log && ok "退出日志正确" || bad "退出日志缺失"
+
+# ---------------------------------------------------------------- 6. 本轮修复的回归用例
+echo "== 6. 回归：缩进异常 / 锁协议 / 跨日归属 / ACL 边界 =="
+
+# JSON 里"同一个对象内重复出现的键"：jq 解析时会静默取最后一个，
+# 所以重复键不会报错，只能自己按对象层级查（跨对象重名是正常的，不算重复）
+dup_keys() {
+	python3 - "$1" << 'PY'
+import json, sys
+
+class Obj(list):
+    pass
+
+def hook(pairs):
+    o = Obj(pairs)
+    o.names = [k for k, _ in pairs]
+    return o
+
+bad = []
+
+def walk(node, path):
+    if isinstance(node, Obj):
+        seen = {}
+        for k in node.names:
+            seen[k] = seen.get(k, 0) + 1
+        for k, n in seen.items():
+            if n > 1:
+                bad.append('%s.%s x%d' % (path, k, n))
+        for k, v in node:
+            walk(v, '%s.%s' % (path, k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            walk(v, '%s[%d]' % (path, i))
+
+with open(sys.argv[1]) as fh:
+    walk(json.load(fh, object_pairs_hook=hook), '$')
+print(' '.join(bad))
+PY
+}
+
+# 6.1 官方支持库里存在缩进异常的块（RM520N 的 settings 里 sms/ims 用 8 空格）。
+#     早先按缩进扫文本的实现会在那里提前收敛，看不见后半段型号，于是把已存在的
+#     型号再注入一次 → 支持库出现重复键。
+cat > "$T/share/qmodem/indent.json" << 'EOF'
+{
+    "modem_support": {
+        "usb": {
+            "rg520n-cn": {
+                "manufacturer": "Quectel",
+                "platform": "qualcomm",
+                "settings": {
+                        "sms": {
+                            "mode": "pdu"
+                        },
+                        "ims": {
+                            "enable": "1"
+                        }
+                },
+                "modes": ["qmi", "ecm"],
+                "pdp_index": "1"
+            }
+        },
+        "pcie": {}
+    }
+}
+EOF
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/indent.json" sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | jq -e '[.added[] | select(. | endswith("/rg520n-cn"))] | length == 0' >/dev/null 2>&1 \
+	&& ok "缩进异常库：已存在型号未被重复注入" || bad "缩进异常库：已存在型号被重复注入: $OUT"
+echo "$OUT" | jq -e '[.skipped[] | select(. == "usb/rg520n-cn")] | length == 1' >/dev/null 2>&1 \
+	&& ok "缩进异常库：该型号被识别（skipped 恰好一次）" || bad "缩进异常库：判重结果异常: $OUT"
+D=$(dup_keys "$T/share/qmodem/indent.json")
+[ -z "$D" ] && ok "缩进异常库：无重复键" || bad "缩进异常库：出现重复键 $D"
+POST=$(jq -r '.modem_support.usb | length' "$T/share/qmodem/indent.json")
+[ "$POST" -gt 1 ] && ok "缩进异常库：其余型号照常合并（usb $POST 项）" || bad "缩进异常库：合并中断（usb $POST 项）"
+
+# 6.2 任意合法缩进 + 空分组（QModem 在没有该类型模组时会写成 "pcie": {}）
+jq --indent 2 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/compact.json"
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/compact.json" sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -qE '"added":\["' && ok "空分组+2 空格缩进：注入成功" || bad "空分组注入失败: $OUT"
+D=$(dup_keys "$T/share/qmodem/compact.json")
+[ -z "$D" ] && ok "空分组：无重复键" || bad "空分组：出现重复键 $D"
+
+# 6.3 支持库损坏：拒绝写入且不改动原文件
+printf '%s' '{"modem_support": broken' > "$T/share/qmodem/broken.json"
+B=$(cksum "$T/share/qmodem/broken.json")
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/broken.json" sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -q '无法解析' && ok "损坏支持库：明确报错" || bad "损坏支持库：报错缺失: $OUT"
+[ "$B" = "$(cksum "$T/share/qmodem/broken.json")" ] && ok "损坏支持库：原文件未被改写" || bad "损坏支持库：原文件被改写"
+
+# 6.4 锁协议："<pid> <epoch>"；持锁进程已消失时回收，仍存活时不抢
+rm -rf "$T/lk-stale" && mkdir -p "$T/lk-stale" && printf '99999999 %s\n' "$(date +%s)" > "$T/lk-stale/pid"
+jq --indent 4 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/stale.json"
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/stale.json" QMODEM_SUPPORT_LOCKDIR="$T/lk-stale" \
+	sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -q '另一个同步进程' && bad "陈旧锁未回收: $OUT" || ok "陈旧锁（pid 不存在）自动回收"
+[ ! -e "$T/lk-stale" ] && ok "陈旧锁回收后锁目录已清理" || bad "锁目录残留"
+
+jq --indent 4 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/busy.json"
+B=$(cksum "$T/share/qmodem/busy.json")
+rm -rf "$T/lk-live" && mkdir -p "$T/lk-live" && printf '%s %s\n' "$$" "$(date +%s)" > "$T/lk-live/pid"
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/busy.json" QMODEM_SUPPORT_LOCKDIR="$T/lk-live" \
+	QMODEM_SUPPORT_LOCK_RETRY=1 sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -q '另一个同步进程' && ok "活锁：拒绝并发写入" || bad "活锁被强行接管: $OUT"
+[ "$B" = "$(cksum "$T/share/qmodem/busy.json")" ] && ok "活锁：目标文件未被改动" || bad "活锁：目标文件被改写"
+rm -f "$T/lk-live/pid"; rmdir "$T/lk-live" 2>/dev/null
+
+# 6.5 采集器：跨日归属合计精确 + 计数器不可读时 reset 保住生命周期基准
+cat > "$T/bin/ubus" << 'UBEOF'
+#!/bin/sh
+# 计数替身：从 $QMODEM_CTR_DIR/{rx,tx,fail} 读取 get_stats 结果
+d="${QMODEM_CTR_DIR:?}"
+[ -f "$d/fail" ] && exit 1
+rx=$(cat "$d/rx" 2>/dev/null); tx=$(cat "$d/tx" 2>/dev/null)
+printf '{"available":true,"total_rx_bytes":%s,"total_tx_bytes":%s}\n' "${rx:-0}" "${tx:-0}"
+UBEOF
+chmod 755 "$T/bin/ubus"
+mkdir -p "$T/ctr"; printf '1000' > "$T/ctr/rx"; printf '500' > "$T/ctr/tx"; rm -f "$T/ctr/fail"
+NOW=$(date +%s)
+# 上一轮采样在 72 小时前，本轮增量 1900/1503 需按跨越的天数分摊，且各天之和必须等于增量
+printf 'last_ts=%s\nlast_rx=1000\nlast_tx=500\ntotal_rx=0\ntotal_tx=0\nswapped=0\n' "$((NOW - 260000))" > "$T/etc/qmodem-stats/split.stats"
+printf '2900' > "$T/ctr/rx"; printf '2003' > "$T/ctr/tx"
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" run split >/dev/null 2>&1
+OUT=$(env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" show split)
+echo "$OUT" | grep -q '"total_rx":1900' && ok "跨日分摊：总量精确（1900）" || bad "跨日分摊总量错误: $OUT"
+SUM=$(echo "$OUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["today_rx"] + sum(x["rx"] for x in d["days"]))')
+[ "$SUM" = "1900" ] && ok "跨日分摊：各天之和等于增量（$SUM）" || bad "跨日分摊丢失/重复计数（$SUM）"
+NDAYS=$(echo "$OUT" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["days"]))')
+[ "$NDAYS" -ge 1 ] && ok "跨日分摊：已回填历史日（$NDAYS 天）" || bad "跨日分摊：历史日为空"
+
+# reset 时读不到计数器：必须保留 last_rx/last_tx，否则下一轮会把模组整个生命周期的流量记账
+printf 'last_ts=%s\nlast_rx=50000000\nlast_tx=40000000\ntotal_rx=49999000\ntotal_tx=39999500\nswapped=0\n' "$NOW" > "$T/etc/qmodem-stats/rs.stats"
+touch "$T/ctr/fail"
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" reset rs >/dev/null 2>&1
+grep -q '^last_rx=50000000$' "$T/etc/qmodem-stats/rs.stats" && ok "reset 计数器不可读时保住基准" || bad "reset 丢失基准: $(cat "$T/etc/qmodem-stats/rs.stats")"
+grep -q '^total_rx=0$' "$T/etc/qmodem-stats/rs.stats" && ok "reset 已清零当日/累计" || bad "reset 未清零"
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" run rs >/dev/null 2>&1
+OUT=$(env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" show rs)
+echo "$OUT" | grep -q '"total_rx":0' && ok "计数器仍不可读时不凭空记账" || bad "凭空记账: $OUT"
+rm -f "$T/ctr/fail"
+
+# 6.6 ACL：写操作不能再落在 read 段（rpcd 里 write 蕴含 read，只放 read 等于放开给只读会话）
+ACL="$ROOT/root/usr/share/rpcd/acl.d/luci-app-qmodem-generic.json"
+MENU="$ROOT/root/usr/share/luci/menu.d/luci-app-qmodem-generic.json"
+jq -e '.["luci-app-qmodem-generic"].read.ubus.qmodem_stats | index("stats_reset") == null' "$ACL" >/dev/null 2>&1 \
+	&& ok "ACL：stats_reset 不在 read 段" || bad "ACL：只读段仍含 stats_reset"
+jq -e '.["luci-app-qmodem-generic"].write.ubus.qmodem_stats | index("stats_reset") != null' "$ACL" >/dev/null 2>&1 \
+	&& ok "ACL：stats_reset 已归入 write 段" || bad "ACL：write 段缺 stats_reset"
+for m in sync custom_save custom_delete probe_port; do
+	jq -e --arg m "$m" '.["luci-app-qmodem-generic"].read.ubus.qmodem_support | index($m) == null' "$ACL" >/dev/null 2>&1 \
+		&& ok "ACL：只读段不含 $m" || bad "ACL：只读段仍含写方法 $m"
+done
+MISS=$(jq -r 'to_entries[] | select(.key | startswith("admin/modem/qmodem-generic")) | select(.value.title == null) | .key' "$MENU")
+[ -z "$MISS" ] && ok "menu.d：所有子页都有 title（否则标签页标题空白）" || bad "menu.d 缺 title: $MISS"
 
 echo
 if [ "$FAIL" = "0" ]; then

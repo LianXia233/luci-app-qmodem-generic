@@ -851,7 +851,7 @@ function el(tag, cls, data, attrs) {
 		else if (data instanceof Node)
 			node.appendChild(data);
 		else
-			node.innerHTML = String(data);
+			node.appendChild(document.createTextNode(String(data)));
 	}
 	return node;
 }

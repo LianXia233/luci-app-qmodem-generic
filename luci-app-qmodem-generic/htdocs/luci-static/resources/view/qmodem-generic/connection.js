@@ -274,7 +274,7 @@ return view.extend({
 			'  <g transform="translate(15, 14)">',
 			'    <rect x="0" y="0" width="115" height="56" rx="12" fill="rgba(241,245,249,0.85)" stroke="#cbd5e1" stroke-width="1.6"/>',
 			'    <circle cx="22" cy="28" r="6" fill="#0072f5"/>',
-			'    <text x="36" y="25" font-size="12" font-weight="750" fill="#0f172a">' + iface + '</text>',
+			'    <text x="36" y="25" font-size="12" font-weight="750" fill="#0f172a">' + controls.xmlText(iface) + '</text>',
 			'    <text x="36" y="41" font-size="10" fill="#64748b">' + _('网络接口') + '</text>',
 			'  </g>',
 			'  <!-- 传输链路 1 -->',
@@ -487,7 +487,12 @@ return view.extend({
 		function toggleGlobalDial(ev) {
 			var val = ev.currentTarget.checked ? '1' : '0';
 			try {
-				if (!uci.get('qmodem', 'main'))
+				/* 段落是否存在只能按 .name 判定：uci.get(cfg, 'main') 省略 option 时
+				 * 并不保证返回段落对象，一旦返回空值就会对已存在的 main 段重复
+				 * uci.add()，LuCI 直接抛错，开关永远保存不了。官方 /etc/config/qmodem
+				 * 里这一段是 `config main 'main'`，所以类型与名称都用 main。 */
+				var mains = uci.sections('qmodem', 'main') || [];
+				if (!mains.some(function(s) { return s && s['.name'] === 'main'; }))
 					uci.add('qmodem', 'main', 'main');
 				uci.set('qmodem', 'main', 'enable_dial', val);
 			} catch (e) {

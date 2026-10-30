@@ -553,8 +553,11 @@ return view.extend({
 				storageAvailable = true;
 				mem1.disabled = mem2.disabled = mem3.disabled = false;
 				mem1.value = /^(SM|ME)$/.test(storage.mem1) ? storage.mem1 : 'SM';
-				mem2.value = /^(SM|ME)$/.test(storage.mem2) ? storage.mem2 : storage.mem1;
-				mem3.value = /^(SM|ME)$/.test(storage.mem3) ? storage.mem3 : storage.mem2;
+				/* 回退值本身也必须命中 <option>，否则 select.value 变成空串、提交时静默丢失存储区 */
+				mem2.value = /^(SM|ME)$/.test(storage.mem2) ? storage.mem2
+					: (/^(SM|ME)$/.test(storage.mem1) ? storage.mem1 : 'SM');
+				mem3.value = /^(SM|ME)$/.test(storage.mem3) ? storage.mem3
+					: (/^(SM|ME)$/.test(storage.mem2) ? storage.mem2 : mem2.value);
 				storageUsage.textContent = _('ME %s/%s · SM %s/%s').format(
 					storage.ME.used, storage.ME.total, storage.SM.used, storage.SM.total);
 				legacyStorageRow.style.display = 'none';

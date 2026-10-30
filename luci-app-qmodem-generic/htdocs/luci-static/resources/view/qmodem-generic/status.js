@@ -560,8 +560,8 @@ return view.extend({
 			'  <!-- 终端/模组汇聚 -->',
 			'  <g transform="translate(244, 12)">',
 			'    <rect x="0" y="4" width="48" height="34" rx="8" fill="rgba(241,245,249,0.9)" stroke="#94a3b8" stroke-width="1.6"/>',
-			'    <text x="24" y="21" font-size="10" font-weight="700" fill="#0f172a" text-anchor="middle">' + (hasCa ? info.count + 'CA' : '1CC') + '</text>',
-			'    <text x="24" y="32" font-size="8" font-weight="600" fill="#64748b" text-anchor="middle">' + (info.carriers[0] ? (info.carriers[0].band || 'Modem') : 'Modem') + '</text>',
+			'    <text x="24" y="21" font-size="10" font-weight="700" fill="#0f172a" text-anchor="middle">' + controls.xmlText(hasCa ? info.count + 'CA' : '1CC') + '</text>',
+			'    <text x="24" y="32" font-size="8" font-weight="600" fill="#64748b" text-anchor="middle">' + controls.xmlText(info.carriers[0] ? (info.carriers[0].band || 'Modem') : 'Modem') + '</text>',
 			'  </g>',
 			'</svg>'
 		].join('');
@@ -816,7 +816,7 @@ return view.extend({
 			return [
 				'<rect x="' + x + '" y="' + (80 - rxH) + '" width="' + barW + '" height="' + rxH + '" rx="3" fill="#0072f5"/>',
 				'<rect x="' + (x + barW + 3) + '" y="' + (80 - txH) + '" width="' + barW + '" height="' + txH + '" rx="3" fill="#10b981"/>',
-				'<text x="' + (x + barW) + '" y="94" font-size="8" fill="#94a3b8" text-anchor="middle">' + dateLabel + '</text>'
+				'<text x="' + (x + barW) + '" y="94" font-size="8" fill="#94a3b8" text-anchor="middle">' + controls.xmlText(dateLabel) + '</text>'
 			].join('');
 		}).join('');
 

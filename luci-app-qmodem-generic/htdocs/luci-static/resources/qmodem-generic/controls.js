@@ -139,6 +139,20 @@ function valueText(value) {
 	return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
+/*
+ * svgNode() 走的是 innerHTML，动态值（AT 回读的频段名、stats 文件里的日期、
+ * UCI 里的接口名）一旦被插入到 <text> 或属性里，就能改写这段 SVG 结构。
+ * 所有拼进 SVG 字符串的外部数据都必须先过这里。
+ */
+function xmlText(value) {
+	return String(value == null ? '' : value)
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
 function dataRow(label, value, rowClass, keyClass, valClass) {
 	if (!hasValue(value)) return null;
 	return E('div', { 'class': rowClass || 'qm-kv-row' }, [
@@ -838,7 +852,9 @@ function probeSupportPort(port) { return withTimeoutReject(callProbePort(port), 
 /* kind: 'pcie' | 'usb' | 'all'。QModem 把请求排队给 modem_scand，结果靠 UCI 变化体现。 */
 function scanDevices(kind) {
 	var fn = kind === 'pcie' ? callScanPcie : kind === 'usb' ? callScanUsb : callScanAll;
-	return withTimeoutReject(fn(), 60000, _('扫描请求超时，请稍后刷新页面查看结果。'));
+	var label = kind === 'pcie' ? _('PCIe 设备扫描') : kind === 'usb' ? _('USB 设备扫描') : _('全总线扫描');
+	return withTimeoutReject(fn(), 60000, _('扫描请求超时，请稍后刷新页面查看结果。'))
+		.then(function(res) { return requireScanResult(res, label); });
 }
 function getPcieDevices() { return withTimeout(callGetPcieDevices(), DIRECT_RPC_TIMEOUT, { devices: [] }); }
 function getUsbDevices() { return withTimeout(callGetUsbDevices(), DIRECT_RPC_TIMEOUT, { devices: [] }); }
@@ -1188,13 +1204,36 @@ function requireSuccess(raw, operation) {
 	return raw;
 }
 
-/* remove_modem / scan_* 返回 {"status":"<退出码>"}：0 才是成功（与 status 语义方向相反） */
+/* remove_modem 返回 {"status":"<退出码>"}：0 才是成功（与 status 语义方向相反） */
 function requireExitCodeZero(raw, operation) {
 	if (raw == null)
 		throw new Error(operation + _('：QModem 未返回操作结果。'));
 	var code = Number(raw.status !== undefined ? raw.status : (raw.result && raw.result.status));
 	if (!isFinite(code) || code !== 0)
 		throw new Error(operation + _('失败：') + String(raw.error || raw.message || ('exit ' + raw.status)));
+	return raw;
+}
+
+/*
+ * scan_pcie / scan_usb / scan_all 的契约与 remove_modem 不同：官方 rpcd 返回
+ * {"code":<整数退出码>,"message":"..."}，异常分支还可能只返回 {"error":"..."}。
+ * 早先这里的注释把两者混为一谈，调用方只在 settings.js 里顺手看了一眼 code，
+ * 于是 modem_scan.sh 缺失（code=127）之外的一切失败都会提示「扫描完成」。
+ * 现在统一在这里判定，失败一律 reject。
+ */
+function requireScanResult(raw, operation) {
+	if (raw == null)
+		throw new Error(operation + _('：QModem 未返回扫描结果。'));
+	var body = (raw.result && typeof raw.result === 'object') ? raw.result : raw;
+	var reason = body.error || raw.error || body.message || raw.message;
+	var code = (body.code !== undefined) ? body.code : raw.code;
+	if (code === undefined) {
+		if (reason)
+			throw new Error(operation + _('失败：') + String(reason));
+		return raw;
+	}
+	if (Number(code) !== 0)
+		throw new Error(operation + _('失败：') + String(reason || ('scan exit ' + code)));
 	return raw;
 }
 
@@ -2061,6 +2100,7 @@ return baseclass.extend({
 	element: E,
 	hasValue: hasValue,
 	valueText: valueText,
+	xmlText: xmlText,
 	dataRow: dataRow,
 	flagKeys: flagKeys,
 	isEnabled: isEnabled,

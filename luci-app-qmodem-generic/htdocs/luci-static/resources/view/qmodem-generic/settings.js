@@ -52,10 +52,9 @@ return view.extend({
 		ui.showModal(_('Scanning'), [
 			E('p', { 'class': 'spinning' }, _('正在扫描 %s 设备，扫描由 QModem 的 modem_scan 服务执行，可能需要数十秒…').format(label))
 		]);
-		controls.scanDevices(kind).then(function(res) {
+		/* 扫描失败（含 code != 0）由 controls.scanDevices 统一 reject，这里只处理成功分支 */
+		controls.scanDevices(kind).then(function() {
 			ui.hideModal();
-			if (res && res.code != null && Number(res.code) !== 0)
-				throw new Error(res.message || ('scan exit ' + res.code));
 			controls.notify(null, E('p', {}, _('扫描完成，模组列表已更新。')));
 			window.setTimeout(function() { window.location.reload(); }, 900);
 		}).catch(function(err) {

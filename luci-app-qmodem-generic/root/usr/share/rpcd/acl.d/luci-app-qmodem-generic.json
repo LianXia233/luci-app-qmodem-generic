@@ -7,8 +7,8 @@
 				"qmodem": [ "*" ],
 				"qmodem.sms": [ "status", "config_get", "sync_status", "list", "get", "modem_list", "storage_get" ],
 				"qmodem.uplink": [ "status" ],
-				"qmodem_stats": [ "*" ],
-				"qmodem_support": [ "*" ],
+				"qmodem_stats": [ "daily_stats", "stats_history" ],
+				"qmodem_support": [ "status", "ports", "custom_list" ],
 				"rc": [ "list" ],
 				"network.device": [ "status" ],
 				"network.interface": [ "status", "dump" ]
@@ -20,8 +20,8 @@
 				"uci": [ "commit" ],
 				"qmodem": [ "*" ],
 				"qmodem.sms": [ "configure", "sync", "send", "delete", "mark_read", "modem_delete", "storage_set" ],
-				"qmodem_stats": [ "*" ],
-				"qmodem_support": [ "*" ],
+				"qmodem_stats": [ "daily_stats", "stats_history", "stats_reset" ],
+				"qmodem_support": [ "status", "ports", "custom_list", "sync", "custom_save", "custom_delete", "probe_port" ],
 				"rc": [ "list" ],
 				"luci": [ "setInitAction" ]
 			}
