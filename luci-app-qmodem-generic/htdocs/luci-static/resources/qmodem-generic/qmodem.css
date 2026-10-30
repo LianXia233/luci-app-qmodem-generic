@@ -6234,3 +6234,17 @@ html { -webkit-text-size-adjust: 100%; }
     white-space: nowrap !important;
   }
 }
+
+/* v2.42.7 修复：手机端 hero 徽标被压成竖排 —— 禁止换行与收缩 */
+@media (max-width: 768px) {
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-badge-online,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-badge {
+    white-space: nowrap !important;
+    flex: 0 0 auto !important;
+    flex-shrink: 0 !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-badge-online .mt-beacon-dot,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-badge .mt-beacon-dot {
+    flex: 0 0 auto !important;
+  }
+}
