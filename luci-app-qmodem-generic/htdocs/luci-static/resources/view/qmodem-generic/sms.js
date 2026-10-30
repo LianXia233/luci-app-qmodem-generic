@@ -710,6 +710,46 @@ return view.extend({
 			newConversation();
 		}
 
+		/* ================= 高度贴合视口（移植自 luci-app-mt5700 sms_center） ================= */
+
+		/*
+		 * 把会话区高度定成「视口里剩下的那点地方」。
+		 * 纯 CSS 算不出来：上方导航栏/页签高度随主题与屏宽变，calc 写死常量
+		 * 必然在某些尺寸下超出去，页面整体滚动 ——「滚消息」变成「滚网页」，
+		 * 输入框被推到很远。直接量一次 rect.top，剩余高度全给会话区，
+		 * 超出的部分由消息区自己滚。
+		 */
+		var fitHeight = function() {
+			var top = layout.getBoundingClientRect().top + window.pageYOffset;
+			/* 8px 底部留白，避免卡片贴着屏幕边缘 */
+			var avail = window.innerHeight - top - 8;
+			if (avail < 320) {
+				avail = 320;      /* 极端矮屏：宁可整页滚，也不要把会话区压成一条缝 */
+			}
+			layout.style.height = avail + 'px';
+		};
+
+		/*
+		 * 延后多帧再量：render() 返回时节点还没插进文档，此刻 rect.top 是 0，
+		 * 算出的高度会把整页重新顶长；hero 图片/字体撑开又会改变高度。
+		 * 多量几次，最后一次一定在页面稳定之后（fitHeight 自带溢出回扣，
+		 * 多量只会更准，不会累积误差）。
+		 */
+		var scheduleFit = function() {
+			window.requestAnimationFrame(function() {
+				fitHeight();
+				window.requestAnimationFrame(fitHeight);
+			});
+			window.setTimeout(fitHeight, 400);
+			window.setTimeout(fitHeight, 1500);
+		};
+		if (!self._smsFitBound) {
+			self._smsFitBound = true;
+			window.addEventListener('resize', fitHeight);
+			window.addEventListener('orientationchange', fitHeight);
+		}
+		scheduleFit();
+
 		return shell;
 	},
 
