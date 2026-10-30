@@ -224,6 +224,73 @@ return view.extend({
 		return button;
 	},
 
+	/* 官方快捷命令分类（按命令语义正则归类，随固件/模组平台变化的命令表
+	   也能落入正确分组；未命中的进「其他」）。顺序即优先级：写操作优先于
+	   查询判定（如 AT+CGDCONT? 是查询，AT+CGDCONT=3,... 是写 APN）。 */
+	CMD_GROUP_DEFS: [
+		{ title: _('维护与写入（危险）'), danger: true,
+		  re: /CFUN=[015]|GTSN=1,|GTFCCLOCK|GTTHERMAL|GTESIMCFG/ },
+		{ title: _('SIM 卡槽与 eSIM'),
+		  re: /GTDUALSIM/ },
+		{ title: _('拨号与 APN'),
+		  re: /CGDCONT=[^?]|CGACT=/ },
+		{ title: _('网络模式与锁网'),
+		  re: /GTACT=[0-9]|GTUSBMODE=[0-9]/ }
+	],
+
+	classifyCommands: function(cmds) {
+		var defs = this.CMD_GROUP_DEFS;
+		var groups = defs.map(function(d) { return { title: d.title, danger: !!d.danger, items: [] }; });
+		var other = [];
+		cmds.forEach(function(item) {
+			var value = item.value || '';
+			/* 官方命令表 name 形如「动作描述 > AT 命令」：主标签取描述，
+			   命令本体作为小字副标签展示，不能让用户对着裸命令猜 */
+			var desc = item.name.indexOf('>') >= 0 ? item.name.split('>')[0].trim() : item.name;
+			var entry = { label: desc || value, value: value };
+			for (var i = 0; i < defs.length; i++) {
+				if (defs[i].re.test(value)) {
+					groups[i].items.push(entry);
+					return;
+				}
+			}
+			other.push(entry);
+		});
+		/* 查询组 = 剩余全部（多为 '?' 结尾的只读命令），排在最前最常用 */
+		var out = [{ title: _('基础查询与其他'), danger: false, items: other }].concat(groups);
+		return out.filter(function(g) { return g.items.length > 0; });
+	},
+
+	buildCommandGroups: function(cmds, input, output) {
+		var self = this;
+		return this.classifyCommands(cmds).map(function(g) {
+			return E('details', { 'class': 'qm-cmd-group' + (g.danger ? ' qm-cmd-danger' : '') }, [
+				E('summary', {}, [
+					g.title,
+					E('span', { 'class': 'qm-cmd-count' }, String(g.items.length))
+				]),
+				E('div', { 'class': 'qmodem-generic-quick qm-cmd-group-body' }, g.items.map(function(item) {
+					var self2 = self;
+					var button = E('button', {
+						'type': 'button',
+						'class': 'btn cbi-button qm-cmd-btn',
+						'data-at-command': item.value,
+						'title': item.value,
+						'click': function() {
+							input.value = item.value;
+							self2.sendCommand(output, input);
+						}
+					}, [
+						E('span', { 'class': 'qm-cmd-btn-label' }, item.label),
+						E('span', { 'class': 'qm-cmd-btn-cmd' }, item.value)
+					]);
+					(self.commandButtons || (self.commandButtons = [])).push(button);
+					return button;
+				}))
+			]);
+		});
+	},
+
 	loadSaved: function() {
 		try {
 			var saved = JSON.parse(window.localStorage.getItem('qmodem-generic.at.saved') || '[]');
@@ -356,11 +423,10 @@ return view.extend({
 				this.quickButton(_('Signal'), 'AT+CSQ', input, output),
 				this.quickButton(_('Operator'), 'AT+COPS?', input, output)
 			]),
-			/* QModem 官方快捷命令（get_at_cfg.cmds，随固件语言与模组平台变化） */
-			(res.cmds || []).length ? E('div', { 'class': 'qmodem-generic-quick' }, [
-				res.cmds.map(function(item) {
-					return self.quickButton(item.name, item.value, input, output);
-				})
+			/* QModem 官方快捷命令（get_at_cfg.cmds，随固件语言与模组平台变化）。
+			   33+ 条按钮平铺过长，改为按语义分组的折叠面板，默认全部收起。 */
+			(res.cmds || []).length ? E('div', { 'class': 'qm-cmd-groups' }, [
+				this.buildCommandGroups(res.cmds, input, output)
 			]) : null,
 			controls.supportsTdTechAt(this.section, res.base) ? E('div', { 'class': 'qmodem-generic-quick' }, [
 				this.quickButton(_('Temperature'), 'AT^CHIPTEMP?', input, output),
