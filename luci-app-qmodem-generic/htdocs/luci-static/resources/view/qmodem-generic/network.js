@@ -324,7 +324,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-network-style', [
 			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-net{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境光晕 */
@@ -1039,16 +1039,18 @@ return view.extend({
 
 	paintContent: function(res) {
 		res = res || {};
+		var enter = !this.painted;
+		this.painted = true;
 		var errors = res.errors || [];
 		var warnings = errors.map(function(msg) {
-			return E('div', { 'class': 'mt-net-card', 'style': 'color:var(--qm-danger);margin-bottom:12px' }, msg);
+			return E('div', { 'class': 'qm-error-banner' }, msg);
 		});
 
 		if (!res.section)
-			return E('div', { 'class': 'mt-net' }, [
+			return E('div', { 'class': 'mt-net' + (enter ? ' qm-enter' : '') }, [
 				this.styleNode(),
 				controls.styleNode(),
-				E('div', { 'class': 'mt-net-card', 'style': 'color:var(--qm-danger)' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
+				E('div', { 'class': 'qm-error-banner' }, _('未检测到模组（请确认 QModem 已识别该设备）。'))
 			].concat(warnings));
 
 		var section = res.section;
@@ -1126,7 +1128,7 @@ return view.extend({
 			rawDump = _('无法序列化 QModem 返回数据。');
 		}
 
-		return E('div', { 'class': 'mt-net' }, [
+		return E('div', { 'class': 'mt-net' + (enter ? ' qm-enter' : '') }, [
 			this.styleNode(),
 			controls.styleNode(),
 			/* 背景环境光晕 */

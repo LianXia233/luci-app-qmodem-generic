@@ -262,7 +262,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-status-style', [
 			/* 全局毛玻璃与流动渐变底蕴 */
 			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.qmodem-glass-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:30px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
@@ -373,7 +373,14 @@ return view.extend({
 
 			/* 响应式适配 */
 			'@media(max-width:980px){.qm-grid-3{grid-template-columns:1fr 1fr}.qm-address-card{grid-column:1/-1}.qm-traffic-layout{grid-template-columns:repeat(3,1fr)}.qm-traffic-chart-box{grid-column:1/-1}}',
-			'@media(max-width:680px){.qm-hero{flex-direction:column;align-items:flex-start}.qm-hero-actions{width:100%;justify-content:space-between}.qm-grid-3,.qm-grid-2,.qm-shortcuts,.qm-traffic-layout{grid-template-columns:1fr}.qm-address-card,.qm-traffic-chart-box{grid-column:auto}}'
+			'@media(max-width:680px){.qm-hero{flex-direction:column;align-items:flex-start}.qm-hero-actions{width:100%;justify-content:space-between}.qm-grid-3,.qm-grid-2,.qm-shortcuts,.qm-traffic-layout{grid-template-columns:1fr}.qm-address-card,.qm-traffic-chart-box{grid-column:auto}}',
+			'/* 完整信息折叠面板：默认收起，避免总览页过长 */',
+			'.qm-info-details>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;cursor:pointer;list-style:none;font-size:15px;font-weight:750;color:var(--qm-text);padding:2px 0}',
+			'.qm-info-details>summary::-webkit-details-marker{display:none}',
+			'.qm-info-details>summary::before{content:"\\25B8";color:var(--qm-text-muted);transition:transform .18s ease;display:inline-block;margin-right:8px}',
+			'.qm-info-details[open]>summary::before{transform:rotate(90deg)}',
+			'.qm-info-details[open]>summary{border-bottom:1px solid var(--qm-border-soft);padding-bottom:10px;margin-bottom:14px}',
+			'.qm-info-count{font-size:11px;font-weight:600;color:var(--qm-text-muted);white-space:nowrap;flex:0 0 auto}'
 		].join(''));
 	},
 
@@ -979,10 +986,9 @@ return view.extend({
 		if (!res.section) {
 			return E('div', { 'class': 'qmodem-glass-page' }, [
 				this.styleNode(), controls.styleNode(),
-				E('div', { 'class': 'qm-glass-card', 'style': 'color:var(--qm-danger);background:var(--qm-danger-soft)' },
-					_('No modem detected (make sure QModem has recognised the device).')),
+				E('div', { 'class': 'qm-error-banner' }, _('No modem detected (make sure QModem has recognised the device).')),
 				(res.errors || []).map(function(msg) {
-					return E('div', { 'class': 'qm-glass-card', 'style': 'margin-top:10px;color:var(--qm-danger)' }, msg);
+					return E('div', { 'class': 'qm-error-banner' }, msg);
 				})
 			]);
 		}
@@ -991,6 +997,8 @@ return view.extend({
 		var connected = data.connected === '1', reachable = data.reachable === '1';
 		var session = this.parseSession(res, connected);
 		var carrierInfo = this.carrierInfo(res);
+		var enter = !this.painted;
+		this.painted = true;
 
 		if (/^(n\/a|none|null|--)$/i.test(data.operator_name || ''))
 			data.operator_name = '';
@@ -998,14 +1006,14 @@ return view.extend({
 		var operator = opInfo.name;
 		data.operator = (operator && operator !== _('Mobile Network')) ? operator : '';
 
-		return E('div', { 'class': 'qmodem-glass-page' }, [
+		return E('div', { 'class': 'qmodem-glass-page' + (enter ? ' qm-enter' : '') }, [
 			this.styleNode(), controls.styleNode(),
 			/* 背景环境光晕 */
 			E('div', { 'class': 'qmodem-glass-bg-glow' }),
 			E('div', { 'class': 'qmodem-glass-bg-glow2' }),
 
 			(res.errors || []).map(function(msg) {
-				return E('div', { 'class': 'qm-glass-card', 'style': 'margin-bottom:12px;color:var(--qm-danger)' }, msg);
+				return E('div', { 'class': 'qm-error-banner' }, msg);
 			}),
 
 			this.modems && this.modems.length > 1 ? controls.renderModemBar(this.modems, res.section, function(id) {
@@ -1067,12 +1075,26 @@ return view.extend({
 				this.shortcut(_('模组与 SIM 卡'), _('设备信息、SIM 卡与维护'), 'admin/modem/qmodem-generic/system')
 			]),
 
-			/* 原始底层完整信息 */
-			E('div', { 'class': 'qm-glass-card' }, [
-				E('h3', { 'style': 'margin:0 0 6px;font-size:15px;font-weight:750;color:var(--qm-text)' }, _('完整模组信息')),
-				E('p', { 'style': 'margin:0 0 16px;color:var(--qm-text-muted);font-size:11px' }, _('该模组由 QModem 上报的全部字段，按类别分组展示。')),
-				E('div', { 'class': 'mt-info-grid-all' }, controls.renderInfoGrouped(res.allInfo))
-			])
+			/* QModem 上报的完整信息（默认折叠） */
+			(function() {
+				var filtered = (res.allInfo || []).filter(function(item) {
+					return item && controls.hasValue(item.value);
+				});
+				var groups = controls.groupByClass(filtered);
+				var keys = Object.keys(groups);
+				var fieldCount = keys.reduce(function(n, k) {
+					return n + (groups[k] || []).length;
+				}, 0);
+				var body = keys.length
+					? E('div', { 'class': 'mt-info-grid-all' }, controls.renderInfoGrouped(res.allInfo))
+					: E('div', { 'style': 'color:var(--qm-text-muted);font-size:12px' }, _('QModem 未上报其它信息字段。'));
+				return E('details', { 'class': 'qm-glass-card qm-info-details' }, [
+					E('summary', {}, [ _('完整模组信息'),
+						fieldCount ? E('span', { 'class': 'qm-info-count' }, _('%d 类 · %d 项').format(keys.length, fieldCount)) : null
+					]),
+					E('div', {}, [ body ])
+				]);
+			})()
 		]);
 	},
 

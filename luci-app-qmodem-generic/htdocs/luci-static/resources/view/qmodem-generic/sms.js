@@ -258,7 +258,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-sms-style', [
 			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-sms{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
@@ -583,9 +583,11 @@ return view.extend({
 	paintContent: function(res) {
 		var self = this;
 		res = res || {};
+		var enter = !self.painted;
+		self.painted = true;
 
 		if (!res.section) {
-			return E('div', { 'class': 'mt-sms' }, [
+			return E('div', { 'class': 'mt-sms' + (enter ? ' qm-enter' : '') }, [
 				this.styleNode(), controls.styleNode(),
 				E('section', { 'class': 'mt-sms-hero' }, [
 					E('div', {}, [
@@ -779,7 +781,7 @@ return view.extend({
 			window.location.reload();
 		});
 
-		return E('div', { 'class': 'mt-sms' }, [
+		return E('div', { 'class': 'mt-sms' + (enter ? ' qm-enter' : '') }, [
 			this.styleNode(),
 			controls.styleNode(),
 			/* 背景环境光晕 */

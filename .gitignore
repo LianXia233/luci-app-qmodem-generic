@@ -15,3 +15,7 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# 前端测试依赖（仅本地/CI 使用，不属于固件运行时依赖）
+node_modules/
+package-lock.json

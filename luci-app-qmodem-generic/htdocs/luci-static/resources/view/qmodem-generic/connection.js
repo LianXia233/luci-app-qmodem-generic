@@ -130,7 +130,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-connection-style', [
 			/* 全局毛玻璃与流动渐变底蕴 */
 			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mtconn-page{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
@@ -620,6 +620,8 @@ return view.extend({
 	paintContent: function(res) {
 		var self = this;
 		res = res || {};
+		var enter = !self.painted;
+		self.painted = true;
 
 		var modems = controls.getModemSectionsSync();
 		var modemBar = controls.renderModemBar(modems, res.section, function(id) {
@@ -628,7 +630,7 @@ return view.extend({
 		});
 
 		if (!res.section) {
-			return E('div', { 'class': 'mtconn-page' }, [
+			return E('div', { 'class': 'mtconn-page' + (enter ? ' qm-enter' : '') }, [
 				self.styleNode(),
 				controls.styleNode(),
 				modemBar,
@@ -702,7 +704,7 @@ return view.extend({
 		]);
 
 		return self.buildApnForm(section).then(function(formNode) {
-			return E('div', { 'class': 'mtconn-page' }, [
+			return E('div', { 'class': 'mtconn-page' + (enter ? ' qm-enter' : '') }, [
 				self.styleNode(),
 				controls.styleNode(),
 				/* 背景氛围光 */
@@ -844,11 +846,10 @@ return view.extend({
 				logDetails
 			]);
 		}).catch(function(err) {
-			return E('div', { 'class': 'mtconn-page' }, [
+			return E('div', { 'class': 'mtconn-page' + (enter ? ' qm-enter' : '') }, [
 				self.styleNode(),
 				controls.styleNode(),
-				E('div', { 'class': 'mtconn-card', 'style': 'color:var(--qm-danger);margin-top:16px' },
-					_('页面渲染失败：') + ((err && err.message) || String(err)))
+				E('div', { 'class': 'qm-error-banner' }, _('页面渲染失败：') + ((err && err.message) || String(err)))
 			]);
 		});
 	},

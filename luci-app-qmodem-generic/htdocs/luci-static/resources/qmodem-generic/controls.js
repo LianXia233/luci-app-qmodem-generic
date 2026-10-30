@@ -1781,9 +1781,35 @@ function state(label, value) {
 /* 保留历史导出：视图仍在调用 controls.styleNode()。
  * 现在它只负责注入"控件级"的局部样式，全局皮肤（令牌 / 组件 / 响应式）
  * 统一由 theme.js 提供，因此这里先确保主题层已注入再返回本模块的样式节点。 */
+/* ------------------------------------------------------------------
+ * 样式注入：只向 document.head 注入一次（幂等），返回 null。
+ * 历史写法是每个视图的 styleNode() 返回 <style> 节点、随轮询重绘反复插入，
+ * 导致每 5~8 秒整段 CSS 被重新创建并解析一次。现在统一注入 head：
+ * 首次调用注入，之后命中 #id 直接跳过；E() 会过滤 null 子节点，
+ * 视图节点数组不需要任何改动。非浏览器环境（Node 单元测试）静默跳过。 */
+var injectedStyles = {};
+function injectStyleOnce(id, css) {
+	if (typeof document === 'undefined' || !document.createElement)
+		return null;
+	if (typeof css !== 'string' || !css)
+		return null;
+	if (!injectedStyles[id])
+		injectedStyles[id] = css;
+	if (typeof document.getElementById === 'function' && document.getElementById(id))
+		return null;
+	try {
+		var style = document.createElement('style');
+		style.id = id;
+		style.type = 'text/css';
+		style.appendChild(document.createTextNode(injectedStyles[id]));
+		(document.head || document.documentElement).appendChild(style);
+	} catch (e) { /* 注入失败不影响页面功能 */ }
+	return null;
+}
+
 function styleNode() {
 	theme.apply();
-	return E('style', {}, [
+	return injectStyleOnce('qm-controls-ui-style', [
 		'.mt-ui-page{--mt-ui-accent:var(--qm-accent);--mt-ui-teal:var(--qm-accent-3);--mt-ui-border:var(--qm-border);--mt-ui-border-soft:var(--qm-border-soft);--mt-ui-surface:var(--qm-surface);--mt-ui-muted:var(--qm-text-muted);max-width:1120px;margin:0 auto;color:var(--qm-text)}',
 		'.mt-ui-hero{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 24px;margin:0 0 16px;border:0;border-radius:16px;background:var(--qm-hero-gradient);color:var(--qm-on-hero);box-shadow:0 10px 28px var(--qm-shadow-color)}.mt-ui-hero h2{margin:0 0 6px;color:var(--qm-on-hero);font-size:24px;line-height:1.2}.mt-ui-hero p,.mt-ui-hero [class*="-sub"]{margin:0;color:var(--qm-on-hero);font-size:12px;line-height:1.5}.mt-ui-hero [class*="kicker"],.mt-ui-hero [class*="eyebrow"]{color:var(--qm-on-hero);font-size:11px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}',
 		'.mt-ui-card{border:1px solid var(--mt-ui-border);border-radius:14px;background:var(--mt-ui-surface);box-shadow:0 3px 12px var(--qm-shadow-color)}',
@@ -2050,6 +2076,7 @@ return baseclass.extend({
 	card: card,
 	state: state,
 	styleNode: styleNode,
+	injectStyleOnce: injectStyleOnce,
 	confirmModal: confirmModal,
 	operatorInfo: operatorInfo
 });

@@ -3643,3 +3643,12 @@ msgstr "后台任务被拒绝"
 
 msgid "Task timed out"
 msgstr "后台任务超时"
+
+msgid "完整模组信息"
+msgstr "完整模组信息"
+
+msgid "%d 类 · %d 项"
+msgstr "%d 类 · %d 项"
+
+msgid "QModem 未上报其它信息字段。"
+msgstr "QModem 未上报其它信息字段。"

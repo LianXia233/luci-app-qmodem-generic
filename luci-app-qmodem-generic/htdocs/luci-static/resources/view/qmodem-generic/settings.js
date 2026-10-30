@@ -120,7 +120,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-settings-style', [
 			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
 			'.mt-diag-page{position:relative;max-width:1120px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
 			/* 背景环境漫反射光晕 */
@@ -203,6 +203,8 @@ return view.extend({
 	render: function(res) {
 		var self = this;
 		res = res || {};
+		var enter = !self.painted;
+		self.painted = true;
 
 		var warnings = (res.errors || []).map(function(msg) {
 			return E('div', { 'class': 'alert-message warning' }, msg);
@@ -215,7 +217,7 @@ return view.extend({
 		});
 
 		if (!res.section)
-			return E('div', { 'class': 'mt-diag-page' }, [
+			return E('div', { 'class': 'mt-diag-page' + (enter ? ' qm-enter' : '') }, [
 				this.styleNode(),
 				controls.styleNode(),
 				modemBar,
@@ -355,7 +357,7 @@ return view.extend({
 
 		return Promise.all([ m.render(), gm.render() ]).then(function(nodes) {
 			var formNode = nodes[0], globalFormNode = nodes[1];
-			return E('div', { 'class': 'mt-diag-page' }, [
+			return E('div', { 'class': 'mt-diag-page' + (enter ? ' qm-enter' : '') }, [
 				self.styleNode(),
 				controls.styleNode(),
 				/* 背景环境漫反射光晕 */
@@ -453,7 +455,7 @@ return view.extend({
 				])
 			]);
 		}).catch(function(err) {
-			return E('div', { 'class': 'mt-diag-page' }, [
+			return E('div', { 'class': 'mt-diag-page' + (enter ? ' qm-enter' : '') }, [
 				self.styleNode(),
 				controls.styleNode(),
 				modemBar,

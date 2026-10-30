@@ -82,7 +82,7 @@ return view.extend({
 	},
 
 	styleNode: function() {
-		return E('style', {}, [
+		return controls.injectStyleOnce('qm-terminal-style', [
 			'.mt-terminal-hero{padding:22px 24px;border-radius:14px;background:var(--qm-terminal-gradient);color:var(--qm-on-hero);margin-bottom:16px}',
 			'.mt-terminal-hero h2{color:var(--qm-on-hero);margin:0 0 6px}.mt-terminal-hero p{color:var(--qm-border);margin:0;max-width:760px}',
 			'.mt-terminal-card{border:1px solid var(--qm-border-soft);border-radius:14px;background:var(--qm-surface);padding:20px}',
@@ -99,12 +99,12 @@ return view.extend({
 			'.qm-app .qm-at-state{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--qm-border);font-size:12px;color:var(--qm-text-soft);background:var(--qm-surface-2)}',
 			'.qm-app .qm-at-state.is-busy{color:var(--qm-accent);background:var(--qm-accent-soft);border-color:var(--qm-accent-border)}',
 			'.qm-app .qm-at-state.is-ok{color:var(--qm-ok);background:var(--qm-ok-soft);border-color:var(--qm-ok-border)}',
-			'.qm-app .qm-at-state.is-error{color:#b42318;background:var(--qm-danger-soft);border-color:var(--qm-danger-border)}',
+			'.qm-app .qm-at-state.is-error{color:var(--qm-danger);background:var(--qm-danger-soft);border-color:var(--qm-danger-border)}',
 			'.qm-app .qmodem-generic-output{white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;background:var(--qm-surface-2);color:var(--qm-text);border:0;border-radius:0;padding:16px 18px;margin:0;min-height:300px;max-height:560px;overflow:auto;font-family:var(--qm-font-mono);font-size:13px;line-height:1.75}',
 			'.qm-app .qmodem-generic-output.is-empty{color:var(--qm-text-muted)}',
 			'.qm-app .qm-at-entry{display:block;padding:5px 0;white-space:pre-wrap}',
 			'.qm-app .qm-at-entry.is-command{color:var(--qm-accent);font-weight:650}',
-			'.qm-app .qm-at-entry.is-error{color:#b42318;border-left:3px solid var(--qm-danger);padding-left:10px}',
+			'.qm-app .qm-at-entry.is-error{color:var(--qm-danger);border-left:3px solid var(--qm-danger);padding-left:10px}',
 			'.qm-app.qm-dark .qm-at-entry.is-error,.qm-app.qm-dark .qm-at-state.is-error{color:#ffb4ab}',
 			'.qm-app .qm-at-time{font-size:11px;color:var(--qm-text-muted);font-weight:400}',
 			'@media(max-width:680px){.qmodem-generic-terminal-row{flex-wrap:wrap}.qmodem-generic-terminal-row input{flex-basis:100%}.mt-terminal-hero{padding:20px}}'
@@ -239,6 +239,8 @@ return view.extend({
 		var self = this;
 
 		res = res || {};
+		var enter = !self.painted;
+		self.painted = true;
 		this.section = res.section || null;
 		this.atPort = res.port || '';
 		this.portSelect = null;
@@ -257,7 +259,7 @@ return view.extend({
 		]) ]);
 
 		if (!this.section) {
-			return E('div', { 'class':'mt-terminal mt-ui-page' }, [
+			return E('div', { 'class':'mt-terminal mt-ui-page' + (enter ? ' qm-enter' : '') }, [
 				this.styleNode(),
 				controls.styleNode(),
 				modemBar,
@@ -306,7 +308,7 @@ return view.extend({
 		});
 		window.setTimeout(function() { self.renderSaved(saved, input, output); }, 0);
 
-		return E('div', { 'class':'mt-terminal mt-ui-page' }, [
+		return E('div', { 'class':'mt-terminal mt-ui-page' + (enter ? ' qm-enter' : '') }, [
 			this.styleNode(),
 			controls.styleNode(),
 			modemBar,

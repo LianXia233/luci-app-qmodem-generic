@@ -288,6 +288,10 @@ var CSS_COMPONENTS = [
 	'.qm-alert.is-danger{background:var(--qm-danger-soft);border-color:var(--qm-danger-border);color:var(--qm-danger)}',
 
 	'.qm-empty{padding:26px 14px;text-align:center;color:var(--qm-text-muted);font-size:12px}',
+	'.qm-app .qm-error-banner{display:flex;gap:8px;align-items:flex-start;padding:10px 14px;border-radius:var(--qm-radius-sm);background:var(--qm-danger-soft);border:1px solid var(--qm-danger-border);color:var(--qm-danger);font-size:12.5px;line-height:1.55;margin-bottom:12px;word-break:break-word}',
+	'.qm-app .qm-error-banner::before{content:"!";flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--qm-danger);color:#fff;font-weight:800;font-size:12px;margin-top:1px}',
+	'.qm-app .qm-warn-banner{display:flex;gap:8px;align-items:flex-start;padding:10px 14px;border-radius:var(--qm-radius-sm);background:var(--qm-warn-soft);border:1px solid var(--qm-warn-border);color:var(--qm-warn);font-size:12.5px;line-height:1.55;margin-bottom:12px;word-break:break-word}',
+	'.qm-app .qm-warn-banner::before{content:"!";flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--qm-warn);color:#fff;font-weight:800;font-size:12px;margin-top:1px}',
 	'.qm-mono{font-family:var(--qm-font-mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-all}',
 	'.qm-scroll{max-height:340px;overflow:auto;-webkit-overflow-scrolling:touch}',
 	'.qm-table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}',
@@ -513,8 +517,26 @@ var CSS_LEGACY = [
 	'.qm-app [fill="#64748b"],.qm-app [fill="#94a3b8"]{fill:var(--qm-text-muted)}',
 	'.qm-app [stroke="#e2e8f0"],.qm-app [stroke="#cbd5e1"],.qm-app [stroke="#226"],',
 	'.qm-app [stroke="rgba(226,232,240,0.8)"]{stroke:var(--qm-border)}',
-	'.qm-app [fill="#f1f5f9"],.qm-app [fill="#f8fafc"],.qm-app [fill="#e2e8f0"]{fill:var(--qm-surface-2)}',
+	'.qm-app [fill="#f1f5f9"],.qm-app [fill="#f8fafc"],.qm-app [fill="#e2e8f0"],',
+	'.qm-app [fill="rgba(241,245,249,0.85)"],.qm-app [fill="rgba(241,245,249,0.9)"]{fill:var(--qm-surface-2)}',
 	'.qm-app [fill="#fff"],.qm-app [fill="#ffffff"]{fill:var(--qm-surface)}'
+].join('');
+
+/* ------------------------------------------------------------------ */
+/* 4.5) 首屏入场动画                                                  */
+/* ------------------------------------------------------------------ */
+/* 只由视图根节点上的 .qm-enter 触发（首次渲染加类，轮询重绘不加），
+ * 尊重 prefers-reduced-motion（见 CSS_RESPONSIVE）。 */
+function selEnter(list) {
+	return list.map(function(c) { return '.qm-enter .' + c; }).join(',');
+}
+
+var CSS_ENTER = [
+	'@keyframes qmFadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}',
+	selEnter(CARD_CLASSES) + '{animation:qmFadeUp .42s cubic-bezier(.2,.8,.4,1) backwards}',
+	selEnter(HERO_CLASSES) + '{animation:qmFadeUp .5s cubic-bezier(.2,.8,.4,1) backwards}',
+	'.qm-enter .qm-shortcut-item,.qm-enter .qm-shortcuts>a{animation:qmFadeUp .42s cubic-bezier(.2,.8,.4,1) backwards}',
+	'.qm-enter .qm-topology-node{animation:qmFadeUp .42s cubic-bezier(.2,.8,.4,1) backwards}'
 ].join('');
 
 /* ------------------------------------------------------------------ */
@@ -611,7 +633,7 @@ var CSS_PAGE_TITLES = [
 	'.qm-app h2.qm-page-title>.qm-page-title-icon{width:22px;height:22px;flex-basis:22px}}'
 ].join('');
 
-var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS, CSS_PAGE_TITLES ].join('\n');
+var QM_CSS = [ CSS_TOKENS, CSS_PALETTES, CSS_BASE, CSS_COMPONENTS, CSS_LEGACY, CSS_ENTER, CSS_APPEARANCE, CSS_RESPONSIVE, CSS_NAV_TABS, CSS_PAGE_TITLES ].join('\n');
 
 /* ------------------------------------------------------------------ */
 /* 6) 运行时：注入 + 明暗探测                                            */
