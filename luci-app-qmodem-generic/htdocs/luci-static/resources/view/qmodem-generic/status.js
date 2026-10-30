@@ -696,8 +696,8 @@ return view.extend({
 				netInfoCell('band', '制式模式', 'net-val-rat', data.sysmode_detail),
 				netInfoCell('band', '射频频段', 'net-val-band', data.band_display || data.band),
 				netInfoCell('layers', '载波聚合', 'net-val-ca', caText),
-				netInfoCell('ip', 'WWAN IPv4 地址', 'net-val-ip', data.ipv4),
-				netInfoCell('ipv6', 'WWAN IPv6 地址', 'net-val-ipv6', data.ipv6)
+				netInfoCell('ip', data.netdev ? 'WWAN IPv4 地址 (' + data.netdev + ')' : 'WWAN IPv4 地址', 'net-val-ip', data.ipv4),
+				netInfoCell('ipv6', data.netdev ? 'WWAN IPv6 地址 (' + data.netdev + ')' : 'WWAN IPv6 地址', 'net-val-ipv6', data.ipv6)
 			])
 		]);
 		statGrid.appendChild(cardNet);
