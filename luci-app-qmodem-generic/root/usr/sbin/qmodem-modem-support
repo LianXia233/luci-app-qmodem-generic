@@ -37,6 +37,9 @@ EXTRA="${QMODEM_EXTRA_SUPPORT_FILE:-/usr/share/qmodem-generic/extra_modem_suppor
 CUSTOM_DIR="${QMODEM_CUSTOM_SUPPORT_DIR:-/etc/qmodem-generic/modems}"
 BACKUP="$TARGET.bak"
 TMP="$TARGET.tmp.$$"
+# 待写入计划（每行 "组\t型号\t数据源"）与按数据源聚合后的写入批次
+PLAN_FILE="${TMPDIR:-/tmp}/qmodem-plan.$$"
+GROUPS_FILE="${TMPDIR:-/tmp}/qmodem-groups.$$"
 LOCKDIR="${QMODEM_SUPPORT_LOCKDIR:-/var/run/qmodem-modem-support.lock}"
 # 锁最多持有时间（秒）：超过且持锁进程已不存在时视为崩溃残留，可强行清理
 LOCK_RETRY="${QMODEM_SUPPORT_LOCK_RETRY:-5}"
@@ -134,15 +137,32 @@ has_def() {
 		'(.modem_support // {})[$g][$m] | type == "object"' "$3" >/dev/null 2>&1
 }
 
-# 把型号定义插到目标文件指定分组的最前面（新的在前，与历史行为一致），
+# 把一批型号定义插到目标文件指定分组的最前面（新的在前，与历史行为一致），
 # 结果写入 $TMP；分组不存在时会在 modem_support 下新建该分组。
-inject_model() {
-	jq --indent 4 --arg g "$1" --arg m "$2" --slurpfile src "$3" '
-		((.modem_support // {})[$g][$m]) as $old
-		| .modem_support = ((.modem_support // {})
-			| .[$g] = ( ( { ($m): ($src[0].modem_support[$g][$m]) } )
-				+ ( ((.[$g] // {}) | if $old == null then . else del(.[$m]) end) ) ))
+# $1 = 数据源文件，$2 = [{"g":"usb","m":"rg200u-cn"}, ...]
+#
+# 同一数据源的型号合并成一次 jq：支持库只能整体重写，内置源有上百个型号，
+# 逐个型号各写一遍就是上百次全文件解析 + 落盘。
+inject_models() {
+	jq --indent 4 --slurpfile src "$1" --argjson pairs "$2" '
+		reduce $pairs[] as $p (.;
+			((.modem_support // {})[$p.g][$p.m]) as $old
+			| ($src[0].modem_support[$p.g][$p.m]) as $def
+			| if ($def | type) == "object" then
+				.modem_support = ((.modem_support // {})
+					| .[$p.g] = ( ( { ($p.m): $def } )
+						+ ( ((.[$p.g] // {}) | if $old == null then . else del(.[$p.m]) end) ) ))
+			  else . end)
 	' "$TARGET" > "$TMP" 2>/dev/null
+}
+
+# 写入计划里同一数据源是否已全部落库（用于批量写入后的复核）
+all_injected() {
+	[ -s "$1" ] || return 1
+	jq -e --argjson pairs "$2" '
+		.modem_support as $ms
+		| [ $pairs[] | ($ms[.g][.m] | type) == "object" ] | all
+	' "$1" >/dev/null 2>&1
 }
 
 # 结构校验：必须是合法 JSON 且 modem_support 为对象
@@ -319,7 +339,7 @@ while read -r GROUP MODEL SOURCE; do
 			exit 0
 		fi
 		printf '%s %s\n' "$$" "$(date +%s)" > "$LOCKDIR/pid" 2>/dev/null || true
-		trap 'cleanup_tmp; rm -f "$LOCKDIR/pid" 2>/dev/null; rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
+		trap 'cleanup_tmp; rm -f "$PLAN_FILE" "$GROUPS_FILE" 2>/dev/null; rm -f "$LOCKDIR/pid" 2>/dev/null; rmdir "$LOCKDIR" 2>/dev/null' EXIT INT TERM
 	fi
 
 	if [ "$BACKED_UP" = "0" ]; then
@@ -327,66 +347,83 @@ while read -r GROUP MODEL SOURCE; do
 		BACKED_UP=1
 	fi
 
-	if ! inject_model "$GROUP" "$MODEL" "$SOURCE"; then
-		cleanup_tmp
-		ERR="写入 $MODEL 时 jq 报错，已放弃修改：$TARGET"
-		log "$ERR"
-		emit 1
-		exit 1
-	fi
-
-	# 先验临时文件，再覆盖原文件；覆盖时保留 inode 与权限位
-	if ! validate_json "$TMP"; then
-		cleanup_tmp
-		ERR="生成的临时文件无效，已放弃写入：$MODEL"
-		log "$ERR"
-		emit 1
-		exit 1
-	fi
-	if ! jq -e --arg g "$GROUP" --arg m "$MODEL" \
-		'(.modem_support // {})[$g][$m] | type == "object"' "$TMP" >/dev/null 2>&1; then
-		cleanup_tmp
-		ERR="临时文件中未找到已注入的 $MODEL（$GROUP），已放弃写入"
-		log "$ERR"
-		emit 1
-		exit 1
-	fi
-
-	if ! cat "$TMP" > "$TARGET" 2>/dev/null; then
-		cleanup_tmp
-		ERR="写入失败（文件系统只读？），已放弃：$TARGET"
-		log "$ERR"
-		[ "$BACKED_UP" = "1" ] && cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
-		emit 1
-		exit 1
-	fi
-	cleanup_tmp
-
-	# 逐型号复核：任何一次写入后支持库都必须可解析
-	if ! validate_target; then
-		[ -f "$BACKUP" ] && cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
-		ERR="写入后校验失败，已回滚：$TARGET"
-		log "$ERR"
-		emit 1
-		exit 1
-	fi
-
+	# 只登记写入计划：同一数据源的型号在遍历结束后一次性合并，避免上百次
+	# 全文件重写。记入 APPLIED 是为了让后续型号（含其它数据源的重复项）去重。
+	printf '%s\t%s\t%s\n' "$GROUP" "$MODEL" "$SOURCE" >> "$PLAN_FILE"
 	if [ -n "$APPLIED" ]; then
 		APPLIED="$APPLIED
 $GROUP $MODEL"
 	else
 		APPLIED="$GROUP $MODEL"
 	fi
-	entry="$GROUP/$MODEL"
-	ADDED="$ADDED $entry"
-	detail "$GROUP" "$MODEL" added
-	log "已向支持库（$GROUP）注入 $MODEL，原文件备份为 $BACKUP"
 done <<EOF
 $SOURCE_ENTRIES
 EOF
 
 cleanup_tmp
 [ -f "$EXISTING_FILE" ] && rm -f "$EXISTING_FILE"
+
+# ---------------------------------------------------------------- 批量写入
+# 支持库只能整体重写，因此按数据源聚合：一个源里的全部型号共用一次 jq。
+if [ -s "$PLAN_FILE" ]; then
+	if ! jq -R -s 'split("\n") | map(select(length > 0) | split("\t"))
+		| group_by(.[2])
+		| map({ src: .[0][2], pairs: map({ g: .[0], m: .[1] }) })' \
+		"$PLAN_FILE" > "$GROUPS_FILE" 2>/dev/null || [ ! -s "$GROUPS_FILE" ]; then
+		rm -f "$PLAN_FILE" "$GROUPS_FILE"
+		ERR="生成写入计划失败，已放弃修改：$TARGET"
+		log "$ERR"
+		emit 1
+		exit 1
+	fi
+
+	_batch_n=$(jq 'length' "$GROUPS_FILE" 2>/dev/null)
+	case "$_batch_n" in ''|*[!0-9]*) _batch_n=0 ;; esac
+	_batch_i=0
+	while [ "$_batch_i" -lt "$_batch_n" ]; do
+		_batch_src=$(jq -r ".[$_batch_i].src" "$GROUPS_FILE" 2>/dev/null)
+		_batch_pairs=$(jq -c ".[$_batch_i].pairs" "$GROUPS_FILE" 2>/dev/null)
+		_batch_i=$((_batch_i + 1))
+
+		if [ -z "$_batch_src" ] || [ -z "$_batch_pairs" ]; then
+			_batch_err="写入计划损坏，已放弃修改：$TARGET"
+		elif ! inject_models "$_batch_src" "$_batch_pairs"; then
+			_batch_err="合并 $_batch_src 的型号定义时 jq 报错，已回滚：$TARGET"
+		elif ! validate_json "$TMP"; then
+			_batch_err="生成的临时文件无效，已回滚：$TARGET"
+		elif ! all_injected "$TMP" "$_batch_pairs"; then
+			_batch_err="临时文件缺少预期型号（$_batch_src），已回滚：$TARGET"
+		elif ! cat "$TMP" > "$TARGET" 2>/dev/null; then
+			_batch_err="写入失败（文件系统只读？），已回滚：$TARGET"
+		elif ! validate_target; then
+			_batch_err="写入后校验失败，已回滚：$TARGET"
+		else
+			_batch_err=''
+		fi
+		cleanup_tmp
+
+		if [ -n "$_batch_err" ]; then
+			rm -f "$PLAN_FILE" "$GROUPS_FILE"
+			if [ "$BACKED_UP" = "1" ] && [ -f "$BACKUP" ]; then
+				cp -f "$BACKUP" "$TARGET" 2>/dev/null || true
+			fi
+			ERR="$_batch_err"
+			log "$ERR"
+			emit 1
+			exit 1
+		fi
+	done
+	rm -f "$GROUPS_FILE"
+
+	# 全部批次写入成功后才登记新增型号：中途失败已经回滚，不能报告成已注入
+	while IFS="$(printf '\t')" read -r _b_g _b_m _b_s; do
+		[ -n "$_b_g" ] && [ -n "$_b_m" ] || continue
+		ADDED="$ADDED $_b_g/$_b_m"
+		detail "$_b_g" "$_b_m" added
+		log "已向支持库（$_b_g）注入 $_b_m，原文件备份为 $BACKUP"
+	done < "$PLAN_FILE"
+fi
+rm -f "$PLAN_FILE"
 
 # ---------------------------------------------------------------- 结果输出
 if [ -n "$ADDED" ]; then

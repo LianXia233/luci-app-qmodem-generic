@@ -121,6 +121,22 @@ echo "$OUT2" | grep -q '"added":\[\]' && ok "第二次幂等跳过（added 为�
 # 目标文件仍可解析
 sh -c "awk 'BEGIN{RS=\"\"} END{print NR}' < '$T/share/qmodem/modem_support.json'" >/dev/null 2>&1 && ok "目标文件非空" || bad "目标文件为空"
 tail -1 "$T/share/qmodem/modem_support.json" | grep -q '}' && ok "目标文件以 } 收尾" || bad "目标文件未以 } 收尾"
+# 批量注入：内置源的所有型号一次合并，内容必须与数据源逐项一致
+DST="$T/share/qmodem/modem_support.json"
+SRC="$T/share/qmodem-generic/extra_modem_support.json"
+if env $ENVQ jq -e --slurpfile d "$DST" '
+	[ .modem_support | to_entries[]
+	  | .key as $g | .value | to_entries[]
+	  | ($d[0].modem_support[$g][.key]) == .value ] | all
+' "$SRC" >/dev/null 2>&1; then
+	ok "批量注入：内置型号逐项与数据源一致"
+else
+	bad "批量注入：型号内容与数据源不一致"
+fi
+SRC_N=$(env $ENVQ jq '[ .modem_support[] | length ] | add' "$SRC" 2>/dev/null)
+DST_N=$(env $ENVQ jq '[ .modem_support[] | length ] | add' "$DST" 2>/dev/null)
+[ "$DST_N" -eq $((SRC_N + 1)) ] && ok "批量注入：型号总数 = 内置 $SRC_N + 原有 1" || bad "型号总数异常：$DST_N（期望 $((SRC_N + 1))）"
+[ "$(grep -c '"rg520n-cn"[[:space:]]*:' "$DST")" -eq 1 ] && ok "批量注入：无重复键" || bad "批量注入产生了重复键"
 
 # ---------------------------------------------------------------- 2. qmodem_support rpcd
 echo "== 2. qmodem_support rpcd =="
