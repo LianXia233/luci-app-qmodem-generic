@@ -35,17 +35,20 @@ var BROADCAST_TOWER_PATHS = [
 return view.extend({
 	section: null,
 
+	/* load() 只做引导并立即返回：页面骨架先画出来，数据采集在 render()
+	   之后异步进行（collectData → 原地重渲染填充），面板秒开不阻塞。 */
 	load: function() {
 		var self = this;
 		return controls.bootstrap().then(function(ctx) {
 			self.section = ctx.section;
-			return self.collect(ctx);
+			self.modems = (ctx && ctx.sections) || [];
+			return { section: ctx.section, errors: [] };
 		});
 	},
 
-	collect: function(ctx) {
+	collectData: function(section) {
 		var self = this, errors = [];
-		var section = (ctx && ctx.section) || 'modem1';
+		section = section || this.section || 'modem1';
 
 		/* 每个后端调用限时：模组忙（如重拨中）时 ubus/AT 调用可能长时间挂起，
 		   不设超时会卡住整个视图（页面永远停在「加载视图中」）。超时的分组
@@ -73,8 +76,6 @@ return view.extend({
 				return fallback;
 			});
 		}
-
-		self.modems = (ctx && ctx.sections) || [];
 
 		if (!section)
 			return { section: null, errors: errors };
@@ -273,6 +274,9 @@ return view.extend({
 		if (pcc && pcc.band_name)
 			data.band = this.cleanText(pcc.band_name) || data.band;
 
+		/* 频段显示补 RAT 前缀：裸数字（41）分不清 NR/LTE */
+		data.band_display = this.bandDisplay(data.sysmode_detail, data.band);
+
 		/* ---- 邻区（get_neighborcell，原样上报值；首屏后异步填充） ---- */
 		var nb = (res.neighbor && res.neighbor.neighborcell) || {};
 		data.neighbors_nr = Array.isArray(nb.NR) ? nb.NR : [];
@@ -315,6 +319,23 @@ return view.extend({
 		return controls.formatRate((b * 8) / 1024);
 	},
 
+	/* 频段显示补 RAT 前缀：裸数字（41）分不清 NR/LTE —— 优先用
+	   get_current_band 的 band_name（如 NR n41，调用方先行赋给 band）；
+	   否则按制式拼 NR n41 / LTE B41；已有 n41/B41 前缀的原一化处理。 */
+	bandDisplay: function(sysmodeDetail, band) {
+		if (!controls.hasValue(band)) return '';
+		var sysU = String(sysmodeDetail || '').toUpperCase();
+		var rat = '';
+		if (sysU.indexOf('NR') >= 0 || sysU.indexOf('5G') >= 0) rat = 'NR';
+		else if (sysU.indexOf('LTE') >= 0 || sysU.indexOf('4G') >= 0) rat = 'LTE';
+		var s = String(band).trim();
+		if (/^n?[0-9]+$/.test(s))
+			return rat === 'LTE' ? 'LTE B' + s.replace(/^n/, '') : 'NR n' + s.replace(/^[Bb]/, '');
+		if (/^[Bb][0-9]+$/.test(s))
+			return rat === 'LTE' ? 'LTE ' + s.toUpperCase() : 'NR n' + s.slice(1);
+		return s;
+	},
+
 	render: function(res) {
 		var self = this;
 		res = res || {};
@@ -324,9 +345,17 @@ return view.extend({
 
 		var E = controls.element;
 		var data = this.parseStatus(res);
+		if (res && res.cell)
+			self._dataReady = true;
 		var connected = data.connected === '1';
 		var rsrpNum = parseFloat(data.rsrp);
 		var hasRsrp = !isNaN(rsrpNum);
+
+		/* 载波聚合摘要（get_current_band 的真实 pcc/scc 列表） */
+		var caText = data.pcc
+			? ('PCC ' + (data.pcc.band_name || data.pcc.band || '--') +
+				(data.scc.length ? ' + SCC ' + data.scc.map(function(c) { return (c.band_name || c.band || '--'); }).join(' / ') : ''))
+			: '';
 
 		var modems = self.modems || (controls.getModemSectionsSync ? controls.getModemSectionsSync() : []);
 		var modemBar = (controls.renderModemBar && modems.length > 0) ? controls.renderModemBar(modems, res.section, function(id) {
@@ -534,17 +563,22 @@ return view.extend({
 		var layout = E('div', { 'class': 'mt-anime-container mt5700-page qm-app' + (enter ? ' qm-enter' : '') });
 
 		// 0. Soft Anime Hero Card (Streamlined & Compact)
+		/* 副标题改为真实数据摘要（制式/频段/CA/运营商），不再是写死文案；
+		   数据异步到达前显示读取占位。徽标与型号 tag 同样留 id 供异步填充。 */
+		var heroDescParts = [data.sysmode_detail, data.band_display || data.band, caText, data.operator_name]
+			.filter(function(v) { return controls.hasValue(v); });
 		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card', 'style': 'padding:10px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;' }, [
 			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;' }, [
 				E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
 					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem · 全息全景网络座舱'),
-					E('span', { 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
+					E('span', { 'id': 'qm-hero-badge', 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
 						E('span', { 'class': 'mt-beacon-dot', 'style': connected ? '' : 'background:var(--mt5700-danger);' }),
-						E('span', {}, connected ? '5G 链路就绪 (CONNECTED)' : '等待驻网 (STANDBY)')
+						E('span', { 'id': 'qm-hero-badge-text' }, connected ? '5G 链路就绪 (CONNECTED)' : (data.reachable ? '等待驻网 (STANDBY)' : '读取模组状态中…'))
 					]),
-					data.model ? E('span', { 'class': 'mt-pill-tag', 'style': 'background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:2px 8px;font-size:11px;' }, data.model) : null
+					E('span', { 'id': 'qm-hero-model', 'class': 'mt-pill-tag', 'style': 'display:' + (data.model ? 'inline-flex' : 'none') + ';background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:2px 8px;font-size:11px;' }, data.model || '')
 				]),
-				E('p', { 'style': 'margin:0;font-size:12px;color:var(--mt5700-text-secondary);line-height:1.3;' }, '5G NR 全网通 · 载波聚合 · 射频空间波束 · 实时微秒级遥测')
+				E('p', { 'id': 'qm-hero-desc', 'style': 'margin:0;font-size:12px;color:var(--mt5700-text-secondary);line-height:1.3;' },
+					heroDescParts.length ? heroDescParts.join(' · ') : '正在读取模组数据…')
 			]),
 			E('div', { 'class': 'mt-hero-right', 'style': 'display:flex;align-items:center;gap:14px;' }, [
 				modemBar,
@@ -613,10 +647,6 @@ return view.extend({
 		statGrid.appendChild(cardSig);
 
 		// Card 2: 网络状态与基站拓扑（netifd / cell_info / get_current_band 真实值）
-		var caText = data.pcc
-			? ('PCC ' + (data.pcc.band_name || data.pcc.band || '--') +
-				(data.scc.length ? ' + SCC ' + data.scc.map(function(c) { return (c.band_name || c.band || '--'); }).join(' / ') : ''))
-			: '';
 		var cardNet = E('div', { 'class': 'mt-card' }, [
 			E('div', { 'class': 'mt-card-head' }, [
 				E('div', { 'class': 'mt-card-title' }, [
@@ -650,7 +680,7 @@ return view.extend({
 			E('div', { 'class': 'mt-net-info-grid' }, [
 				netInfoCell('sim', '运营商归属', 'net-val-isp', data.operator_name),
 				netInfoCell('band', '制式模式', 'net-val-rat', data.sysmode_detail),
-				netInfoCell('band', '射频频段', 'net-val-band', data.band),
+				netInfoCell('band', '射频频段', 'net-val-band', data.band_display || data.band),
 				netInfoCell('layers', '载波聚合', 'net-val-ca', caText),
 				netInfoCell('ip', 'WWAN IPv4 地址', 'net-val-ip', data.ipv4),
 				netInfoCell('ipv6', 'WWAN IPv6 地址', 'net-val-ipv6', data.ipv6)
@@ -717,13 +747,13 @@ return view.extend({
 		var tabPanes = {};
 		var tabDefs = [
 			{ id: 'tab-cell', title: '小区无线', rows: [
-				['物理小区标识 (PCI)', data.pci],
-				['绝对频点号 (ARFCN)', data.arfcn],
-				['射频频段 (Band)', data.band],
-				['下行载波带宽 (DL BW)', data.dl_bw],
-				['上行载波带宽 (UL BW)', data.ul_bw],
-				['跟踪区码 (TAC)', data.tac],
-				['小区全局标识 (Cell ID)', data.cell_id]
+				['物理小区标识 (PCI)', data.pci, 'tabv-pci'],
+				['绝对频点号 (ARFCN)', data.arfcn, 'tabv-arfcn'],
+				['射频频段 (Band)', data.band_display || data.band, 'tabv-band'],
+				['下行载波带宽 (DL BW)', data.dl_bw, 'tabv-dlbw'],
+				['上行载波带宽 (UL BW)', data.ul_bw, 'tabv-ulbw'],
+				['跟踪区码 (TAC)', data.tac, 'tabv-tac'],
+				['小区全局标识 (Cell ID)', data.cell_id, 'tabv-cellid']
 			] },
 			{ id: 'tab-hw', title: '模组硬件', rows: [
 				['模组型号 (Model)', data.model],
@@ -765,17 +795,23 @@ return view.extend({
 
 			var paneRows = [];
 			t.rows.forEach(function(r) {
-				/* 只渲染后端真实提供的字段；缺失的行直接隐藏，绝不填假值 */
-				if (!controls.hasValue(r[1]))
-					return;
+				/* 只渲染后端真实提供的字段；缺失的行直接隐藏，绝不填假值。
+				   例外：带刷新 id 的行（PCI/ARFCN/频段等）在数据未就绪时以
+				   '…' 占位渲染，10s 轮询会原地填充，避免开页久了 identifier 过期。 */
+				if (!controls.hasValue(r[1])) {
+					/* 数据未就绪且该行带刷新 id → 以 '…' 占位等待轮询填充；否则隐藏 */
+					if (!(r[2] && !self._dataReady))
+						return;
+				}
 				paneRows.push(E('div', { 'class': 'mt-info-row', 'style': 'display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--mt5700-border-subtle);font-size:13px;' }, [
 					E('span', { 'style': 'color:var(--mt5700-text-secondary);font-weight:600;' }, r[0]),
-					E('strong', { 'style': 'color:var(--mt5700-text);font-weight:750;font-variant-numeric:tabular-nums;' }, String(r[1]))
+					E('strong', { 'style': 'color:var(--mt5700-text);font-weight:750;font-variant-numeric:tabular-nums;', 'id': r[2] || null },
+						controls.hasValue(r[1]) ? String(r[1]) : '…')
 				]));
 			});
 			if (!paneRows.length) {
 				paneRows.push(E('div', { 'style': 'padding:14px 0;font-size:12px;color:var(--mt5700-text-muted);text-align:center;' },
-					'后端暂未上报该分组数据'));
+					self._dataReady ? '后端暂未上报该分组数据' : '正在读取模组数据…'));
 			}
 
 			var pane = E('div', { 'id': t.id, 'class': 'mt-tab-pane', 'style': idx === 0 ? 'padding-top:14px;' : 'display:none;padding-top:14px;' }, paneRows);
@@ -814,6 +850,19 @@ return view.extend({
 		midGrid.appendChild(chartCard);
 
 		// ---- 实时轮询绑定（LuCI poll：离开页面自动停止） ----
+		self._netdev = data.netdev || self._netdev || '';
+		self._caText = caText;
+		self._operator = data.operator_name || '';
+		/* 采样历史与计数基准跨重渲染保留（异步数据到达后原地重渲染，不清零） */
+		if (self.trafficDl == null) self.trafficDl = [];
+		if (self.trafficUl == null) self.trafficUl = [];
+		if (self.signalSamples == null) self.signalSamples = [];
+		if (!self._seeded && (hasRsrp || data.rsrq || data.sinr)) {
+			self._seeded = true;
+			self.signalSamples.push({
+				rsrp: data.rsrp, sinr: data.sinr, rsrq: data.rsrq
+			});
+		}
 		self._live = {
 			root: layout,
 			dlRate: layout.querySelector ? layout.querySelector('#traffic-dl-rate') : null,
@@ -824,18 +873,37 @@ return view.extend({
 			chart: layout.querySelector ? layout.querySelector('#sig-chart-box') : null,
 			neighborBox: layout.querySelector ? layout.querySelector('#neighbor-box') : null
 		};
-		self.trafficDl = [];
-		self.trafficUl = [];
-		self.lastCounters = null;
-		self.signalSamples = [];
-		if (hasRsrp || data.rsrq || data.sinr) {
-			self.signalSamples.push({
-				rsrp: data.rsrp, sinr: data.sinr, rsrq: data.rsrq
-			});
-		}
 		liveSparkline(self._live.sparkDl, self.trafficDl, '#0ea5e9', '流量采样中…');
 		liveSparkline(self._live.sparkUl, self.trafficUl, '#10b981', '流量采样中…');
 		drawSignalChart();
+
+		/* 小区标识刷新：10s 轮询同步更新 PCI/ARFCN/频段/TAC/CellID/制式，
+		   避免页面开久了小区重选后标识停留在旧值 */
+		function applyCellIdentity(c) {
+			var root = self._live && self._live.root;
+			if (!root || !c) return;
+			function setT(id, v) {
+				if (!controls.hasValue(v)) return;
+				var el = root.querySelector('#' + id);
+				if (el) el.textContent = String(v);
+			}
+			setT('sig-rat-tag', c.sysmode);
+			setT('net-val-rat', c.sysmode);
+			var bd = self.bandDisplay(c.sysmode, c.band);
+			if (controls.hasValue(bd)) {
+				setT('net-val-band', bd);
+				setT('tabv-band', bd);
+			}
+			setT('tabv-pci', c.pci);
+			setT('tabv-arfcn', c.arfcn);
+			setT('tabv-tac', c.tac);
+			setT('tabv-cellid', c.cell_id);
+			var descEl = root.querySelector('#qm-hero-desc');
+			if (descEl) {
+				var parts = [c.sysmode, bd, self._caText, self._operator].filter(controls.hasValue);
+				if (parts.length) descEl.textContent = parts.join(' · ');
+			}
+		}
 
 		if (!self.pollRegistered) {
 			self.pollRegistered = true;
@@ -843,10 +911,11 @@ return view.extend({
 			/* 每 1s：读取物理网卡内核计数（network.device statistics） */
 			poll.add(L.bind(function() {
 				var live = self._live;
-				if (!live || !live.root || !live.root.isConnected || !data.netdev)
+				if (!live || !live.root || !live.root.isConnected || !self._netdev)
 					return;
-				controls.getDeviceStatus(data.netdev).then(function(st) {
-					if (!live.root || !live.root.isConnected)
+				controls.getDeviceStatus(self._netdev).then(function(st) {
+					live = self._live; /* 重渲染后 _live 已指向新 DOM，重新取 */
+					if (!live || !live.root || !live.root.isConnected)
 						return;
 					var s = (st && st.statistics) || {};
 					var rx = Number(s.rx_bytes), tx = Number(s.tx_bytes);
@@ -881,7 +950,8 @@ return view.extend({
 				if (!live || !live.root || !live.root.isConnected || !self.section)
 					return;
 				controls.getCellInfo(self.section).then(function(cell) {
-					if (!live.root || !live.root.isConnected)
+					live = self._live; /* 重渲染后重新取 */
+					if (!live || !live.root || !live.root.isConnected)
 						return;
 					var find = controls.findEntry;
 					var rsrp = find(cell || [], 'RSRP') || find(cell || [], 'rsrp');
@@ -907,24 +977,56 @@ return view.extend({
 					if (subRsrp && controls.hasValue(rsrp)) subRsrp.textContent = String(rsrp).trim() + ' dBm';
 					if (subRsrq && controls.hasValue(rsrq)) subRsrq.textContent = String(rsrq).trim() + ' dB';
 					if (subSinr && controls.hasValue(sinr)) subSinr.textContent = String(sinr).trim() + ' dB';
+					/* 小区标识同步刷新（PCI/TAC/ARFCN/频段/制式） */
+					applyCellIdentity({
+						sysmode: String(find(cell || [], 'network_mode') || find(cell || [], 'Network Mode') || '').trim(),
+						band: String(find(cell || [], 'Band') || find(cell || [], 'band') || '').trim(),
+						pci: String(find(cell || [], 'Physical Cell ID') || find(cell || [], 'pci') || '').trim(),
+						arfcn: String(find(cell || [], 'ARFCN') || find(cell || [], 'arfcn') || '').trim(),
+						tac: String(find(cell || [], 'TAC') || '').trim(),
+						cell_id: String(find(cell || [], 'Cell ID') || find(cell || [], 'cell_id') || '').trim()
+					});
 				}).catch(function() { /* 采样失败保留既有曲线 */ });
 			}, this), 10);
 		}
 
-		/* 邻区扫描：首屏渲染完成后异步执行（重度 AT 操作，绝不阻塞加载路径） */
-		window.setTimeout(L.bind(function() {
-			var live = self._live;
-			if (!live || !live.root || !live.root.isConnected || !self.section)
-				return;
-			controls.getNeighborCell(self.section).then(function(nb) {
-				if (!live.root || !live.root.isConnected)
-					return;
-				buildNeighborTableInto(live.neighborBox, (nb && nb.neighborcell) || {});
-			}).catch(function() {
-				if (live.root && live.root.isConnected && live.neighborBox)
-					live.neighborBox.textContent = '邻区扫描失败（后端未响应），可刷新重试';
-			});
-		}, this), 1500);
+		/* 邻区扫描：整个页面生命周期只扫一次（重度 AT 操作），结果缓存，
+		   原地重渲染后直接用缓存重建表格 */
+		if (self._neighborData) {
+			buildNeighborTableInto(self._live.neighborBox, self._neighborData);
+		} else if (!self._neighborStarted) {
+			self._neighborStarted = true;
+			window.setTimeout(L.bind(function() {
+				controls.getNeighborCell(self.section).then(function(nb) {
+					self._neighborData = (nb && nb.neighborcell) || {};
+					var live = self._live;
+					if (live && live.root && live.root.isConnected && live.neighborBox)
+						buildNeighborTableInto(live.neighborBox, self._neighborData);
+				}).catch(function() {
+					var live = self._live;
+					if (live && live.root && live.root.isConnected && live.neighborBox)
+						live.neighborBox.textContent = '邻区扫描失败（后端未响应），可刷新重试';
+				});
+			}, this), 1500);
+		}
+
+		/* 异步数据采集：首屏骨架已画完，这里才开始 collectData；
+		   完成后原地重渲染填充真实数据（轮询/邻区引用自动切到新 DOM） */
+		if (!self._collectStarted) {
+			self._collectStarted = true;
+			if (self.section) {
+				self.collectData(self.section).then(function(full) {
+					if (!full || !full.cell)
+						return;
+					var live = self._live;
+					if (!live || !live.root || !live.root.isConnected)
+						return;
+					var fresh = self.render(full);
+					if (live.root.parentNode)
+						live.root.parentNode.replaceChild(fresh, live.root);
+				});
+			}
+		}
 
 		return layout;
 	}
