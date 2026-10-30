@@ -20,17 +20,22 @@
 # -------------
 # 合并/查询都是**纯文件操作**（awk 扫两个 JSON，不碰 modem、不碰网络），
 # 因此允许同步执行 —— 但必须带上硬超时，且结果写入状态缓存：
-#   * status：优先读 qmodem-worker 写好的缓存（纯 cat，毫秒级）；
-#             缓存缺失/过期才现场跑一次（有 timeout 上限），并回写缓存。
+#   * status：优先读缓存（纯 cat，毫秒级）；缓存缺失/过期才现场跑一次
+#             （有 timeout 上限），并回写缓存。
 #   * sync  ：保持同步语义（前端要拿 added/skipped 结果），带 timeout 上限，
-#             执行后刷新缓存。新增 sync_async 走后台任务，立即返回 task_id。
+#             执行后刷新缓存。
 # 这样即使支持库文件在慢速存储上卡住，也不会把 LuCI 拖死。
 
-. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh"
+# 路径兜底：qmodem-lib.sh 定义各路径变量的默认值；即使库缺失（例如升级
+# 安装时旧版包未带该文件），这里也能保证 SYNC_BIN 等路径可用。
+QMODEM_SBIN_DIR="${QMODEM_SBIN_DIR:-/usr/sbin}"
+QMODEM_BIN_DIR="${QMODEM_BIN_DIR:-/usr/bin}"
+QMODEM_CACHE_DIR="${QMODEM_CACHE_DIR:-/tmp/qmodem-cache}"
+
+. "${QMODEM_LIB_DIR:-/usr/lib/qmodem}/qmodem-lib.sh" 2>/dev/null || true
 
 SYNC_BIN="$QMODEM_SBIN_DIR/qmodem-modem-support"
 SUPPORT_LIB="${QMODEM_SUPPORT_FILE:-/usr/share/qmodem/modem_support.json}"
-TASK_BIN="$QMODEM_BIN_DIR/qmodem-task"
 CUSTOM_BIN="$QMODEM_SBIN_DIR/qmodem-support-custom"
 # 纯文件操作的上限：远小于 LuCI 的 20 秒 RPC 超时，卡住也能快速失败
 SUPPORT_TIMEOUT="${QMODEM_SUPPORT_TIMEOUT:-10}"
@@ -97,7 +102,7 @@ refresh_support_cache() {
 	case "$_out" in \{*) ;; *) return 1 ;; esac
 	for _d in "$QMODEM_CACHE_DIR"/*/; do
 		[ -d "$_d" ] || continue
-		case "$_d" in */locks/|*/tasks/) continue ;; esac
+		case "$_d" in */locks/) continue ;; esac
 		qm_envelope ready "$_out" '' "$SUPPORT_TTL" | qm_atomic_write "${_d}support.json"
 	done
 	printf '%s' "$_out"
@@ -115,7 +120,7 @@ run_custom() {
 
 case "$1" in
 	list)
-		echo '{"status":{},"sync":{},"sync_async":{"config_section":"string"},"ports":{},"custom_list":{},"custom_save":{"model":"string","bus":"string","manufacturer":"string","manufacturer_id":"string","platform":"string","modes":"string","pdp_index":"string","wcdma_band":"string","lte_band":"string","nsa_band":"string","sa_band":"string","edit":"string"},"custom_delete":{"model":"string","bus":"string"},"probe_port":{"port":"string"}}'
+		echo '{"status":{},"sync":{},"ports":{},"custom_list":{},"custom_save":{"model":"string","bus":"string","manufacturer":"string","manufacturer_id":"string","platform":"string","modes":"string","pdp_index":"string","wcdma_band":"string","lte_band":"string","nsa_band":"string","sa_band":"string","edit":"string"},"custom_delete":{"model":"string","bus":"string"},"probe_port":{"port":"string"}}'
 		;;
 	call)
 		read -r input
@@ -172,24 +177,13 @@ case "$1" in
 						# 同步后立即刷新缓存，页面下一次轮询即可看到新状态
 						for _d in "$QMODEM_CACHE_DIR"/*/; do
 							[ -d "$_d" ] || continue
-							case "$_d" in */locks/|*/tasks/) continue ;; esac
+							case "$_d" in */locks/) continue ;; esac
 							_s=$(run_sync --status)
 							case "$_s" in \{*) qm_envelope ready "$_s" '' "$SUPPORT_TTL" | qm_atomic_write "${_d}support.json" ;; esac
 						done
 						;;
 					*) unavailable "同步失败或无输出" ;;
 				esac
-				;;
-
-			sync_async)
-				_sec=$(printf '%s' "$input" | jsonfilter -e '@.config_section' 2>/dev/null)
-				case "$_sec" in ''|*[!a-zA-Z0-9_-]*) _sec='' ;; esac
-				if [ -f "$TASK_BIN" ]; then
-					sh "$TASK_BIN" new sync_support "$_sec" '{}' 2>/dev/null \
-						|| printf '{"success":false,"error":"failed to create task"}\n'
-				else
-					printf '{"success":false,"error":"qmodem-task missing"}\n'
-				fi
 				;;
 
 			*) unavailable "unknown method" ;;

@@ -21,7 +21,7 @@ case "$interval" in
 esac
 [ "$interval" -lt 5 ] && interval=5
 
-COLLECT=/usr/bin/qmodem-stats-collect
+COLLECT="${QMODEM_STATS_COLLECT:-/usr/bin/qmodem-stats-collect}"
 LOCKDIR="/tmp/qmodem-stats-loop.$config_section.lock"
 
 mkdir -p /tmp 2>/dev/null || true
@@ -45,5 +45,18 @@ while :; do
 	sleep "$interval"
 	# 采集器可能被卸载/升级：缺失时继续等待，不退出（procd 会认为服务崩溃并重启）
 	[ -f "$COLLECT" ] || continue
+
+	# 配置节已被删除或停用时退出：init.d 只在 start 时按当前配置开实例，
+	# 删除模组后旧循环若不自查，procd 会一直为已删除的节空转采样。
+	uci -q show "qmodem.${config_section}" 2>/dev/null | grep -q '^config modem-device' || {
+		echo "qmodem-stats-loop[$config_section]: section removed, exiting"
+		exit 0
+	}
+	_state=$(uci -q get "qmodem.${config_section}.state" 2>/dev/null)
+	[ "$_state" = "disabled" ] && {
+		echo "qmodem-stats-loop[$config_section]: section disabled, exiting"
+		exit 0
+	}
+
 	sh "$COLLECT" run "$config_section" >/dev/null 2>&1
 done

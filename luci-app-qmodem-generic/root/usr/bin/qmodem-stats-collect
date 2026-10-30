@@ -59,6 +59,32 @@ fi
 
 # ---- 工具函数 -------------------------------------------------------------
 
+# 分天采样锁：后台循环与 rpcd 补采都可能触发 run，无锁并发时双方基于
+# 同一旧基准计算增量，后写者覆盖前写者（丢失更新）。用 mkdir 原子加锁，
+# 与 qmodem-stats-loop 的锁互不冲突。
+collect_lock() {
+	_qm_lockdir="/tmp/qmodem-stats-collect.${1}.lock"
+	mkdir -p /tmp 2>/dev/null || true
+	if mkdir "$_qm_lockdir" 2>/dev/null; then
+		printf '%s\n' "$$" > "$_qm_lockdir/pid" 2>/dev/null
+		return 0
+	fi
+	_qm_pid=$(cat "$_qm_lockdir/pid" 2>/dev/null)
+	if [ -n "$_qm_pid" ] && ! kill -0 "$_qm_pid" 2>/dev/null; then
+		rm -rf "$_qm_lockdir" 2>/dev/null
+		mkdir "$_qm_lockdir" 2>/dev/null || return 1
+		printf '%s\n' "$$" > "$_qm_lockdir/pid" 2>/dev/null
+		return 0
+	fi
+	return 1
+}
+
+collect_unlock() {
+	_qm_lockdir="/tmp/qmodem-stats-collect.${1}.lock"
+	[ "$(cat "$_qm_lockdir/pid" 2>/dev/null)" = "$$" ] && rm -rf "$_qm_lockdir" 2>/dev/null
+	return 0
+}
+
 cn_day_of() {
 	# epoch 秒 → 中国时区日期 YYYY-MM-DD（awk strftime 第三参 1 = UTC，避免依赖系统时区）
 	awk -v t="$1" 'BEGIN{print strftime("%Y-%m-%d", t + 28800, 1)}'
@@ -218,10 +244,14 @@ do_run() {
 	last_ts=${last_ts:-0}; last_rx=${last_rx:-0}; last_tx=${last_tx:-0}
 	total_rx=${total_rx:-0}; total_tx=${total_tx:-0}; swapped=${swapped:-0}
 
-	is_num "$cur_rx" || cur_rx=0
-	is_num "$cur_tx" || cur_tx=0
+	# 后台循环与 rpcd 补采可能并发触发 run：拿不到锁说明已有实例在写，
+	# 本轮直接跳过采样，只输出现有统计（show 是纯读）。
+	collect_lock "$config_section" || { do_show "$config_section"; return 0; }
 
 	if read_counters "$config_section"; then
+		# 计数器只返回单边值时兜底为上一次基准，避免空值参与算术导致整轮崩溃
+		is_num "$cur_rx" || cur_rx=$last_rx
+		is_num "$cur_tx" || cur_tx=$last_tx
 		today=$(cn_day_of "$now")
 
 		if [ "$last_ts" -gt 0 ]; then
@@ -229,10 +259,6 @@ do_run() {
 			dr=$((cur_rx - last_rx)); [ "$dr" -lt 0 ] && dr=$cur_rx
 			dt=$((cur_tx - last_tx)); [ "$dt" -lt 0 ] && dt=$cur_tx
 			if [ "$today" = "$last_day" ]; then
-			# 同一天：常规增量。计数器回绕/重置（模组重拨、驱动重置）时，
-			# 新值小于旧值 → 增量从 0 起算，新计数值即为本轮新增流量。
-			dr=$((cur_rx - last_rx)); [ "$dr" -lt 0 ] && dr=$cur_rx
-			dt=$((cur_tx - last_tx)); [ "$dt" -lt 0 ] && dt=$cur_tx
 			add_delta "$today" "$dr" "$dt"
 			else
 				# 跨日界：采样间隔内的流量无法精确归属到具体某天，
@@ -258,7 +284,8 @@ do_run() {
 		last_rx=$cur_rx
 		last_tx=$cur_tx
 
-		# 方向自动识别：累计流量足够大且 tx > rx，视为该驱动上下行相反
+		# 方向自动识别：累计流量足够大且 tx > rx，视为该驱动上下行相反。
+		# 采集器只置位 swapped 标记，交换在前端展示层完成（daily_stats 的 swapped 字段）。
 		if [ "$total_rx" -gt "$SWAP_MIN_BYTES" ] && [ "$total_tx" -gt "$total_rx" ]; then
 			swapped=1
 		fi
@@ -266,6 +293,7 @@ do_run() {
 		save_stats "$FILE" "$now"
 	fi
 
+	collect_unlock "$config_section"
 	do_show "$config_section"
 }
 
@@ -311,8 +339,15 @@ do_reset() {
 	config_section="$1"
 	FILE="$STATS_DIR/${config_section}.stats"
 	mkdir -p "$STATS_DIR"
+	# 与 run 共用同一把锁：清零与采样并发时以先到者为准，避免互相覆盖
+	collect_lock "$config_section" || {
+		printf '{"config_section":"%s","result":0,"success":false,"error":"stats busy"}\n' "$config_section"
+		return 0
+	}
 	# 保留当前计数器基准：清零后下一轮采样不会把（清零前的）差额误记为新流量
 	read_counters "$config_section" || true
+	is_num "$cur_rx" || cur_rx=0
+	is_num "$cur_tx" || cur_tx=0
 	now=$(date +%s)
 	{
 		echo "last_ts=$now"
@@ -323,6 +358,8 @@ do_reset() {
 		echo "swapped=0"
 	} > "$FILE.tmp"
 	mv "$FILE.tmp" "$FILE"
+
+	collect_unlock "$config_section"
 
 	json_init
 	json_add_string config_section "$config_section"

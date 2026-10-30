@@ -153,6 +153,15 @@ insert_block() {
 	awk -v grp="$1" -v blk="$2" '
 		BEGIN { done = 0; pending = 0 }
 		{
+			# 空分组："group": {} 同一行收尾（QModem 在没有任何该类型模组时
+			# 会生成空分组）。展开为带新型号的组。
+			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*\\}[ \t]*,?[ \t]*$") {
+				print "        \"" grp "\": {"
+				print blk
+				print "        }"
+				done = 1
+				next
+			}
 			if (done == 0 && $0 ~ "^        \"" grp "\": \\{[ \t]*$") {
 				print $0
 				pending = 1
@@ -241,17 +250,46 @@ while read -r GROUP MODEL SOURCE; do
 		continue
 	fi
 
-	# 首个需要写入的型号处取锁，避免开机服务与安装脚本并发改写同一文件
+	# 首个需要写入的型号处取锁，避免开机服务与安装脚本并发改写同一文件。
+	# 锁目录内写 pid + 时间戳：上一轮同步若被强杀会残留空锁目录，
+	# 若不回收则后续同步会被永久误判为"另一个同步进程正在运行"。
 	if [ "$LOCKED" = "0" ]; then
 		mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || true
 		if ! mkdir "$LOCKDIR" 2>/dev/null; then
-			ERR="另一个同步进程正在运行，已跳过本次写入"
-			log "$ERR"
-			emit 1
-			exit 0
+			_lock_pid=$(cat "$LOCKDIR/sync_pid" 2>/dev/null)
+			_lock_ts=$(cat "$LOCKDIR/sync_ts" 2>/dev/null)
+			_lock_age=$(( $(qm_now) - ${_lock_ts:-0} ))
+			_lock_live=0
+			if [ -n "$_lock_pid" ] && kill -0 "$_lock_pid" 2>/dev/null; then _lock_live=1; fi
+			if [ "$_lock_live" != "1" ] && [ "$_lock_age" -gt 600 ]; then
+				# 持有者已死或超时：强抢锁，避免同步永久卡死
+				rm -rf "$LOCKDIR" 2>/dev/null
+				mkdir "$LOCKDIR" 2>/dev/null || {
+					ERR="无法获取同步锁（残留锁清理失败）"
+					log "$ERR"
+					emit 1
+					exit 1
+				}
+			elif [ "$_lock_live" = "1" ]; then
+				ERR="另一个同步进程正在运行，已跳过本次写入"
+				log "$ERR"
+				emit 1
+				exit 0
+			else
+				rm -rf "$LOCKDIR" 2>/dev/null
+				mkdir "$LOCKDIR" 2>/dev/null || {
+					ERR="无法获取同步锁（残留锁清理失败）"
+					log "$ERR"
+					emit 1
+					exit 1
+				}
+			fi
 		fi
 		LOCKED=1
-		trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+		printf '%s' "$$" > "$LOCKDIR/sync_pid" 2>/dev/null
+		qm_now > "$LOCKDIR/sync_ts" 2>/dev/null
+		# 锁目录现在非空，trap 必须用 rm -rf（rmdir 只能删空目录）
+		trap 'rm -rf "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
 	fi
 
 	if [ "$BACKED_UP" = "0" ]; then

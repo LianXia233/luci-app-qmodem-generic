@@ -15,6 +15,7 @@ for f in \
 	/usr/bin/qmodem-stats-loop \
 	/usr/sbin/qmodem-modem-support \
 	/usr/sbin/qmodem-support-custom \
+	/usr/lib/qmodem/qmodem-lib.sh \
 	/etc/init.d/qmodem-stats-collect \
 	/etc/init.d/qmodem-modem-support
 do

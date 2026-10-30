@@ -3,6 +3,17 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [3.0.0-4] - 2026-10-30
+
+- 修复（P0 回归）：恢复 `qmodem-lib.sh` 公共库——3.0.0 删除时误判「无调用方」，但 `rpcd/qmodem_support` 与 `qmodem-support-custom` 仍 source 它，官方 QModem 不提供此文件，导致模组支持库（状态/同步/自定义型号/串口探测）功能自 3.0.0 起实际不可用。恢复按「仍被使用」的最小集（路径变量、qm_init_dirs、qm_json_escape、qm_atomic_write、qm_envelope、qm_lock 系列）。
+- 修复：`qmodem-modem-support` 同步锁——锁目录残留（上一轮被强杀）时不再永久误判「另一个同步进程正在运行」；改为 pid + 时间戳双检查，死亡/超时自动回收。
+- 修复：`insert_block` 兼容空分组（`"pcie": {}` 同一行收尾）——QModem 在没有任何该类型模组时会生成空分组，此前注入会失败。
+- 修复：统计采集并发丢失更新——`run` 与 `reset` 增加 mkdir 互斥锁，后台循环与 rpcd 补采并发时不再互相覆盖基准。
+- 修复：`qmodem-stats-loop` 在配置节被删除/停用时自动退出，不再为已删除的模组空转采样。
+- 修复：采集器单边计数器兜底（只返回 rx 不返回 tx 时不再触发算术崩溃导致整轮采样失败）。
+- 清理：移除 `rpcd/qmodem_support` 中对已删除 `qmodem-task`/`qmodem-worker` 的陈旧引用（sync_async 声明与分支）。
+- 测试：新增后端冒烟测试 `tests/run-backend-tests.sh`（模拟 OpenWrt 环境，覆盖支持库合并/同步锁/空分组/自定义型号/统计采集/循环自查 26 项）。
+
 ## [3.0.0-3] - 2026-10-30
 
 - 优化：统一样式注入——九份前端样式表改为向 document.head 幂等注入一次，不再随轮询重绘反复重建 `<style>`（概览/连接每 6 秒、短信每 5 秒），消除重复的 CSS 解析开销。

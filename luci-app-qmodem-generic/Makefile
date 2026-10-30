@@ -11,7 +11,7 @@ LUCI_MINIFY_JS:=0
 
 PKG_NAME:=luci-app-qmodem-generic
 PKG_VERSION:=3.0.0
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=LianXia233
 
@@ -45,6 +45,7 @@ for f in \
 	/usr/bin/qmodem-stats-loop \
 	/usr/sbin/qmodem-modem-support \
 	/usr/sbin/qmodem-support-custom \
+	/usr/lib/qmodem/qmodem-lib.sh \
 	/etc/init.d/qmodem-stats-collect \
 	/etc/init.d/qmodem-modem-support \
 	/etc/uci-defaults/99_luci-app-qmodem-generic

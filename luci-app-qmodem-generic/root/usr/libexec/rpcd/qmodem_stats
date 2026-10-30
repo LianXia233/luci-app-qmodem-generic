@@ -15,7 +15,7 @@
 #   stats_history 仅读取已存储的统计（不触发采样）
 #   stats_reset   清零本地分天记录并重建基准（同步，带硬超时）
 
-COLLECT_BIN="/usr/bin/qmodem-stats-collect"
+COLLECT_BIN="${QMODEM_STATS_COLLECT:-/usr/bin/qmodem-stats-collect}"
 STALE_AFTER="${QMODEM_STATS_STALE:-150}"
 RESET_TIMEOUT="${QMODEM_STATS_RESET_TIMEOUT:-15}"
 

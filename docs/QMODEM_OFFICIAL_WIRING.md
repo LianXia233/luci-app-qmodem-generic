@@ -80,7 +80,11 @@ QModem 接口契约见官方文档：QModem 仓库 `docs/qmodem-rpcd-interface.m
   —— 读写改为直连官方接口，QModem rpcd 自带缓存兜底；
 - `qos` rpcd 插件（AT 探测 QCI/调制）—— QCI/5QI/签约速率改用官方 `network_info` 字段；
 - `qmodem-mt5700-fix` 服务 —— 设备相关 UCI 修补不再随包携带；
-- 相关的 `qmodem-lib.sh` 公共库已无任何调用方（统计组件改为自包含 `timeout` 封装），
-  自本版起随包删除；
+- 相关的 `qmodem-lib.sh` 公共库曾随包删除（3.0.0 误判为「无调用方」）；
+  实际 `rpcd/qmodem_support` 与 `qmodem-support-custom` 仍依赖其中的
+  路径变量 / 原子写入 / 互斥锁，而官方 QModem 不提供该文件，导致模组支持库
+  功能回归。3.0.0-4 已按「仍被使用」的最小集恢复（路径变量、qm_init_dirs、
+  qm_json_escape、qm_atomic_write、qm_envelope、qm_lock 系列）；
+  统计组件（qmodem-stats-collect）不依赖本库，仍为自包含实现；
 
 升级安装时 `uci-defaults` 钩子会自动 `disable`/`stop` 上述旧服务并清理注册。
