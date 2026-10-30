@@ -336,7 +336,8 @@ var CARD_CLASSES = [
 	'mt-system-temp-box', 'mt-terminal-card', 'mt-ui-card', 'mtconn-card', 'mtconn-config-card',
 	'mtconn-fact-card', 'mtconn-topo-card', 'qm-glass-card', 'qm-stat-card', 'qm-cc-card',
 	'qm-address-card', 'qm-ip-box', 'qm-carrier-topo-box', 'qm-signal-dial-box', 'qm-traffic-chart-box',
-	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option'
+	'qm-mini-item', 'qm-cc-metrics', 'mt-band-option',
+	'qm-glass-panel', 'qm-cockpit-header', 'qm-wing-spectrum', 'qm-wing-session', 'qm-traffic-stage', 'qm-triad-card', 'qm-dock-tile', 'qm-telemetry-tile', 'qm-flow-card', 'qm-info-drawer'
 ];
 /* Hero 容器类（带背景渐变的整块区域）与其内部元素类分开：
  * 背景/圆角只给容器，文字反色给容器的后代。 */
@@ -364,11 +365,12 @@ var GRID_CLASSES = [
 	'mtconn-address-grid', 'mtconn-session-grid', 'qm-mini-grid',
 	/* 视图内原本写死的 4 列 / 3 列栅格，统一交给自适应网格 */
 	'mt-net-metrics', 'mtconn-facts', 'qm-grid-2', 'qm-grid-3', 'qm-shortcuts', 'qm-traffic-layout',
-	'mt-hardware-bands', 'mt-system-thermal-form'
+	'mt-hardware-bands', 'mt-system-thermal-form',
+	'qm-cockpit-stage', 'qm-triad-grid', 'qm-command-dock', 'qm-flow-metrics', 'qm-telemetry-grid'
 ];
 var ROW_CLASSES = [
 	'mt-info-row', 'mt-net-row', 'mt-system-row', 'mtconn-kv-row', 'qm-ip-row', 'qm-list-row',
-	'mt-control-state', 'mtconn-dial-item', 'mt-sms-contact'
+	'mt-control-state', 'mtconn-dial-item', 'mt-sms-contact', 'qm-kv-item'
 ];
 var KEY_CLASSES = [
 	'mt-info-key', 'mt-modem-bar-label', 'mt-net-metric-label', 'mt-sbar-label', 'mtconn-dial-key',
