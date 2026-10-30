@@ -570,7 +570,7 @@ return view.extend({
 		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card', 'style': 'padding:10px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;' }, [
 			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;' }, [
 				E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
-					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem · 全息全景网络座舱'),
+					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem'),
 					E('span', { 'id': 'qm-hero-badge', 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
 						E('span', { 'class': 'mt-beacon-dot', 'style': connected ? '' : 'background:var(--mt5700-danger);' }),
 						E('span', { 'id': 'qm-hero-badge-text' }, connected ? '5G 链路就绪 (CONNECTED)' : (data.reachable ? '等待驻网 (STANDBY)' : '读取模组状态中…'))
