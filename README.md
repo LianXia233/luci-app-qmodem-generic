@@ -1,6 +1,6 @@
 # luci-app-qmodem-generic
 
-[![Build APK and IPK](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/PEIT98/luci-app-qmodem-generic/actions/workflows/build.yml)
+[![Build APK and IPK](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml/badge.svg)](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Target](https://img.shields.io/badge/LuCI-PKGARCH%3Aall-green.svg)
 
@@ -9,6 +9,12 @@
 > 本项目由 [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（鼎桥 MT5700M 专用界面）重构而来，已去除私有文本后端，使用官方 `qmodem` 与可选 `qmodem.sms` 接口。
 
 未获取到的数据自动隐藏对应行。网络模式按 QModem 实际上报展示；MT5700 专有设置仅向对应型号显示，其它模组可使用通用 AT 控制台。
+
+## 预览
+
+![概览页预览](docs/screenshots/status-overview.png)
+
+*概览页（真实数据）：物理网卡 1s 实时速率、真实邻区与遥测曲线、按需显示的后端字段。截图已由使用者对隐私字段打码。*
 
 AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗口独立显示状态、响应正文和错误信息。常用指令使用通用查询，专有指令按模组型号显示。
 
@@ -39,13 +45,13 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 
 | 页面 | 说明 |
 | --- | --- |
-| 总览 Overview | 实际型号标题、信号/流量卡片、按 `class` 分组铺开 QModem 上报的**全部字段** |
+| 总览 Overview | 实际型号标题、信号/流量卡片；**全部数据来自 `qmodem` ubus 后端与 netifd 实时计数**：实时速率直读物理网卡（每 1s 计数差值）、真实邻区表、10s 遥测曲线、AMBR 按后端上报显示（未上报显 `--`）；两阶段异步渲染，面板秒开 |
 | 移动数据 Mobile Data | APN、拨号、IP 详情与会话计数 |
-| 射频与小区 Radio and Cells | 频段、邻区、锁频锁小区、诊断 |
-| 短信 Messages | 数据库／模组存储自动识别，收发、未读状态与会话视图 |
+| 射频与小区 Radio and Cells | 频段（显示 `NR n41` / `LTE B41`，带制式前缀）、邻区、锁频锁小区、诊断 |
+| 短信 Messages | 数据库／模组存储自动识别，收发、未读状态与会话视图；会话区高度贴合视口（移动端输入框常驻可见） |
 | 模组与 SIM | 模组身份、SIM 信息与维护操作 |
 | 高级 Advanced | 外观主题、串口与模组映射、自定义型号、支持库同步及能力诊断 |
-| AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入） |
+| AT 控制台 | 经 `qmodem` ubus 下发 AT 命令（从「高级」页进入）；官方快捷命令按语义折叠分组（危险写入组单独标识），按钮双行显示命令描述与 AT 本体 |
 | 设备参数设置 | QModem `modem-device` 配置节（从「高级 / 模组与 SIM」页进入） |
 
 **亮点**
@@ -53,6 +59,7 @@ AT 控制台保留命令以便重试或收藏，支持 Enter 发送；返回窗�
 - 使用 QModem 官方 ubus 接口，全模组通用；动态字段自适应，内置字段使用中文标签映射。
 - 自带流量统计后台采集服务，重启不丢数据，按中国时区（UTC+8）分天记录。
 - 内置 RG520N-CN、RG502Q-EA、RG650E-EU、RG650V-EU 定义；高级页可查看 USB/PCIe 串口和硬件 ID，并添加其它型号。
+- 移动端适配：弹窗一律 Modal Bottom Sheet（贴底全宽、拖拽把手、safe-area），英雄栏收紧（看板娘 42px 圆保留），AT 快捷命令折叠分组；后端调用全部带超时兜底 + 邻区等重度 AT 操作异步化，模组忙时页面不卡死。
 
 ## 文件布局
 
