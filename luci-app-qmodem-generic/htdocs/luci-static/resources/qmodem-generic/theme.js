@@ -865,12 +865,6 @@ function apply() {
 			link.rel = 'stylesheet';
 			link.href = '/luci-static/resources/qmodem-generic/qmodem.css?v=2.14.0';
 			document.head.appendChild(link);
-
-			if (document.head && !document.querySelector('script[src*="tabmenu.js"]')) {
-				var script = document.createElement('script');
-				script.src = '/luci-static/resources/qmodem-generic/tabmenu.js?v=2.14.0';
-				document.head.appendChild(script);
-			}
 		}
 		mountGlobalBg();
 
