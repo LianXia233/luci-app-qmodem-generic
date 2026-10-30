@@ -219,7 +219,10 @@ fi
 EXISTING_FILE="${TMPDIR:-/tmp}/qmodem-existing.$$"
 EXISTING_LIST=''
 if list_models "$TARGET" > "$EXISTING_FILE" 2>/dev/null; then
+	# 内容取进变量后立刻删除：后续出口（锁冲突、写入失败）都是直接 exit，
+	# 依赖末尾统一清理会在 /tmp 留下 qmodem-existing.<pid>
 	EXISTING_LIST=$(cat "$EXISTING_FILE")
+	rm -f "$EXISTING_FILE"
 else
 	rm -f "$EXISTING_FILE"
 	ERR="解析支持库失败：$TARGET"
@@ -361,7 +364,6 @@ $SOURCE_ENTRIES
 EOF
 
 cleanup_tmp
-[ -f "$EXISTING_FILE" ] && rm -f "$EXISTING_FILE"
 
 # ---------------------------------------------------------------- 批量写入
 # 支持库只能整体重写，因此按数据源聚合：一个源里的全部型号共用一次 jq。

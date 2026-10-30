@@ -362,6 +362,14 @@ echo "$OUT" | grep -q '另一个同步进程' && ok "活锁：拒绝并发写入
 [ "$B" = "$(cksum "$T/share/qmodem/busy.json")" ] && ok "活锁：目标文件未被改动" || bad "活锁：目标文件被改写"
 rm -f "$T/lk-live/pid"; rmdir "$T/lk-live" 2>/dev/null
 
+# 锁冲突这类直接 exit 的出口也必须清掉临时清单，不能只靠末尾统一清理
+LEAK="$T/tmp-leak"; rm -rf "$LEAK" "$T/lk-leak"; mkdir -p "$LEAK" "$T/lk-leak"
+printf '%s %s\n' "$$" "$(date +%s)" > "$T/lk-leak/pid"
+env $ENVQ TMPDIR="$LEAK" QMODEM_SUPPORT_FILE="$T/share/qmodem/busy.json" QMODEM_SUPPORT_LOCKDIR="$T/lk-leak" \
+	QMODEM_SUPPORT_LOCK_RETRY=1 sh "$T/sbin/qmodem-modem-support" --json >/dev/null 2>&1
+[ -z "$(ls "$LEAK" 2>/dev/null)" ] && ok "锁冲突退出后无临时文件残留" || bad "临时文件残留: $(ls "$LEAK" | tr '\n' ' ')"
+rm -rf "$T/lk-leak"
+
 # 6.4b 旧版本残留锁：3.0.0-4 的 merge 写 sync_pid/sync_ts，custom 只 mkdir 从不
 #      写 pid。升级后这两类残留都必须能回收，否则同步与自定义保存永久失败。
 jq --indent 4 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/legacy.json"
