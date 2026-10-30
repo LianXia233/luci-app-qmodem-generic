@@ -6140,3 +6140,71 @@ html { -webkit-text-size-adjust: 100%; }
   word-break: break-all !important;
   line-height: 1.3 !important;
 }
+
+/* ==========================================================================
+   v2.42.5 手机端英雄栏收紧（≤768px）：看板娘保留，整体高度压缩
+   --------------------------------------------------------------------------
+   手机上英雄栏 ≈90px 偏大：status 页 h2 为内联 20px（类规则打不中裸 h2）、
+   头像 52px、右侧模组条占宽。本段以文件末尾最高优先级统一收紧：
+   头像 42px 圆（看板娘必须保留）、标题 15.5px、描述 10.5px、徽标/型号
+   10px、卡片内距 7px 12px，目标高度 ≈56px。双倍类名保特异性。
+   ========================================================================== */
+@media (max-width: 768px) {
+  .mt5700-hero-card.mt5700-hero-card:not(.mt5700-sms-hero-compact),
+  .mt-hero-card.mt-hero-card:not(.mt5700-sms-hero-compact) {
+    padding: 7px 12px !important;
+    gap: 10px !important;
+    margin-bottom: 10px !important;
+    flex-direction: row !important;
+    align-items: center !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-content.mt-hero-left {
+    gap: 1px !important;
+    min-width: 0 !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left h2,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-content h2 {
+    font-size: 15.5px !important;
+    line-height: 1.2 !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left p,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-content p,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) #qm-hero-desc {
+    font-size: 10.5px !important;
+    line-height: 1.25 !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-badge-online,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-badge {
+    padding: 1px 8px !important;
+    font-size: 10px !important;
+    gap: 4px !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left .mt-pill-tag {
+    font-size: 10px !important;
+    padding: 1px 6px !important;
+  }
+  /* 看板娘：保留但紧凑化 —— 42px 正圆，不受更早的 52/64/72px 规则影响 */
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar.mt-mascot-avatar {
+    width: 42px !important;
+    height: 42px !important;
+    aspect-ratio: 1 / 1 !important;
+    flex: 0 0 auto !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-mascot-avatar .mt-mascot-img.mt-mascot-img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    border-radius: 50% !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-right.mt-hero-right {
+    gap: 8px !important;
+    flex: 0 0 auto !important;
+    max-width: 46% !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-right select,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-right .cbi-input-select {
+    max-width: 32vw !important;
+    font-size: 12px !important;
+    height: 30px !important;
+  }
+}
