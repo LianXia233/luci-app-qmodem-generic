@@ -6008,3 +6008,135 @@ html.at-dark, html[data-at-theme="dark"] {
     height: 40px !important;
   }
 }
+
+/* ==========================================================================
+   v2.42.1 AT 控制台：官方快捷命令折叠分组（33+ 条平铺改为收起的分类面板）
+   ========================================================================== */
+.qm-cmd-groups { margin-top: 10px; }
+.qm-cmd-group {
+  border: 1px solid var(--mt5700-border-subtle);
+  border-radius: 12px;
+  margin: 0 0 8px 0;
+  background: var(--mt5700-card-bg);
+  overflow: hidden;
+}
+.qm-cmd-group summary {
+  cursor: pointer;
+  padding: 9px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--mt5700-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  user-select: none;
+}
+.qm-cmd-group summary::-webkit-details-marker { display: none; }
+.qm-cmd-group summary::before {
+  content: '\25B8';
+  color: var(--mt5700-text-muted);
+  transition: transform 0.2s ease;
+}
+.qm-cmd-group[open] summary::before { transform: rotate(90deg); }
+.qm-cmd-group .qm-cmd-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--mt5700-text-muted);
+  background: var(--mt5700-subtle-bg);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.qm-cmd-group-body { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 14px 12px; }
+.qm-cmd-group.qm-cmd-danger { border-color: rgba(239, 68, 68, 0.35); }
+.qm-cmd-group.qm-cmd-danger summary { color: var(--mt5700-danger); }
+
+/* ==========================================================================
+   v2.42.2 全局弹窗优化 + 手机端一律 Modal Bottom Sheet
+   --------------------------------------------------------------------------
+   - 桌面：遮罩加深、层级与投影统一（v2.40 三段式布局保持不变）
+   - 手机（≤768px）：除短信中心自有布局（mt5700-sms-modal 已在 ≤600px
+     单独成抽屉）外，所有弹窗一律 Modal Bottom Sheet：贴底全宽、顶部
+     圆角 22px、拖拽把手、safe-area 让位、上滑入场动画。
+   ========================================================================== */
+.mt5700-modal-mask:not(.mt5700-sms-modal-mask), .at-modal-mask:not(.mt5700-sms-prompt) {
+  background: rgba(9, 14, 28, 0.52) !important;
+}
+@keyframes mt-sheet-up {
+  from { transform: translateY(100%); opacity: 0.5; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (max-width: 768px) {
+  .mt5700-modal-mask:not(.mt5700-sms-modal-mask), .cbi-modal, .modal-overlay, .modal-backdrop, .at-modal-mask:not(.mt5700-sms-prompt) {
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+  .mt5700-modal:not(.mt5700-sms-modal), .cbi-modal-dialog:not(.mt5700-sms-modal), .modal-dialog:not(.mt5700-sms-modal), .at-modal-dialog:not(.mt5700-sms-modal), .modal:not(.mt5700-sms-modal) {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: min(88dvh, 840px) !important;
+    margin: 0 !important;
+    border-radius: 22px 22px 0 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    border-bottom: 0 !important;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+    box-shadow: 0 -18px 50px rgba(2, 8, 23, 0.35) !important;
+    animation: mt-sheet-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  /* 顶部拖拽把手（纯装饰，提示抽屉语义） */
+  .mt5700-modal:not(.mt5700-sms-modal)::before, .modal:not(.mt5700-sms-modal)::before {
+    content: '' !important;
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: 44px !important;
+    height: 5px !important;
+    border-radius: 999px !important;
+    background: var(--mt5700-border) !important;
+    margin: 0 auto 12px !important;
+  }
+  .mt5700-modal-title, .cbi-modal-title, .modal-title {
+    font-size: 16px !important;
+    margin-bottom: 10px !important;
+  }
+  .mt5700-modal-footer, .cbi-modal-actions, .modal-footer {
+    padding-bottom: 2px !important;
+  }
+}
+/* 手机端触控体验：去点按高亮、按压反馈、防 iOS 聚焦自动放大 */
+html { -webkit-text-size-adjust: 100%; }
+@media (max-width: 768px) {
+  .mt5700-btn, .cbi-button, button { -webkit-tap-highlight-color: transparent; }
+  .mt5700-btn:active, .cbi-button:active { transform: scale(0.97); }
+}
+@media (max-width: 768px) and (pointer: coarse) {
+  .mt5700-modal input, .mt5700-modal select, .mt5700-modal textarea,
+  .modal input, .modal select, .modal textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* v2.42.3 命令按钮双行：描述为主、命令为辅（不让用户对裸命令猜） */
+.qm-cmd-btn {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
+  padding: 7px 12px !important;
+  max-width: 100% !important;
+  text-align: left !important;
+}
+.qm-cmd-btn .qm-cmd-btn-label {
+  font-size: 12.5px !important;
+  font-weight: 700 !important;
+  color: var(--mt5700-text) !important;
+  line-height: 1.25 !important;
+}
+.qm-cmd-btn .qm-cmd-btn-cmd {
+  font-size: 10.5px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+  color: var(--mt5700-text-muted) !important;
+  word-break: break-all !important;
+  line-height: 1.3 !important;
+}
