@@ -6208,3 +6208,29 @@ html { -webkit-text-size-adjust: 100%; }
     height: 30px !important;
   }
 }
+
+/* ==========================================================================
+   v2.42.6 手机端 hero 摘要单行化：换行占位 → 省略号截断
+   ========================================================================== */
+@media (max-width: 768px) {
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) #qm-hero-desc,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left p,
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt5700-hero-content p {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left > div:first-child {
+    flex-wrap: nowrap !important;
+    min-width: 0 !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) .mt-hero-left h2 {
+    flex: 0 0 auto !important;
+  }
+  .mt5700-hero-card:not(.mt5700-sms-hero-compact) #qm-hero-model {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}

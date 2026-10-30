@@ -565,7 +565,9 @@ return view.extend({
 		// 0. Soft Anime Hero Card (Streamlined & Compact)
 		/* 副标题改为真实数据摘要（制式/频段/CA/运营商），不再是写死文案；
 		   数据异步到达前显示读取占位。徽标与型号 tag 同样留 id 供异步填充。 */
-		var heroDescParts = [data.sysmode_detail, data.band_display || data.band, caText, data.operator_name]
+		/* hero 摘要：制式/频段/CA。运营商不进 hero（下方「运营商归属」卡片
+		   已展示，重复导致手机端摘要行过长换行） */
+		var heroDescParts = [data.sysmode_detail, data.band_display || data.band, caText]
 			.filter(function(v) { return controls.hasValue(v); });
 		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card', 'style': 'padding:10px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;' }, [
 			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;' }, [
@@ -573,7 +575,7 @@ return view.extend({
 					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem'),
 					E('span', { 'id': 'qm-hero-badge', 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
 						E('span', { 'class': 'mt-beacon-dot', 'style': connected ? '' : 'background:var(--mt5700-danger);' }),
-						E('span', { 'id': 'qm-hero-badge-text' }, connected ? '5G 链路就绪 (CONNECTED)' : (data.reachable ? '等待驻网 (STANDBY)' : '读取模组状态中…'))
+						E('span', { 'id': 'qm-hero-badge-text' }, connected ? '5G 链路就绪' : (data.reachable ? '等待驻网' : '读取模组状态中…'))
 					]),
 					E('span', { 'id': 'qm-hero-model', 'class': 'mt-pill-tag', 'style': 'display:' + (data.model ? 'inline-flex' : 'none') + ';background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:2px 8px;font-size:11px;' }, data.model || '')
 				]),
@@ -900,7 +902,7 @@ return view.extend({
 			setT('tabv-cellid', c.cell_id);
 			var descEl = root.querySelector('#qm-hero-desc');
 			if (descEl) {
-				var parts = [c.sysmode, bd, self._caText, self._operator].filter(controls.hasValue);
+				var parts = [c.sysmode, bd, self._caText].filter(controls.hasValue);
 				if (parts.length) descEl.textContent = parts.join(' · ');
 			}
 		}
