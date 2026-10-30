@@ -6248,3 +6248,38 @@ html { -webkit-text-size-adjust: 100%; }
     flex: 0 0 auto !important;
   }
 }
+
+/* ==========================================================================
+   v2.42.8 页面英雄栏可读性修复：恢复「渐变底 + 白字」
+   --------------------------------------------------------------------------
+   qmodem.css 的卡片规则（.mt-diag-card/.mt-net-card/.mtconn-card/
+   .mt-system-card/.mt-adv-card + .mt-ui-hero）以 !important 强制白底，
+   而各页注入的 .mt-*-hero 渐变背景无 important → 白字落白底看不清。
+   此处以更高特异性 + !important 恢复各页自绘 hero 的设计（theme.js
+   提供 --qm-hero-gradient 亮暗两套），标题/副标题同步锁白。
+   ========================================================================== */
+.qm-app .mt-terminal-hero.mt-terminal-hero,
+.qm-app .mtconn-hero.mtconn-hero,
+.qm-app .mt-net-hero.mt-net-hero,
+.qm-app .mt-system-hero.mt-system-hero,
+.qm-app .mt-diag-hero.mt-diag-hero,
+.qm-app .mt-adv-hero.mt-adv-hero,
+.qm-app .mt-sms-hero.mt-sms-hero {
+  background: var(--qm-hero-gradient) !important;
+  color: var(--qm-on-hero) !important;
+  border: 1px solid rgba(255, 255, 255, 0.30) !important;
+}
+.qm-app .mt-terminal-hero h2, .qm-app .mtconn-hero h2, .qm-app .mt-net-hero h2,
+.qm-app .mt-system-hero h2, .qm-app .mt-sms-hero h2, .qm-app .mt-adv-hero h2,
+.qm-app .mt-diag-hero .mt-diag-title,
+.qm-app .mt-hardware-head h2 {
+  color: var(--qm-on-hero) !important;
+  -webkit-text-fill-color: var(--qm-on-hero) !important;
+  background: none !important;
+}
+.qm-app .mt-terminal-hero p, .qm-app .mtconn-hero p, .qm-app .mt-net-hero p,
+.qm-app .mt-system-hero p, .qm-app .mt-sms-hero p, .qm-app .mt-adv-hero p,
+.qm-app .mt-diag-hero .mt-diag-sub {
+  color: rgba(255, 255, 255, 0.88) !important;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.88) !important;
+}

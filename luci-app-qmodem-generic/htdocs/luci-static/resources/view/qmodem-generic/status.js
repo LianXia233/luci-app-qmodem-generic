@@ -172,6 +172,10 @@ return view.extend({
 		data.temperature = this.cleanText(
 			find(base, 'temperature') || find(cell, 'temperature') ||
 			find(base, 'Temperature') || find(cell, 'Temperature') || '');
+		/* 归一化为纯数值：部分固件返回带单位（"53°C"/"53℃"），视图统一
+		   拼接单位，否则出现「53°C °C」双重单位 */
+		var tMatch = data.temperature.match(/-?\d+(?:\.\d+)?/);
+		data.temperature = tMatch ? tMatch[0] : '';
 		if (data.temperature && /^-?999(\.0+)?$/.test(data.temperature))
 			data.temperature = '';
 
@@ -570,17 +574,21 @@ return view.extend({
 		var heroDescParts = [data.sysmode_detail, data.band_display || data.band, caText]
 			.filter(function(v) { return controls.hasValue(v); });
 		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card', 'style': 'padding:10px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;' }, [
-			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;' }, [
+			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;min-width:0;' }, [
 				E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
 					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem'),
 					E('span', { 'id': 'qm-hero-badge', 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
 						E('span', { 'class': 'mt-beacon-dot', 'style': connected ? '' : 'background:var(--mt5700-danger);' }),
 						E('span', { 'id': 'qm-hero-badge-text' }, connected ? '5G 链路就绪' : (data.reachable ? '等待驻网' : '读取模组状态中…'))
-					]),
-					E('span', { 'id': 'qm-hero-model', 'class': 'mt-pill-tag', 'style': 'display:' + (data.model ? 'inline-flex' : 'none') + ';background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:2px 8px;font-size:11px;' }, data.model || '')
+					])
 				]),
-				E('p', { 'id': 'qm-hero-desc', 'style': 'margin:0;font-size:12px;color:var(--mt5700-text-secondary);line-height:1.3;' },
-					heroDescParts.length ? heroDescParts.join(' · ') : '正在读取模组数据…')
+				/* 型号徽标与摘要同行：手机窄屏下标题行的型号徽标会被挤压到
+				   不可见；摘要行内容短，放这里空间充裕（超长时摘要省略号让位） */
+				E('p', { 'id': 'qm-hero-desc', 'style': 'margin:0;font-size:12px;color:var(--mt5700-text-secondary);line-height:1.3;display:flex;align-items:center;gap:8px;min-width:0;' }, [
+					E('span', { 'id': 'qm-hero-model', 'class': 'mt-pill-tag', 'style': 'display:' + (data.model ? 'inline-flex' : 'none') + ';background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:1px 8px;font-size:11px;white-space:nowrap;flex:0 0 auto;' }, data.model || ''),
+					E('span', { 'id': 'qm-hero-desc-text', 'style': 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' },
+						heroDescParts.length ? heroDescParts.join(' · ') : '正在读取模组数据…')
+				])
 			]),
 			E('div', { 'class': 'mt-hero-right', 'style': 'display:flex;align-items:center;gap:14px;' }, [
 				modemBar,
@@ -900,7 +908,7 @@ return view.extend({
 			setT('tabv-arfcn', c.arfcn);
 			setT('tabv-tac', c.tac);
 			setT('tabv-cellid', c.cell_id);
-			var descEl = root.querySelector('#qm-hero-desc');
+			var descEl = root.querySelector('#qm-hero-desc-text');
 			if (descEl) {
 				var parts = [c.sysmode, bd, self._caText].filter(controls.hasValue);
 				if (parts.length) descEl.textContent = parts.join(' · ');
