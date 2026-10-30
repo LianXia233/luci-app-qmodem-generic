@@ -83,60 +83,43 @@ return view.extend({
 
 	styleNode: function() {
 		return controls.injectStyleOnce('qm-system-style', [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
-			'.mt-system{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
-			/* 背景环境漫反射光晕 */
-			'.mt-sys-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-glass-border);--qm-glass-shadow:var(--qm-shadow);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
+			'.mt-system{position:relative;max-width:1220px;margin:0 auto;color:var(--qm-text);padding-bottom:36px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}',
+			'.mt-sys-bg-glow1{position:absolute;top:-60px;left:6%;width:450px;height:450px;background:var(--qm-glow-a);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 			'.mt-sys-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
-
-			/* 白色毛玻璃卡片通用规则 */
-			'.mt-system-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--qm-glass-border);border-radius:20px;box-shadow:var(--qm-glass-shadow);padding:22px;transition:transform .24s cubic-bezier(.2,.8,.4,1),box-shadow .24s ease}',
-			'.mt-system-card:hover{transform:translateY(-2px);box-shadow:0 12px 38px var(--qm-shadow-color),0 2px 6px var(--qm-shadow-color)}',
+			'.mt-system-card{position:relative;z-index:1;background:var(--qm-glass-bg);backdrop-filter:var(--qm-glass-blur);-webkit-backdrop-filter:var(--qm-glass-blur);border:1px solid var(--qm-glass-border);border-radius:var(--qm-radius);box-shadow:var(--qm-shadow);padding:24px;transition:transform .24s cubic-bezier(.16,1,.3,1),box-shadow .24s ease}',
+			'.mt-system-card:hover{transform:translateY(-2px);box-shadow:0 16px 38px -4px rgba(22,34,64,0.08), inset 0 1px 1.5px rgba(255,255,255,0.95)}',
 			'.mt-system-card.wide{grid-column:1/-1}',
-
-			/* 顶部 Hero 玻璃卡片 */
-			'.mt-system-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient)}',
-			'.mt-system-kicker{font-size:12px;color:var(--qm-accent);font-weight:750;letter-spacing:.04em;margin-bottom:4px}',
-			'.mt-system-title{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}',
-			'.mt-system-sub{font-size:13px;color:var(--qm-text-muted);line-height:1.5}',
-			'.mt-system-temp-box{display:flex;align-items:center;gap:12px;padding:10px 18px;border-radius:16px;background:var(--qm-glass);border:1px solid var(--qm-border-soft);box-shadow:0 4px 12px var(--qm-shadow-color)}',
-			'.mt-system-temp-val{font-size:24px;font-weight:800;color:var(--qm-text);letter-spacing:-.02em;font-variant-numeric:tabular-nums}',
-			'.mt-system-temp-desc{font-size:11px;color:var(--qm-text-muted)}',
-
-			/* 拓扑与摘要信息分开排版，缺少温度不会留下空列。 */
-			'.mt-sys-topo-card{padding:20px 24px;margin-bottom:16px}',
-			'.qm-system-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;margin-bottom:16px}',
-
-			'.mt-card-title{font-size:15px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;gap:8px;margin-bottom:14px}',
-			'.mt-system-row{display:flex;justify-content:space-between;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12px}',
+			'.mt-system-hero{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:26px 32px;margin-bottom:18px;background:linear-gradient(135deg,rgba(0,114,245,0.9) 0%,rgba(9,88,217,0.85) 50%,rgba(16,185,129,0.8) 100%);border-radius:var(--qm-radius);border:1px solid var(--qm-glass-border);color:#fff;box-shadow:0 14px 34px -8px rgba(0,114,245,0.32), inset 0 1px 2px rgba(255,255,255,0.45);position:relative;overflow:hidden}',
+			'.mt-system-hero::before{content:"";position:absolute;top:-50%;right:-10%;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.22) 0%,transparent 70%);pointer-events:none}',
+			'.mt-system-kicker{font-size:11px;color:rgba(255,255,255,0.95);font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}',
+			'.mt-system-title{margin:0 0 6px;font-size:25px;font-weight:800;letter-spacing:-.02em;color:#fff}',
+			'.mt-system-sub{font-size:12.5px;color:rgba(255,255,255,0.88);line-height:1.5}',
+			'.mt-system-temp-box{display:flex;align-items:center;gap:12px;padding:10px 20px;border-radius:999px;background:rgba(255,255,255,0.2);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.35);box-shadow:0 4px 14px rgba(0,0,0,0.08);color:#fff}',
+			'.mt-system-temp-val{font-size:24px;font-weight:850;color:#fff;letter-spacing:-.02em;font-variant-numeric:tabular-nums}',
+			'.mt-system-temp-desc{font-size:11px;font-weight:600;color:rgba(255,255,255,0.88)}',
+			'.mt-sys-topo-card{padding:22px 26px;margin-bottom:18px}',
+			'.qm-system-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;margin-bottom:18px}',
+			'.mt-card-title{font-size:15px;font-weight:800;color:var(--qm-text);display:flex;align-items:center;gap:8px;margin-bottom:16px}',
+			'.mt-system-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--qm-border-soft);font-size:12.5px}',
 			'.mt-system-row:last-child{border-bottom:0}',
-			'.mt-system-row span{color:var(--qm-text-muted);font-weight:500}',
-			'.mt-system-row strong{color:var(--qm-text);font-weight:600;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
-
-			/* 操作与交互控制卡片 */
-			'.mt-sys-actions-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0 16px}',
-			'.mt-sys-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:12px;font-size:12.5px;font-weight:700;cursor:pointer;transition:all .2s ease;border:1px solid transparent;backdrop-filter:blur(8px)}',
-			'.mt-sys-btn-primary{background:var(--qm-accent-gradient);color:var(--qm-on-hero);box-shadow:0 4px 12px var(--qm-accent-soft)}',
-			'.mt-sys-btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 16px var(--qm-accent-border)}',
-			'.mt-sys-btn-danger{background:var(--qm-danger-soft);color:var(--qm-danger);border-color:var(--qm-danger-border)}',
-			'.mt-sys-btn-danger:hover{background:var(--qm-danger-soft);transform:translateY(-1px)}',
-			'.mt-sys-btn-secondary{background:var(--qm-glass);color:var(--qm-text-soft);border-color:var(--qm-border-soft)}',
-			'.mt-sys-btn-secondary:hover{background:var(--qm-surface);color:var(--qm-accent);transform:translateY(-1px);border-color:var(--qm-accent-border)}',
-
-			/* 维护面板与工具栏 */
-			'.mt-system-maintenance{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:16px}',
+			'.mt-system-row span{color:var(--qm-text-muted);font-weight:600}',
+			'.mt-system-row strong{color:var(--qm-text);font-weight:750;text-align:right;word-break:break-word;font-variant-numeric:tabular-nums}',
+			'.mt-sys-actions-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:14px 0 18px}',
+			'.mt-sys-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;border-radius:14px;font-size:12.5px;font-weight:750;cursor:pointer;transition:all .2s cubic-bezier(.16,1,.3,1);border:1px solid var(--qm-glass-inner-border);backdrop-filter:blur(8px)}',
+			'.mt-sys-btn-primary{background:linear-gradient(135deg,#0072f5 0%,#0050b3 100%)!important;color:#fff!important;border-color:transparent!important;box-shadow:0 4px 14px rgba(0,114,245,0.25)!important}',
+			'.mt-sys-btn-primary:hover{transform:translateY(-1.5px)!important;box-shadow:0 6px 20px rgba(0,114,245,0.38)!important}',
+			'.mt-sys-btn-danger{background:var(--qm-danger-soft)!important;color:var(--qm-danger)!important;border-color:var(--qm-danger-border)!important}',
+			'.mt-sys-btn-danger:hover{background:var(--qm-danger-soft)!important;transform:translateY(-1px);box-shadow:0 4px 12px rgba(239,68,68,0.2)}',
+			'.mt-sys-btn-secondary{background:var(--qm-glass-inner)!important;color:var(--qm-text)!important;border-color:var(--qm-glass-inner-border)!important}',
+			'.mt-sys-btn-secondary:hover{background:#fff!important;color:var(--qm-accent)!important;transform:translateY(-1px);box-shadow:0 4px 12px rgba(22,34,64,0.06)}',
+			'.mt-system-maintenance{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:18px}',
 			'.mt-system-maint-tools{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}',
-
-			/* 技术细节折叠区 */
-			'.mt-system-details{margin-bottom:16px}',
-			'.mt-system-details summary{list-style:none;cursor:pointer;padding:16px 20px;font-size:13.5px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;justify-content:space-between}',
+			'.mt-system-details{margin-bottom:18px;overflow:hidden}',
+			'.mt-system-details summary{list-style:none;cursor:pointer;padding:16px 22px;font-size:14px;font-weight:750;color:var(--qm-text);display:flex;align-items:center;justify-content:space-between}',
 			'.mt-system-details summary::-webkit-details-marker{display:none}',
-			'.mt-system-raw{background:var(--qm-surface-3);padding:16px;border-radius:14px;color:var(--qm-accent-2);font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto}',
-
-			/* 模态框热保护表单 */
-			'.mt-system-thermal-form{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;max-height:46vh;overflow:auto;padding-right:6px}',
-
-			/* 响应式 */
+			'.mt-system-raw{background:rgba(15,23,42,0.96);padding:18px 22px;border-radius:16px;color:#38bdf8;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:360px;overflow:auto;box-shadow:0 12px 30px rgba(0,0,0,0.25), inset 0 1px 1px rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.1)}',
+			'.mt-system-thermal-form{display:grid;grid-template-columns:1fr 1fr;gap:0 16px;max-height:46vh;overflow:auto;padding-right:6px}',
 			'@media(max-width:980px){.mt-system-grid{grid-template-columns:1fr}.mt-system-card.wide{grid-column:auto}}',
 			'@media(max-width:680px){.mt-system-hero{flex-direction:column;align-items:flex-start}.mt-system-maintenance{flex-direction:column;align-items:flex-start}.mt-system-maint-tools{width:100%;justify-content:flex-start}.mt-system-thermal-form{grid-template-columns:1fr}}'
 		].join(''));

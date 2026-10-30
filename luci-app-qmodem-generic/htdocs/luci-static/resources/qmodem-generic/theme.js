@@ -818,8 +818,62 @@ function ensureNavTabIcons() {
   }
 }
 
+
+/* MT5700 Soft Anime Global Wallpaper Layer */
+function mountGlobalBg() {
+	if (typeof document === 'undefined' || document.getElementById('mt5700-global-bg')) return;
+	var layer = document.createElement('div');
+	layer.id = 'mt5700-global-bg';
+
+	var base = '/luci-static/resources/qmodem-generic/bg/';
+	var isDark = function() {
+		var root = document.documentElement;
+		return root && (root.classList.contains('at-dark') || root.getAttribute('data-at-theme') === 'dark');
+	};
+	var variant = function() { return isDark() ? 'dark' : 'light'; };
+	var mk = function(cls, kind) {
+		var img = document.createElement('img');
+		img.className = 'mt-bg-char ' + cls;
+		img.alt = '';
+		img.setAttribute('data-kind', kind);
+		img.src = base + 'character-' + kind + '-' + variant() + '.webp';
+		layer.appendChild(img);
+		return img;
+	};
+	var pc = mk('mt-bg-pc', 'pc');
+	var mobile = mk('mt-bg-mobile', 'mobile');
+
+	var rand = function(a, b) { return a + Math.random() * (b - a); };
+	var chars = layer.querySelectorAll('.mt-bg-char');
+	for (var i = 0; i < chars.length; i++) {
+		var el = chars[i];
+		el.style.right = rand(0, 3).toFixed(1) + 'vw';
+		el.style.bottom = rand(-2, 2).toFixed(1) + 'vh';
+		el.style.transform = 'rotate(' + rand(-5, 5).toFixed(1) + 'deg)';
+		el.style.opacity = rand(0.82, 0.96).toFixed(2);
+	}
+
+	(document.body || document.documentElement).appendChild(layer);
+}
+
 function apply() {
 	try {
+		/* MT5700 Soft Anime System Integration */
+		if (typeof window !== 'undefined' && !window._qmodem_css_injected) {
+			window._qmodem_css_injected = true;
+			var link = document.createElement('link');
+			link.rel = 'stylesheet';
+			link.href = '/luci-static/resources/qmodem-generic/qmodem.css?v=2.14.0';
+			document.head.appendChild(link);
+
+			if (document.head && !document.querySelector('script[src*="tabmenu.js"]')) {
+				var script = document.createElement('script');
+				script.src = '/luci-static/resources/qmodem-generic/tabmenu.js?v=2.14.0';
+				document.head.appendChild(script);
+			}
+		}
+		mountGlobalBg();
+
 		if (typeof document === 'undefined' || !document.createElement)
 			return null;
 		injectOnce();

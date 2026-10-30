@@ -259,86 +259,68 @@ return view.extend({
 
 	styleNode: function() {
 		return controls.injectStyleOnce('qm-sms-style', [
-			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-border);--qm-glass-shadow:var(--qm-shadow-md);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
-			'.mt-sms{position:relative;max-width:1160px;margin:0 auto;color:var(--qm-text);padding-bottom:32px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}',
-			/* 背景环境漫反射光晕 */
-			'.mt-sms-bg-glow1{position:absolute;top:-50px;left:6%;width:440px;height:440px;background:var(--qm-glow-a);border-radius:50%;filter:blur(50px);pointer-events:none;z-index:0}',
+			'.qm-app{--qm-glass-bg:var(--qm-glass);--qm-glass-border:var(--qm-glass-border);--qm-glass-shadow:var(--qm-shadow);--qm-primary:var(--qm-accent);--qm-success:var(--qm-ok);--qm-warning:var(--qm-warn)}',
+			'.mt-sms{position:relative;max-width:1220px;margin:0 auto;color:var(--qm-text);padding-bottom:36px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}',
+			'.mt-sms-bg-glow1{position:absolute;top:-60px;left:6%;width:450px;height:450px;background:var(--qm-glow-a);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
 			'.mt-sms-bg-glow2{position:absolute;top:380px;right:4%;width:420px;height:420px;background:var(--qm-glow-b);border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0}',
-
-			/* 顶部 Hero 玻璃卡片 */
-			'.mt-sms-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:26px 30px;margin-bottom:16px;background:var(--qm-surface-gradient);border-radius:20px;border:1px solid var(--qm-glass-border);box-shadow:var(--qm-glass-shadow);backdrop-filter:blur(20px)}',
-			'.mt-sms-hero h2{margin:0 0 6px;font-size:26px;font-weight:800;letter-spacing:-.02em;background:var(--qm-hero-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:flex;align-items:center;gap:10px}',
-			'.mt-sms-hero p{margin:0;font-size:13px;color:var(--qm-text-muted);line-height:1.5}',
-			'.mt-sms-storage{font-size:11px;color:var(--qm-accent);font-weight:600;margin-top:6px;display:flex;align-items:center;gap:6px}',
-			'.mt-sms-hero-actions{display:flex;gap:10px}',
-
-			/* 毛玻璃主聊天界面框架 */
-			'.mt-sms-shell{display:grid;grid-template-columns:320px minmax(0,1fr);min-height:620px;border-radius:20px;border:1px solid var(--qm-glass-border);background:var(--qm-glass-bg);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);box-shadow:var(--qm-glass-shadow);overflow:hidden}',
-
-			/* 左侧联系人侧边栏 */
-			'.mt-sms-sidebar{border-right:1px solid var(--qm-border-soft);background:var(--qm-surface-2);display:flex;flex-direction:column}',
-			'.mt-sms-sidehead{padding:18px 20px;border-bottom:1px solid var(--qm-border-soft);display:flex;align-items:center;justify-content:space-between}',
-			'.mt-sms-sidehead strong{font-size:14px;font-weight:750;color:var(--qm-text)}',
-			'.mt-sms-count-badge{padding:2px 8px;border-radius:999px;background:var(--qm-border-soft);font-size:11px;font-weight:700;color:var(--qm-text-soft)}',
+			'.mt-sms-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:26px 32px;margin-bottom:18px;background:linear-gradient(135deg,rgba(0,114,245,0.9) 0%,rgba(9,88,217,0.85) 50%,rgba(16,185,129,0.8) 100%);border-radius:var(--qm-radius);border:1px solid var(--qm-glass-border);color:#fff;box-shadow:0 14px 34px -8px rgba(0,114,245,0.32), inset 0 1px 2px rgba(255,255,255,0.45);position:relative;overflow:hidden}',
+			'.mt-sms-hero::before{content:"";position:absolute;top:-50%;right:-10%;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.22) 0%,transparent 70%);pointer-events:none}',
+			'.mt-sms-hero h2{margin:0 0 6px;font-size:25px;font-weight:800;letter-spacing:-.02em;color:#fff;display:flex;align-items:center;gap:12px}',
+			'.mt-sms-hero p{margin:0;font-size:12.5px;color:rgba(255,255,255,0.88);line-height:1.5}',
+			'.mt-sms-storage{font-size:12px;color:#fff;font-weight:750;margin-top:8px;display:inline-flex;align-items:center;gap:8px;padding:4px 14px;border-radius:999px;background:rgba(255,255,255,0.2);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.35)}',
+			'.mt-sms-hero-actions{display:flex;gap:10px;align-items:center}',
+			/* VisionOS Glass Split-Shell */
+			'.mt-sms-shell{display:grid;grid-template-columns:330px minmax(0,1fr);min-height:640px;border-radius:var(--qm-radius);border:1px solid var(--qm-glass-border);background:var(--qm-glass-bg);backdrop-filter:var(--qm-glass-blur);-webkit-backdrop-filter:var(--qm-glass-blur);box-shadow:var(--qm-shadow);overflow:hidden;position:relative;z-index:1}',
+			'.mt-sms-sidebar{border-right:1px solid var(--qm-border-soft);background:rgba(255,255,255,0.4);backdrop-filter:blur(20px);display:flex;flex-direction:column}',
+			'.mt-sms-sidehead{padding:18px 22px;border-bottom:1px solid var(--qm-border-soft);display:flex;align-items:center;justify-content:space-between}',
+			'.mt-sms-sidehead strong{font-size:14.5px;font-weight:800;color:var(--qm-text)}',
+			'.mt-sms-count-badge{padding:3px 10px;border-radius:999px;background:var(--qm-glass-inner);border:1px solid var(--qm-glass-inner-border);font-size:11px;font-weight:750;color:var(--qm-text)}',
 			'.mt-sms-contacts-scroll{flex:1;overflow-y:auto}',
-
-			/* 联系人条目 */
-			'.mt-sms-contact{display:flex;align-items:center;gap:12px;width:100%;border:0;border-bottom:1px solid var(--qm-border-soft);padding:14px 18px;text-align:left;background:transparent;cursor:pointer;transition:all .18s ease}',
-			'.mt-sms-contact:hover{background:var(--qm-glass)}',
-			'.mt-sms-contact.active{background:var(--qm-accent-soft);box-shadow:inset 3px 0 0 var(--qm-accent)}',
-			'.mt-sms-avatar{width:36px;height:36px;border-radius:50%;background:var(--qm-accent-gradient);color:var(--qm-on-hero);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;flex-shrink:0}',
+			'.mt-sms-contact{display:flex;align-items:center;gap:12px;width:100%;border:0;border-bottom:1px solid var(--qm-border-soft);padding:14px 20px;text-align:left;background:transparent;cursor:pointer;transition:all .18s cubic-bezier(.16,1,.3,1)}',
+			'.mt-sms-contact:hover{background:rgba(255,255,255,0.85)}',
+			'.mt-sms-contact.active{background:var(--qm-accent-soft);box-shadow:inset 4px 0 0 var(--qm-accent)}',
+			'.mt-sms-avatar{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#0072f5 0%,#0050b3 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:800;flex-shrink:0;box-shadow:0 3px 10px rgba(0,114,245,0.25)}',
 			'.mt-sms-contact-info{flex:1;min-width:0}',
 			'.mt-sms-contact-top{display:flex;justify-content:space-between;align-items:center;gap:6px}',
-			'.mt-sms-contact-number{font-weight:750;font-size:12.5px;color:var(--qm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-			'.mt-sms-contact-date{font-size:10px;color:var(--qm-text-muted);flex-shrink:0}',
-			'.mt-sms-contact-preview{font-size:11px;color:var(--qm-text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-			'.mt-sms-unread{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:var(--qm-accent);color:var(--qm-on-hero);font-size:10px}',
-			'.mt-sms-source-note{font-size:12px;line-height:1.6;color:var(--qm-text-muted);margin:0 0 14px}',
-
-			/* 右侧消息气泡与对话区 */
-			'.mt-sms-chat{display:flex;flex-direction:column;min-width:0;background:var(--qm-glass)}',
-			'.mt-sms-chathead{padding:18px 24px;border-bottom:1px solid var(--qm-border-soft);display:flex;align-items:center;justify-content:space-between;background:var(--qm-glass)}',
+			'.mt-sms-contact-number{font-weight:800;font-size:13px;color:var(--qm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+			'.mt-sms-contact-date{font-size:10.5px;color:var(--qm-text-muted);font-weight:600;flex-shrink:0}',
+			'.mt-sms-contact-preview{font-size:11.5px;color:var(--qm-text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4}',
+			'.mt-sms-unread{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:#0072f5;color:#fff;font-size:10px;font-weight:800}',
+			/* Chat Window */
+			'.mt-sms-chat{display:flex;flex-direction:column;min-width:0;background:rgba(255,255,255,0.25)}',
+			'.mt-sms-chathead{padding:18px 26px;border-bottom:1px solid var(--qm-border-soft);display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.6);backdrop-filter:blur(16px)}',
 			'.mt-sms-chathead strong{font-size:15px;font-weight:800;color:var(--qm-text)}',
-			'.mt-sms-thread{flex:1;padding:24px;overflow-y:auto;max-height:480px;display:flex;flex-direction:column;gap:14px}',
-
-			/* 气泡样式 */
-			'.mt-sms-bubblewrap{display:flex;align-items:flex-end;gap:8px;max-width:80%}',
+			'.mt-sms-thread{flex:1;padding:26px;overflow-y:auto;max-height:480px;display:flex;flex-direction:column;gap:16px}',
+			/* Chat Bubbles */
+			'.mt-sms-bubblewrap{display:flex;align-items:flex-end;gap:8px;max-width:82%}',
 			'.mt-sms-bubblewrap.in{align-self:flex-start}',
 			'.mt-sms-bubblewrap.out{align-self:flex-end;flex-direction:row-reverse}',
-			'.mt-sms-bubble{padding:12px 16px;border-radius:18px;font-size:13px;line-height:1.55;word-break:break-word;position:relative}',
-			'.mt-sms-bubblewrap.in .mt-sms-bubble{background:var(--qm-glass);border:1px solid var(--qm-border-soft);color:var(--qm-text);border-bottom-left-radius:4px;box-shadow:0 2px 8px var(--qm-shadow-color)}',
-			'.mt-sms-bubblewrap.out .mt-sms-bubble{background:var(--qm-accent-gradient);color:var(--qm-on-hero);border-bottom-right-radius:4px;box-shadow:0 4px 14px var(--qm-accent-border)}',
-			'.mt-sms-bubbledate{font-size:9.5px;margin-top:5px;opacity:.7;text-align:right}',
-			'.mt-sms-delete{border:1px solid var(--qm-border-soft);background:var(--qm-surface);color:var(--qm-text-muted);cursor:pointer;font-size:15px;min-width:30px;min-height:30px;padding:4px;opacity:.72;transition:all .2s ease;border-radius:8px}',
+			'.mt-sms-bubble{padding:13px 18px;border-radius:20px;font-size:13.5px;line-height:1.55;word-break:break-word;position:relative}',
+			'.mt-sms-bubblewrap.in .mt-sms-bubble{background:#fff;border:1px solid var(--qm-glass-border);color:var(--qm-text);border-bottom-left-radius:5px;box-shadow:0 4px 16px rgba(22,34,64,0.06)}',
+			'.mt-sms-bubblewrap.out .mt-sms-bubble{background:linear-gradient(135deg,#0072f5 0%,#0050b3 100%);color:#fff;border-bottom-right-radius:5px;box-shadow:0 6px 20px rgba(0,114,245,0.28)}',
+			'.mt-sms-bubbledate{font-size:10px;margin-top:6px;opacity:.75;text-align:right;font-variant-numeric:tabular-nums}',
+			'.mt-sms-delete{border:1px solid var(--qm-border-soft);background:var(--qm-glass-inner);color:var(--qm-text-muted);cursor:pointer;font-size:15px;min-width:32px;min-height:32px;padding:4px;opacity:.72;transition:all .2s ease;border-radius:10px}',
 			'.mt-sms-bubblewrap:hover .mt-sms-delete,.mt-sms-delete:focus-visible{opacity:1;color:var(--qm-danger);border-color:var(--qm-danger)}',
-
-			/* 输入与发送区 */
-			'.mt-sms-compose{border-top:1px solid var(--qm-border-soft);padding:16px 20px;background:var(--qm-glass)}',
-			'.mt-sms-recipient{display:none;margin-bottom:10px}',
+			/* Compose Dock */
+			'.mt-sms-compose{border-top:1px solid var(--qm-border-soft);padding:18px 24px;background:rgba(255,255,255,0.6);backdrop-filter:blur(16px)}',
+			'.mt-sms-recipient{display:none;margin-bottom:12px}',
 			'.mt-sms-recipient.show{display:block}',
-			'.mt-sms-recipient input{width:100%;border-radius:10px;padding:8px 14px;border:1px solid var(--qm-border);background:var(--qm-glass);font-size:13px}',
-			'.mt-sms-recipient input:focus{border-color:var(--qm-accent);outline:none;box-shadow:0 0 0 3px var(--qm-accent-soft)}',
+			'.mt-sms-recipient input{width:100%;border-radius:12px;padding:9px 14px;border:1px solid var(--qm-glass-inner-border);background:var(--qm-glass-inner);font-size:13px;color:var(--qm-text)}',
+			'.mt-sms-recipient input:focus{border-color:var(--qm-accent);outline:none;box-shadow:0 0 0 3px var(--qm-accent-soft);background:#fff}',
 			'.mt-sms-compose-row{display:flex;gap:12px;align-items:flex-end}',
-			'.mt-sms-compose textarea{flex:1;resize:vertical;min-height:56px;max-height:140px;border-radius:12px;padding:10px 14px;border:1px solid var(--qm-border);background:var(--qm-glass);font-size:13px;line-height:1.5;transition:all .2s ease}',
-			'.mt-sms-compose textarea:focus{border-color:var(--qm-accent);outline:none;box-shadow:0 0 0 3px var(--qm-accent-soft);background:var(--qm-surface)}',
-
-			/* 空状态动态插图 */
-			'.mt-sms-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:420px;color:var(--qm-text-muted);text-align:center;padding:30px}',
-			'.mt-sms-empty strong{font-size:15px;color:var(--qm-text-soft);margin-top:14px}',
+			'.mt-sms-compose textarea{flex:1;resize:vertical;min-height:60px;max-height:140px;border-radius:14px;padding:12px 16px;border:1px solid var(--qm-glass-inner-border);background:var(--qm-glass-inner);font-size:13px;line-height:1.55;transition:all .2s ease}',
+			'.mt-sms-compose textarea:focus{border-color:var(--qm-accent);outline:none;box-shadow:0 0 0 3px var(--qm-accent-soft);background:#fff}',
+			'.mt-sms-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:440px;color:var(--qm-text-muted);text-align:center;padding:30px}',
+			'.mt-sms-empty strong{font-size:15px;color:var(--qm-text);margin-top:14px}',
 			'.mt-sms-empty p{font-size:12px;margin:4px 0 0}',
-
-			/* 按钮系统 */
-			'.mt-sms-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;transition:all .2s ease;border:1px solid transparent}',
-			'.mt-sms-btn-primary{background:var(--qm-accent-gradient);color:var(--qm-on-hero);box-shadow:0 4px 12px var(--qm-accent-soft)}',
-			'.mt-sms-btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 16px var(--qm-accent-border)}',
-			'.mt-sms-btn-secondary{background:var(--qm-glass);color:var(--qm-text-soft);border-color:var(--qm-border-soft)}',
-			'.mt-sms-btn-secondary:hover{background:var(--qm-surface);color:var(--qm-accent);border-color:var(--qm-accent-border);transform:translateY(-1px)}',
-
-			/* 模态框设置排版 */
+			'.mt-sms-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:12px;font-size:12.5px;font-weight:750;cursor:pointer;transition:all .2s cubic-bezier(.16,1,.3,1);border:1px solid var(--qm-glass-inner-border);background:var(--qm-glass-inner);color:var(--qm-text)}',
+			'.mt-sms-btn:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(22,34,64,0.06)}',
+			'.mt-sms-btn-primary{background:linear-gradient(135deg,#0072f5 0%,#0050b3 100%)!important;color:#fff!important;border-color:transparent!important;box-shadow:0 4px 14px rgba(0,114,245,0.25)!important}',
+			'.mt-sms-btn-primary:hover{transform:translateY(-1.5px)!important;box-shadow:0 6px 20px rgba(0,114,245,0.38)!important}',
+			'.mt-sms-btn-secondary{background:var(--qm-glass-inner)!important;color:var(--qm-text)!important;border-color:var(--qm-glass-inner-border)!important}',
+			'.mt-sms-btn-secondary:hover{background:#fff!important;color:var(--qm-accent)!important;transform:translateY(-1px);box-shadow:0 4px 12px rgba(22,34,64,0.06)}',
 			'.mt-sms-settings-row{display:grid;grid-template-columns:135px 1fr;gap:12px;align-items:center;margin:12px 0}',
 			'.mt-sms-danger{margin-top:20px;padding-top:16px;border-top:1px solid var(--qm-border-soft)}',
-
-			/* 响应式适配 */
 			'@media(max-width:780px){.mt-sms-shell{grid-template-columns:1fr}.mt-sms-sidebar{max-height:260px}.mt-sms-hero{flex-direction:column;align-items:flex-start}.mt-sms-hero-actions{width:100%;justify-content:flex-start}}'
 		].join(''));
 	},

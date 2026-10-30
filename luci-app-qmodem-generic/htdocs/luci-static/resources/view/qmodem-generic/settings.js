@@ -4,6 +4,7 @@
 'require uci';
 'require ui';
 'require qmodem-generic.controls as controls';
+'require qmodem-generic.theme as theme';
 
 var E = controls.element;
 
@@ -201,6 +202,7 @@ return view.extend({
 
 	render: function(res) {
 		var self = this;
+		theme.apply();
 		res = res || {};
 		var enter = !self.painted;
 		self.painted = true;
