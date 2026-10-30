@@ -91,8 +91,10 @@ return view.extend({
 			guard(controls.getUsageStats(section), _('流量统计'), { available: 0 }),
 			guard(controls.getCurrentBand(section), _('载波聚合状态'), { cells: [] }),
 			guard(controls.getInterfaceStatus(section), _('移动 IP'), {}),
-			guard(controls.getNetworkInfo(section), _('网络'), []),
-			guard(controls.getNeighborCell(section), _('邻区'), {})
+			guard(controls.getNetworkInfo(section), _('网络'), [])
+			/* 邻区扫描（get_neighborcell）是无缓存的重度 AT 操作，会长时间
+			   占用 uhttpd 线程（-n 3），放进首屏加载会拖死整个 LuCI（连概览
+			   页都无法响应）。已移到首屏渲染后异步补充，见 render()。 */
 		]).then(function(r) {
 			var iface = r[7] || {};
 			var ifname = iface.interface || '';
@@ -119,7 +121,6 @@ return view.extend({
 					currentBand: r[6],
 					iface: iface,
 					net: r[8],
-					neighbor: r[9],
 					netdev: netdev,
 					devStatus: devStatus,
 					allInfo: allInfo,
@@ -272,7 +273,7 @@ return view.extend({
 		if (pcc && pcc.band_name)
 			data.band = this.cleanText(pcc.band_name) || data.band;
 
-		/* ---- 邻区（get_neighborcell，原样上报值） ---- */
+		/* ---- 邻区（get_neighborcell，原样上报值；首屏后异步填充） ---- */
 		var nb = (res.neighbor && res.neighbor.neighborcell) || {};
 		data.neighbors_nr = Array.isArray(nb.NR) ? nb.NR : [];
 		data.neighbors_lte = Array.isArray(nb.LTE) ? nb.LTE : [];
@@ -430,8 +431,12 @@ return view.extend({
 				'</svg>';
 		}
 
-		/* 邻区表：get_neighborcell 原样上报值（上游约定不做换算） */
-		function buildNeighborTable() {
+		/* 邻区表：get_neighborcell 原样上报值（上游约定不做换算）。
+		   邻区数据首屏后异步获取，这里只负责按传入数据构建表格。 */
+		function buildNeighborTableInto(box, nbData) {
+			if (!box) return;
+			var nr = (nbData && Array.isArray(nbData.NR)) ? nbData.NR : [];
+			var lte = (nbData && Array.isArray(nbData.LTE)) ? nbData.LTE : [];
 			var rows = [];
 			function addRows(list, rat) {
 				list.forEach(function(c) {
@@ -446,8 +451,8 @@ return view.extend({
 					]));
 				});
 			}
-			addRows(data.neighbors_nr, 'NR');
-			addRows(data.neighbors_lte, 'LTE');
+			addRows(nr, 'NR');
+			addRows(lte, 'LTE');
 
 			var thead = E('thead', {}, [
 				E('tr', {}, [
@@ -463,9 +468,9 @@ return view.extend({
 				]));
 			}
 
-			return E('div', { 'class': 'mt5700-table-wrapper' }, [
+			box.replaceChildren(E('div', { 'class': 'mt5700-table-wrapper' }, [
 				E('table', { 'class': 'mt5700-table' }, [ thead, E('tbody', {}, rows) ])
-			]);
+			]));
 		}
 
 		/* 射频历史曲线：只画真实采样点 */
@@ -803,7 +808,8 @@ return view.extend({
 					E('span', {}, '邻区列表 (get_neighborcell 原样上报)')
 				])
 			]),
-			buildNeighborTable()
+			E('div', { 'id': 'neighbor-box', 'style': 'font-size:12px;color:var(--mt5700-text-muted);padding:6px 0;' },
+				'邻区扫描中…（重度 AT 操作，首屏后异步获取）')
 		]);
 		midGrid.appendChild(chartCard);
 
@@ -815,7 +821,8 @@ return view.extend({
 			sparkDl: layout.querySelector ? layout.querySelector('#sparkline-dl') : null,
 			sparkUl: layout.querySelector ? layout.querySelector('#sparkline-ul') : null,
 			totals: layout.querySelector ? layout.querySelector('#traffic-totals') : null,
-			chart: layout.querySelector ? layout.querySelector('#sig-chart-box') : null
+			chart: layout.querySelector ? layout.querySelector('#sig-chart-box') : null,
+			neighborBox: layout.querySelector ? layout.querySelector('#neighbor-box') : null
 		};
 		self.trafficDl = [];
 		self.trafficUl = [];
@@ -903,6 +910,21 @@ return view.extend({
 				}).catch(function() { /* 采样失败保留既有曲线 */ });
 			}, this), 10);
 		}
+
+		/* 邻区扫描：首屏渲染完成后异步执行（重度 AT 操作，绝不阻塞加载路径） */
+		window.setTimeout(L.bind(function() {
+			var live = self._live;
+			if (!live || !live.root || !live.root.isConnected || !self.section)
+				return;
+			controls.getNeighborCell(self.section).then(function(nb) {
+				if (!live.root || !live.root.isConnected)
+					return;
+				buildNeighborTableInto(live.neighborBox, (nb && nb.neighborcell) || {});
+			}).catch(function() {
+				if (live.root && live.root.isConnected && live.neighborBox)
+					live.neighborBox.textContent = '邻区扫描失败（后端未响应），可刷新重试';
+			});
+		}, this), 1500);
 
 		return layout;
 	}
