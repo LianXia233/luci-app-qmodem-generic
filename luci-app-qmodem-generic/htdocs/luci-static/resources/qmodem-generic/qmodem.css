@@ -5984,3 +5984,27 @@ html.at-dark, html[data-at-theme="dark"] {
   width: 48px !important;
   height: 48px !important;
 }
+
+/* ==========================================================================
+   v2.41.9 状态页英雄栏兜底：裸看板娘图不得撑爆英雄栏
+   --------------------------------------------------------------------------
+   状态页曾把 <img class="mt-mascot-img"> 直接放进 .mt-hero-right（无
+   .mt-mascot-avatar 圆容器包裹），而全局规则给 .mt-mascot-img 施加
+   width/height:100%!important（本为「圆容器内填充图」设计）。裸图的
+   百分比高度退化为固有尺寸（mascot.png ≈ 300px），英雄栏被撑到 341px。
+   现已改为容器内包裹；本条为兜底：任何直接挂在 .mt-hero-right 下的裸图
+   一律收敛为 48px 圆角小图，特异性 5 级（含双倍类名），不受压缩器重排影响。
+   ========================================================================== */
+.mt5700-hero-card.mt5700-hero-card .mt-hero-right > .mt-mascot-img.mt-mascot-img {
+  width: auto !important;
+  height: 48px !important;
+  border-radius: 12px !important;
+  object-fit: contain !important;
+  background: transparent !important;
+}
+
+@media (max-width: 768px) {
+  .mt5700-hero-card.mt5700-hero-card .mt-hero-right > .mt-mascot-img.mt-mascot-img {
+    height: 40px !important;
+  }
+}
