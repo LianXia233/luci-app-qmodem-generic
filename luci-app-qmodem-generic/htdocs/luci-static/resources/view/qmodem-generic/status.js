@@ -265,8 +265,12 @@ return view.extend({
 		data.gateway = gw;
 		data.mtu = (res.devStatus && res.devStatus.mtu != null) ? String(res.devStatus.mtu) : '';
 
-		/* ---- 当前载波（get_current_band，真实 pcc/scc 列表） ---- */
-		var cells = (res.currentBand && Array.isArray(res.currentBand.cells)) ? res.currentBand.cells : [];
+		/* ---- 当前载波（get_current_band，真实 pcc/scc 列表） ----
+		   返回体兼容两种封装：{cells:[...]} 与 {current_band:{cells:[...]}}
+		   （fibocom 供应商脚本用 current_band 对象包裹） */
+		var cbRaw = res.currentBand || {};
+		var cbInner = (cbRaw.current_band && typeof cbRaw.current_band === 'object') ? cbRaw.current_band : cbRaw;
+		var cells = Array.isArray(cbInner.cells) ? cbInner.cells : [];
 		var pcc = null, scc = [];
 		cells.forEach(function(c) {
 			if (!c) return;

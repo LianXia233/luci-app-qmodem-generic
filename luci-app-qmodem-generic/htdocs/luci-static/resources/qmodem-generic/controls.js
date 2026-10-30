@@ -1447,6 +1447,24 @@ function getModemInterfaces(section) {
 				});
 		}
 
+		/* 兜底：按名解析到的接口可能 up 但无地址（拨号切换期残留），而同一
+		   物理设备上的其他接口（如 modem0/modem0_6）持有真实地址 —— 把
+		   「同设备且有地址的 up 接口」并入合并视图，保证 IPv4/IPv6 展示的
+		   是真实出口。去重后交给 mergeIfaceEntries 聚合。 */
+		var phyDev = '';
+		try { phyDev = uci.get('qmodem', section, 'network') || ''; } catch (e) { phyDev = ''; }
+		if (phyDev) {
+			dump.forEach(function(e) {
+				if (!e || !e.up || !e.interface) return;
+				var d = e.l3_device || e.device;
+				var hasAddr = (Array.isArray(e['ipv4-address']) && e['ipv4-address'].length) ||
+					(Array.isArray(e['ipv6-address']) && e['ipv6-address'].length) ||
+					(Array.isArray(e['ipv6-prefix']) && e['ipv6-prefix'].length);
+				if (d === phyDev && hasAddr && names.indexOf(e.interface) === -1)
+					names.push(e.interface);
+			});
+		}
+
 		return { names: names, entries: names.map(function(n) { return byName[n]; }) };
 	});
 }
