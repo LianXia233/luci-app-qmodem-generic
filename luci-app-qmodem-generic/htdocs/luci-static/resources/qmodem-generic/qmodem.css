@@ -5931,3 +5931,56 @@ html.at-dark, html[data-at-theme="dark"] {
   box-shadow: 0 8px 24px rgba(139, 92, 246, 0.5) !important;
   transform: translateY(-1.5px) !important;
 }
+
+
+/* ==========================================================================
+   Ultra-Streamlined Hero Card (优化英雄栏高度)
+   ========================================================================== */
+.mt5700-hero-card, .mt-hero-card,
+.qm-app .mtconn-hero, .qm-app .mt-net-hero,
+.qm-app .mt-system-hero, .qm-app .mt-sms-hero,
+.qm-app .mt-terminal-hero, .qm-app .mt-diag-hero {
+  padding: 10px 20px !important;
+  margin-bottom: 12px !important;
+  min-height: auto !important;
+  gap: 12px !important;
+  border-radius: var(--mt5700-radius-lg) !important;
+}
+
+.mt5700-hero-card .mt5700-hero-content,
+.mt-hero-card .mt-hero-left,
+.mt-diag-hero > div:first-child {
+  gap: 3px !important;
+}
+
+.mt5700-hero-card h2, .mt-hero-card h2,
+.mt5700-hero-title, .mt-hero-title,
+.mt-diag-title {
+  font-size: 19px !important;
+  line-height: 1.25 !important;
+  margin: 0 !important;
+}
+
+.mt5700-hero-card p, .mt-hero-card p,
+.mt5700-hero-desc, .mt-hero-sub,
+.mt-diag-sub {
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  margin: 0 !important;
+}
+
+.mt5700-hero-badge, .mt-badge-online {
+  padding: 2px 10px !important;
+  font-size: 11px !important;
+  gap: 5px !important;
+}
+
+.mt-mascot-img {
+  height: 48px !important;
+  width: auto !important;
+}
+
+.mt-mascot-avatar, .mt-mascot-avatar.mt-mascot-avatar {
+  width: 48px !important;
+  height: 48px !important;
+}

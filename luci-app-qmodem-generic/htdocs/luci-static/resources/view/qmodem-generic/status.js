@@ -419,25 +419,22 @@ return view.extend({
 		// Main Anime Container
 		var layout = E('div', { 'class': 'mt-anime-container mt5700-page qm-app' + (enter ? ' qm-enter' : '') });
 
-		// 0. Soft Anime Hero Card
-		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card' }, [
-			E('div', { 'class': 'mt5700-hero-content mt-hero-left' }, [
-				E('div', { 'style': 'display:flex;align-items:center;gap:10px;' }, [
-					E('span', { 'class': 'mt-badge-online', 'style': connected ? '' : 'background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
+		// 0. Soft Anime Hero Card (Streamlined & Compact)
+		var heroCard = E('section', { 'class': 'mt5700-hero-card mt-hero-card', 'style': 'padding:10px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;' }, [
+			E('div', { 'class': 'mt5700-hero-content mt-hero-left', 'style': 'display:flex;flex-direction:column;gap:3px;' }, [
+				E('div', { 'style': 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;' }, [
+					E('h2', { 'style': 'margin:0;font-size:20px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;line-height:1.2;' }, 'QModem · 全息全景网络座舱'),
+					E('span', { 'class': 'mt-badge-online', 'style': connected ? 'padding:2px 10px;font-size:11px;' : 'padding:2px 10px;font-size:11px;background:var(--mt5700-danger-pale);color:var(--mt5700-danger);' }, [
 						E('span', { 'class': 'mt-beacon-dot', 'style': connected ? '' : 'background:var(--mt5700-danger);' }),
 						E('span', {}, connected ? '5G 链路就绪 (CONNECTED)' : '等待驻网 (STANDBY)')
 					]),
-					data.model ? E('span', { 'class': 'mt-pill-tag', 'style': 'background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;' }, data.model) : null
+					data.model ? E('span', { 'class': 'mt-pill-tag', 'style': 'background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;padding:2px 8px;font-size:11px;' }, data.model) : null
 				]),
-				E('h2', { 'style': 'margin:4px 0;font-size:26px;font-weight:850;color:var(--mt5700-text);letter-spacing:-0.02em;' }, [
-					'QModem · 全息全景网络座舱',
-					data.model ? E('span', { 'style': 'font-size:16px;color:var(--mt5700-accent);margin-left:12px;font-weight:700;' }, data.model) : null
-				]),
-				E('p', { 'style': 'margin:0;font-size:13px;color:var(--mt5700-text-secondary);' }, '5G NR 全网通 · 载波聚合 · 射频空间波束 · 实时微秒级遥测')
+				E('p', { 'style': 'margin:0;font-size:12px;color:var(--mt5700-text-secondary);line-height:1.3;' }, '5G NR 全网通 · 载波聚合 · 射频空间波束 · 实时微秒级遥测')
 			]),
-			E('div', { 'class': 'mt-hero-right', 'style': 'display:flex;align-items:center;gap:18px;' }, [
+			E('div', { 'class': 'mt-hero-right', 'style': 'display:flex;align-items:center;gap:14px;' }, [
 				modemBar,
-				E('img', { 'class': 'mt-mascot-img', 'src': '/luci-static/resources/qmodem-generic/mascot.png', 'alt': 'Mascot', 'style': 'height:82px;object-fit:contain;' })
+				E('img', { 'class': 'mt-mascot-img', 'src': '/luci-static/resources/qmodem-generic/mascot.png', 'alt': 'Mascot', 'style': 'height:48px;width:auto;object-fit:contain;' })
 			])
 		]);
 		layout.appendChild(heroCard);
