@@ -34,11 +34,20 @@ qm_sup_stale() {
 	_raw=$(cat "$LOCKDIR/pid" 2>/dev/null)
 	_pid=${_raw%% *}
 	case "$_pid" in
-		''|*[!0-9]*) return 1 ;;
-		*) kill -0 "$_pid" 2>/dev/null && return 1 ;;
+		''|*[!0-9]*)
+			# pid 文件缺失/不可解析：旧版本（3.0.0-4 及更早）只 mkdir 不写 pid，
+			# 崩溃残留的空目录在这里会被判成"同步进行中"而永久卡住。给
+			# LOCK_GRACE 秒宽限，避免抢走刚 mkdir 尚未写 pid 的正常锁。
+			_age=$(( $(date +%s) - $(stat -c %Y "$LOCKDIR" 2>/dev/null || echo 0) ))
+			[ "$_age" -gt "${QMODEM_SUPPORT_LOCK_GRACE:-5}" ] || return 1
+			;;
+		*)
+			kill -0 "$_pid" 2>/dev/null && return 1
+			;;
 	esac
-	rm -f "$LOCKDIR/pid" 2>/dev/null
+	rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
 	rmdir "$LOCKDIR" 2>/dev/null
+	[ -d "$LOCKDIR" ] && return 1
 	return 0
 }
 

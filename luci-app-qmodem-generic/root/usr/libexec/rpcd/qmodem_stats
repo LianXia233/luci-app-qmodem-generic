@@ -92,9 +92,19 @@ case "$1" in
 				# 语义不变：只读已存储的统计，从不采样
 				if [ -f "$COLLECT_BIN" ]; then
 					_out=$(sh "$COLLECT_BIN" show "$config_section" 2>/dev/null)
+					# 只转发结构完整的 JSON：采集器异常中断时 stdout 可能是
+					# 半截对象，以 { 开头并不代表能解析
 					case "$_out" in
-						\{*) printf '%s\n' "$_out" ;;
-						*)   printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")" ;;
+						\{*)
+							if printf '%s' "$_out" | jsonfilter -e '@.config_section' >/dev/null 2>&1; then
+								printf '%s\n' "$_out"
+							else
+								printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"
+							fi
+							;;
+						*)
+							printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"
+							;;
 					esac
 				else
 					printf '{"config_section":%s,"available":0,"days":[]}\n' "$(j_str "$config_section")"

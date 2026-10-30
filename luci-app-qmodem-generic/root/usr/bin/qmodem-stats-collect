@@ -203,23 +203,34 @@ add_delta() {
 # 结果是流量被记两次、且 ${FILE}.tmp 互相覆盖。这里用 mkdir 原子性做锁，
 # pid + 时间戳写在锁内，便于回收崩溃残留的锁。
 
-LOCK_DIR="${QMODEM_STATS_LOCKDIR:-/var/lock/qmodem-stats.lock}"
+# 锁按模组节隔离：不同 section 各写各的 .stats 文件，互不相干。共用一把全局锁
+# 会让多模组并行采样退化成串行（第 3 个可能等满重试次数直接跳过），A 模组采样
+# 期间点 B 模组的清零也会被误判为 busy。LOCK_DIR 由 do_run / do_reset 按节设置。
+LOCK_BASE="${QMODEM_STATS_LOCKDIR:-/var/lock/qmodem-stats.lock}"
+LOCK_DIR=''
 LOCK_RETRY="${QMODEM_STATS_LOCK_RETRY:-10}"
-LOCK_STALE="${QMODEM_STATS_LOCK_STALE:-120}"
+# 锁目录已存在但 pid 文件不可解析时，超过这个秒数才认定为崩溃残留
+LOCK_GRACE=5
 HELD_LOCK=0
 
 lock_owner_dead() {
-	# 锁里没有可信 pid、pid 已不存在，或持锁超过 LOCK_STALE 秒 → 视为残留
+	# 返回 0 表示「可回收」。两种残留：
+	#   1) pid 文件缺失/不可解析（崩溃在 mkdir 与写 pid 之间，或旧版遗留）；
+	#      刚创建的锁不抢，避免与尚未写入 pid 的进程双持。
+	#   2) pid 可信但进程已不存在。
+	# 注意：pid 存活时一律不回收。持锁时间长不代表可以抢占——一次慢采样
+	# （ubus 8 秒超时叠加 AT 重试）可能超过任何固定阈值，抢锁会造成双写。
 	_p=''; _t=''
 	[ -f "$LOCK_DIR/pid" ] && read -r _p _t < "$LOCK_DIR/pid" 2>/dev/null
 	case "$_p" in
-		''|*[!0-9]*) return 0 ;;
+		''|*[!0-9]*)
+			_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0) ))
+			[ "$_age" -gt "$LOCK_GRACE" ]
+			return
+			;;
 	esac
-	kill -0 "$_p" 2>/dev/null || return 0
-	case "$_t" in
-		''|*[!0-9]*) return 1 ;;
-	esac
-	[ $(( $(date +%s) - _t )) -gt "$LOCK_STALE" ]
+	kill -0 "$_p" 2>/dev/null && return 1
+	return 0
 }
 
 acquire_lock() {
@@ -233,10 +244,10 @@ acquire_lock() {
 			return 0
 		fi
 		if lock_owner_dead; then
-			rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+			rm -f "$LOCK_DIR/pid" "$LOCK_DIR/sync_pid" "$LOCK_DIR/sync_ts" 2>/dev/null || true
 			rmdir "$LOCK_DIR" 2>/dev/null || true
-			_try=$((_try + 1))
-			continue
+			# 目录真的没了才免计次重试；否则退回普通等待，避免忙等死循环
+			[ -d "$LOCK_DIR" ] || continue
 		fi
 		_try=$((_try + 1))
 		sleep 1
@@ -290,6 +301,7 @@ do_run() {
 	config_section="$1"
 	mkdir -p "$STATS_DIR"
 	FILE="$STATS_DIR/${config_section}.stats"
+	LOCK_DIR="$LOCK_BASE.$config_section"
 
 	# 取不到锁说明已有采集进程在写同一份文件：本次只输出当前值，绝不重复计数
 	if ! acquire_lock; then
@@ -307,9 +319,11 @@ do_run() {
 	total_rx=${total_rx:-0}; total_tx=${total_tx:-0}; swapped=${swapped:-0}
 
 	if read_counters "$config_section"; then
-		# 只有一侧计数器可读时另一侧会是空串，先补齐，避免 $((cur - base)) 出错
-		is_num "$cur_rx" || cur_rx=0
-		is_num "$cur_tx" || cur_tx=0
+		# 只有一侧计数器可读时补齐不可读侧：必须沿用上一次基准，绝不能写 0。
+		# 写成 0 会让本轮的 last_rx 落盘成 0，等计数器恢复可读时把模组整个
+		# 生命周期的累计流量当成「本次新增」记进当天（与 reset 里同一类错误）。
+		is_num "$cur_rx" || cur_rx=$last_rx
+		is_num "$cur_tx" || cur_tx=$last_tx
 		today=$(cn_day_of "$now")
 
 		if [ "$last_ts" -gt 0 ]; then
@@ -397,6 +411,7 @@ do_reset() {
 	config_section="$1"
 	FILE="$STATS_DIR/${config_section}.stats"
 	mkdir -p "$STATS_DIR"
+	LOCK_DIR="$LOCK_BASE.$config_section"
 
 	if ! acquire_lock; then
 		json_init

@@ -40,6 +40,8 @@ TMP="$TARGET.tmp.$$"
 LOCKDIR="${QMODEM_SUPPORT_LOCKDIR:-/var/run/qmodem-modem-support.lock}"
 # 锁最多持有时间（秒）：超过且持锁进程已不存在时视为崩溃残留，可强行清理
 LOCK_RETRY="${QMODEM_SUPPORT_LOCK_RETRY:-5}"
+# 锁目录存在但 pid 文件缺失/不可解析时的宽限期（秒）
+LOCK_GRACE="${QMODEM_SUPPORT_LOCK_GRACE:-5}"
 
 JQ="$(command -v jq 2>/dev/null)"
 
@@ -283,14 +285,28 @@ while read -r GROUP MODEL SOURCE; do
 			# 持锁进程已经消失（异常断电、被 kill）时清掉残留锁。
 			# pid 文件格式与 /usr/sbin/qmodem-support-custom 共用："<pid> <epoch>"，
 			# 只取第一段，避免带 epoch 的锁被当成"无法解析"而永久卡住同步。
+			#
+			# pid 文件缺失或不可解析同样要能回收：3.0.0-4 及更早的锁写的是
+			# sync_pid / sync_ts，升级时若残留（断电、kill -9），按旧逻辑会一直
+			# 报"另一个同步进程正在运行"。这类锁给 LOCK_GRACE 秒宽限——刚
+			# mkdir 成功、尚未写 pid 的进程不会被误抢。
 			_raw=$(cat "$LOCKDIR/pid" 2>/dev/null)
 			_pid=${_raw%% *}
-			case "$_pid" in ''|*[!0-9]*) ;; *)
-				if ! kill -0 "$_pid" 2>/dev/null; then
-					rm -f "$LOCKDIR/pid" 2>/dev/null
-					rmdir "$LOCKDIR" 2>/dev/null || true
-					continue
-				fi ;;
+			case "$_pid" in
+				''|*[!0-9]*)
+					_age=$(( $(date +%s) - $(stat -c %Y "$LOCKDIR" 2>/dev/null || echo 0) ))
+					if [ "$_age" -gt "$LOCK_GRACE" ]; then
+						rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
+						rmdir "$LOCKDIR" 2>/dev/null || true
+						[ -d "$LOCKDIR" ] || continue
+					fi
+					;;
+				*)
+					if ! kill -0 "$_pid" 2>/dev/null; then
+						rm -f "$LOCKDIR/pid" "$LOCKDIR/sync_pid" "$LOCKDIR/sync_ts" 2>/dev/null
+						rmdir "$LOCKDIR" 2>/dev/null || true
+						[ -d "$LOCKDIR" ] || continue
+					fi ;;
 			esac
 			_try=$((_try + 1))
 			sleep 1

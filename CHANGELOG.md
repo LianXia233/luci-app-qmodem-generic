@@ -7,15 +7,17 @@
 
 - 修复（P0 数据损坏）：`qmodem-modem-support` 改为按 JSON 结构（jq）合并支持库，彻底移除按缩进扫文本的 `group_body`/`has_model`/`insert_block`。官方 `modem_support.json` 里存在缩进异常的块（RM520N 的 `settings` 内出现 8 空格的 `"sms": { … },`），文本扫描会在那里提前收敛，看不见该块之后的型号，于是把**已存在的型号再注入一次**，支持库出现同名重复键；重复键谁生效取决于解析器（`modem_scand` 用 jsonfilter），等于静默改坏 QModem 的识别库，且原 `validate()` 无法察觉。现在解析、判重、写入全部走 jq，对任意合法 JSON 排版（4 空格 / 2 空格 / 单行空对象）结果一致，并逐型号复核后才落盘。
 - 修复：`qmodem-modem-support` 缺 jq 时拒绝写入（jq 已是本包硬依赖），不再退化成"看起来成功"的文本拼接；写入失败（只读文件系统等）会如实报错并回滚备份。
-- 修复：同步锁协议与 `qmodem-support-custom` 统一为 `"<pid> <epoch>"`。此前两边格式不一致：`qmodem-support-custom` 写 `pid epoch`，而合并脚本的 `case` 判定把带空格的 pid 视为不可解析 → 崩溃残留的锁永远破不掉，开机同步从此静默失败；反之合并脚本留下的 pid-only 锁也让自定义型号保存误判"同步进行中"。两个脚本现在都能回收持锁进程已消失的残留锁，并且回收后立即重试（不消耗等待次数）。
+- 修复：同步锁协议与 `qmodem-support-custom` 统一为 `"<pid> <epoch>"`。此前两边格式不一致：`qmodem-support-custom` 写 `pid epoch`，而合并脚本的 `case` 判定把带空格的 pid 视为不可解析 → 崩溃残留的锁永远破不掉，开机同步从此静默失败；反之合并脚本留下的 pid-only 锁也让自定义型号保存误判"同步进行中"。两个脚本现在都能回收持锁进程已消失的残留锁，并且回收后立即重试（不消耗等待次数）。pid 文件缺失或不可解析的锁（3.0.0-4 的 `sync_pid`/`sync_ts`、custom 只 `mkdir` 留下的空目录）在 5 秒宽限后同样回收——否则升级后同步与"保存自定义型号"会被永久卡住；宽限期用于避开刚 `mkdir`、尚未写入 pid 的正常锁。
 - 修复：开机重复执行——`/etc/init.d/qmodem-modem-support` 此前是 `USE_PROCD=1` 的一次性任务却没关 respawn，procd 默认策略（退出后 5 秒重试、1 小时内最多 5 次）会把合并脚本每次开机重跑 5 遍，syslog 全是重复的"支持库已包含 …，跳过"。改为经典 one-shot 脚本，只在 boot 执行一次。
 - 修复（流量统计正确性）：
   - 采样与清零都持互斥锁，且**先取锁再读基准**——此前后台循环与 rpcd 页面补采并发时互相覆盖基准，同一批流量被重复记账；
   - `reset` 在计数器读不到时保留 `last_rx/last_tx`，不再写成 0（否则下一轮会把模组整个生命周期的流量当成"今天用的"，实测虚增 50 MB）；
-  - 只有一侧计数器可读时另一侧为空串，先补齐再做算术，避免整轮采样失败；
+  - 只有一侧计数器可读时另一侧为空串，先补齐再做算术，避免整轮采样失败；补齐必须沿用该侧上一次基准，**不能写 0**——写成 0 会让本轮 `last_rx` 落盘为 0，等计数器恢复可读时把模组整个生命周期的累计流量当成"本次新增"记进当天；
+  - 采集锁按模组节隔离（`<lock>.<section>`）：多模组并行采样不再互相排队到重试耗尽，A 模组采样期间清零 B 模组也不会误报 busy；
+  - 持锁进程存活时一律不回收锁：慢采样（ubus 超时叠加 AT 重试）可能超过任何固定阈值，按超时抢锁会造成两个进程双写同一份 stats；
   - 跨日界采样按跨越天数分摊并回填历史日，各天之和严格等于本次增量；
   - 日期换算改用整数算法（`civil_from_days`）：`strftime`/`mktime` 在 busybox awk、mawk 上不可用，静默失败会让跨日归属与保留期裁剪算错。已用 gawk/busybox awk 对拍校验。
-- 修复：`rpcd/qmodem_stats` 的 `stats_history` 只转发合法 JSON（输出异常时返回 `available:0` 空结果），并给页面触发的补采加节流戳（默认 30 秒），页面每几秒轮询不再堆叠采集进程。
+- 修复：`rpcd/qmodem_stats` 的 `stats_history` 只转发结构完整的 JSON（以 `{` 开头且能解析出 `config_section`，否则返回 `available:0` 空结果），并给页面触发的补采加节流戳（默认 30 秒），页面每几秒轮询不再堆叠采集进程。
 - 修复（权限边界）：rpcd 的 `read` 段方法对只读会话同样可调（rpcd 的 write 蕴含 read），因此把写操作移出只读段：`qmodem_stats` 只读 `daily_stats`/`stats_history`，`stats_reset` 归入 write；`qmodem_support` 只读 `status`/`ports`/`custom_list`，`sync`/`custom_save`/`custom_delete`/`probe_port` 归入 write。
 - 修复：LuCI 标签页空白标题——`menu.d` 里 `terminal`、`settings` 两个子页既没有 `title` 也没有 `order`，标签文字为空且排到最前面。补 `"AT Console"`（order 55）与 `"Settings"`（order 70），对应 msgid 在 `po/zh_Hans` 里已存在。
 - 修复（前端）：

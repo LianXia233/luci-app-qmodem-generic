@@ -59,7 +59,8 @@ elif cur is True:
 elif cur is False:
     print('false')
 elif cur is None:
-    print('null', end='')
+    # 与真实 jsonfilter 一致：键不存在时不输出、返回非零
+    sys.exit(1)
 elif isinstance(cur, (dict, list)):
     print(json.dumps(cur))
 else:
@@ -193,7 +194,8 @@ grep -q 'total_rx=0' "$T/etc/qmodem-stats/modem1.stats" && ok "reset 已清零" 
 ( env PATH="$T/bin:$PATH" $ENVQ sh "$T/bin/qmodem-stats-collect" run modem2 >/dev/null 2>&1 & ) 2>/dev/null
 ( env PATH="$T/bin:$PATH" $ENVQ sh "$T/bin/qmodem-stats-collect" run modem2 >/dev/null 2>&1 & ) 2>/dev/null
 sleep 2
-[ ! -d "$T/lock-stats" ] && ok "并发 run 后采集锁已清理" || bad "采集锁残留：$T/lock-stats"
+[ ! -d "$T/lock-stats" ] && ! ls -d "$T"/lock-stats.* >/dev/null 2>&1 \
+	&& ok "并发 run 后采集锁已清理（按节锁）" || bad "采集锁残留：$(ls -d "$T"/lock-stats* 2>/dev/null | tr '\n' ' ')"
 [ ! -d /tmp/qmodem-stats-collect.modem2.lock ] && ok "旧锁路径不再使用" || bad "仍在写旧锁路径"
 [ -f "$T/etc/qmodem-stats/modem2.stats" ] && ok "并发 run 已落盘" || bad "并发 run 未落盘"
 
@@ -344,14 +346,53 @@ echo "$OUT" | grep -q '另一个同步进程' && ok "活锁：拒绝并发写入
 [ "$B" = "$(cksum "$T/share/qmodem/busy.json")" ] && ok "活锁：目标文件未被改动" || bad "活锁：目标文件被改写"
 rm -f "$T/lk-live/pid"; rmdir "$T/lk-live" 2>/dev/null
 
+# 6.4b 旧版本残留锁：3.0.0-4 的 merge 写 sync_pid/sync_ts，custom 只 mkdir 从不
+#      写 pid。升级后这两类残留都必须能回收，否则同步与自定义保存永久失败。
+jq --indent 4 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/legacy.json"
+rm -rf "$T/lk-legacy" && mkdir -p "$T/lk-legacy"
+printf '99999999' > "$T/lk-legacy/sync_pid" && date +%s > "$T/lk-legacy/sync_ts"
+sleep 1
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/legacy.json" QMODEM_SUPPORT_LOCKDIR="$T/lk-legacy" \
+	QMODEM_SUPPORT_LOCK_GRACE=0 sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -q '另一个同步进程' && bad "旧格式锁（sync_pid）未回收: $OUT" || ok "旧格式锁（sync_pid）已回收"
+echo "$OUT" | grep -q '"added":\["' && ok "旧格式锁回收后继续写入" || bad "旧格式锁回收后未写入: $OUT"
+
+rm -rf "$T/lk-empty" && mkdir -p "$T/lk-empty"
+sleep 1
+# 用一份全新的空库，确保确实有型号需要写入（否则不会走到取锁）
+jq --indent 4 '.modem_support.usb = {} | .modem_support.pcie = {}' "$T/share/qmodem/indent.json" > "$T/share/qmodem/empty.json"
+OUT=$(env $ENVQ QMODEM_SUPPORT_FILE="$T/share/qmodem/empty.json" QMODEM_SUPPORT_LOCKDIR="$T/lk-empty" \
+	QMODEM_SUPPORT_LOCK_GRACE=0 sh "$T/sbin/qmodem-modem-support" --json 2>/dev/null)
+echo "$OUT" | grep -q '另一个同步进程' && bad "空锁目录未回收: $OUT" || ok "空锁目录已回收"
+[ ! -d "$T/lk-empty" ] && ok "空锁目录回收后无残留" || bad "空锁目录残留"
+
+# custom 侧：旧版崩溃留下的空锁目录曾让"保存自定义型号"永久报同步进行中
+rm -rf "$T/lk-cust" && mkdir -p "$T/lk-cust"
+sleep 1
+COUT=$(printf '{"bus":"usb","model":"testmod","manufacturer":"brandx","manufacturer_id":"2dee","platform":"qualcomm","modes":"qmi","pdp_index":"1","edit":false}\n' \
+	| env $ENVQ QMODEM_SUPPORT_LOCKDIR="$T/lk-cust" QMODEM_SUPPORT_LOCK_GRACE=0 \
+		sh "$T/sbin/qmodem-support-custom" save 2>/dev/null)
+echo "$COUT" | grep -q '"success":true' && ok "空锁目录：自定义型号仍可保存" || bad "空锁目录阻塞自定义保存: $COUT"
+
 # 6.5 采集器：跨日归属合计精确 + 计数器不可读时 reset 保住生命周期基准
 cat > "$T/bin/ubus" << 'UBEOF'
 #!/bin/sh
-# 计数替身：从 $QMODEM_CTR_DIR/{rx,tx,fail} 读取 get_stats 结果
+# 计数替身：从 $QMODEM_CTR_DIR/{rx,tx,fail} 读取 get_stats 结果。
+# rx/tx 任一文件缺失即模拟"该侧计数器读不到"，用于验证单侧不可读时的基准处理。
 d="${QMODEM_CTR_DIR:?}"
 [ -f "$d/fail" ] && exit 1
-rx=$(cat "$d/rx" 2>/dev/null); tx=$(cat "$d/tx" 2>/dev/null)
-printf '{"available":true,"total_rx_bytes":%s,"total_tx_bytes":%s}\n' "${rx:-0}" "${tx:-0}"
+r=''; t=''
+[ -f "$d/rx" ] && r=$(cat "$d/rx" 2>/dev/null)
+[ -f "$d/tx" ] && t=$(cat "$d/tx" 2>/dev/null)
+if [ -n "$r" ] && [ -n "$t" ]; then
+	printf '{"available":true,"total_rx_bytes":%s,"total_tx_bytes":%s}\n' "$r" "$t"
+elif [ -n "$r" ]; then
+	printf '{"available":true,"total_rx_bytes":%s}\n' "$r"
+elif [ -n "$t" ]; then
+	printf '{"available":true,"total_tx_bytes":%s}\n' "$t"
+else
+	printf '{"available":true}\n'
+fi
 UBEOF
 chmod 755 "$T/bin/ubus"
 mkdir -p "$T/ctr"; printf '1000' > "$T/ctr/rx"; printf '500' > "$T/ctr/tx"; rm -f "$T/ctr/fail"
@@ -377,6 +418,34 @@ env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-co
 OUT=$(env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" show rs)
 echo "$OUT" | grep -q '"total_rx":0' && ok "计数器仍不可读时不凭空记账" || bad "凭空记账: $OUT"
 rm -f "$T/ctr/fail"
+
+# 6.5b 单侧计数器暂时不可读：该侧基准必须保住，恢复后只记真实增量。
+#      写成 0 会让下一轮把模组整个生命周期的累计流量记进当天。
+printf 'last_ts=%s\nlast_rx=1000\nlast_tx=500\ntotal_rx=0\ntotal_tx=0\nswapped=0\n' "$NOW" > "$T/etc/qmodem-stats/one.stats"
+mv "$T/ctr/rx" "$T/ctr/rx.off"       # 只有 tx 可读
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" run one >/dev/null 2>&1
+grep -q '^last_rx=1000$' "$T/etc/qmodem-stats/one.stats" \
+	&& ok "单侧不可读：该侧基准未被清零" || bad "单侧不可读：基准被清零 $(grep '^last_rx=' "$T/etc/qmodem-stats/one.stats")"
+mv "$T/ctr/rx.off" "$T/ctr/rx"
+printf '101000' > "$T/ctr/rx"; printf '1600' > "$T/ctr/tx"
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" run one >/dev/null 2>&1
+OUT=$(env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" sh "$T/bin/qmodem-stats-collect" show one)
+echo "$OUT" | grep -q '"total_rx":100000' \
+	&& ok "计数器恢复后只记真实增量（100000）" || bad "计数器恢复后虚增: $OUT"
+
+# 6.5c 存活持锁进程即使时间戳很旧也不能被抢占：慢采样不等于崩溃
+printf 'last_ts=0\nlast_rx=0\nlast_tx=0\ntotal_rx=0\ntotal_tx=0\nswapped=0\n' > "$T/etc/qmodem-stats/live1.stats"
+sleep 30 & HOLD=$!
+rm -rf "$T/lock-live.live1" && mkdir -p "$T/lock-live.live1"
+printf '%s %s\n' "$HOLD" "$(( $(date +%s) - 600 ))" > "$T/lock-live.live1/pid"
+env $ENVQ PATH="$T/bin:$PATH" QMODEM_CTR_DIR="$T/ctr" QMODEM_STATS_LOCKDIR="$T/lock-live" \
+	QMODEM_STATS_LOCK_RETRY=1 sh "$T/bin/qmodem-stats-collect" run live1 >/dev/null 2>&1
+if [ -f "$T/lock-live.live1/pid" ] && [ "$(cut -d' ' -f1 "$T/lock-live.live1/pid" 2>/dev/null)" = "$HOLD" ]; then
+	ok "存活持锁进程未被超时抢占"
+else
+	bad "存活持锁进程被抢占（锁已被清或易主）"
+fi
+kill "$HOLD" 2>/dev/null; rm -rf "$T/lock-live.live1"
 
 # 6.6 ACL：写操作不能再落在 read 段（rpcd 里 write 蕴含 read，只放 read 等于放开给只读会话）
 ACL="$ROOT/root/usr/share/rpcd/acl.d/luci-app-qmodem-generic.json"
