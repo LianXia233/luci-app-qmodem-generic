@@ -320,6 +320,44 @@ return view.extend({
 		);
 	},
 
+	/* 概览键值行：后端未上报的字段整行隐藏，绝不填假值（与 network/system
+	   页的 row() 语义一致）。id 供 10s 轮询原地填充；数据尚未就绪且该行带 id
+	   时以 '…' 占位，否则返回 null。 */
+	infoRow: function(label, value, id, allowPending) {
+		var pending = !controls.hasValue(value);
+		if (pending && !(id && allowPending))
+			return null;
+		return controls.element('div', {
+			'class': 'mt-info-row',
+			'style': 'display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--mt5700-border-subtle);font-size:13px;'
+		}, [
+			controls.element('span', { 'style': 'color:var(--mt5700-text-secondary);font-weight:600;' }, label),
+			controls.element('strong', {
+				'style': 'color:var(--mt5700-text);font-weight:750;font-variant-numeric:tabular-nums;',
+				'id': id || null
+			}, pending ? '…' : String(value))
+		]);
+	},
+
+	/* QoS 等级文本：QCI（LTE）与 5QI（NR）是两个独立上报字段，同时存在时
+	   并列展示、不互相覆盖；模组未上报时常填 0 或空串，一律视为未知 ——
+	   绝不显示成 'QCI 0'。返回 { label }，label 为空由调用方回退 '--'。 */
+	qosExplain: function(qosInfo) {
+		qosInfo = qosInfo || {};
+		var parts = [
+			this.qosLevel(qosInfo.qci, 'QCI'),
+			this.qosLevel(qosInfo.five_qi, '5QI')
+		].filter(function(text) { return text !== ''; });
+		return { label: parts.join(' / ') };
+	},
+
+	qosLevel: function(value, prefix) {
+		if (!controls.hasValue(value)) return '';
+		var n = Number(value);
+		if (!isFinite(n) || n <= 0) return '';
+		return prefix + ' ' + Math.round(n);
+	},
+
 	/* 速率文本：输入 Byte/s，输出 kbps 交由 controls.formatRate；无效返回 '--' */
 	rateText: function(bytesPerSec) {
 		var b = Number(bytesPerSec);
@@ -704,6 +742,7 @@ return view.extend({
 
 		// Card 3: 实时流量统计与微图（1s 轮询物理网卡内核计数）
 		var subRateText = this.subscriptionRate(data.qosInfo) || '--（模组未上报 AMBR）';
+		var qosText = this.qosExplain(data.qosInfo).label;
 		var cardTraffic = E('div', { 'class': 'mt-card' }, [
 			E('div', { 'class': 'mt-card-head' }, [
 				E('div', { 'class': 'mt-card-title' }, [
@@ -746,7 +785,7 @@ return view.extend({
 					E('div', { 'style': 'font-size:11px;color:var(--mt5700-text-muted);font-weight:700;' }, '运营商签约限速 (AMBR)'),
 					E('div', { 'id': 'ambr-text', 'style': 'font-size:13px;font-weight:800;color:var(--mt5700-accent);margin-top:2px;' }, subRateText)
 				]),
-				data.qosInfo && data.qosInfo.qci ? E('span', { 'class': 'mt-pill-tag', 'style': 'background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;' }, 'QCI ' + data.qosInfo.qci) : null
+				qosText ? E('span', { 'class': 'mt-pill-tag', 'style': 'background:rgba(139,92,246,0.15);color:var(--mt5700-accent);font-weight:800;' }, qosText) : null
 			])
 		]);
 		statGrid.appendChild(cardTraffic);
@@ -812,16 +851,9 @@ return view.extend({
 				/* 只渲染后端真实提供的字段；缺失的行直接隐藏，绝不填假值。
 				   例外：带刷新 id 的行（PCI/ARFCN/频段等）在数据未就绪时以
 				   '…' 占位渲染，10s 轮询会原地填充，避免开页久了 identifier 过期。 */
-				if (!controls.hasValue(r[1])) {
-					/* 数据未就绪且该行带刷新 id → 以 '…' 占位等待轮询填充；否则隐藏 */
-					if (!(r[2] && !self._dataReady))
-						return;
-				}
-				paneRows.push(E('div', { 'class': 'mt-info-row', 'style': 'display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--mt5700-border-subtle);font-size:13px;' }, [
-					E('span', { 'style': 'color:var(--mt5700-text-secondary);font-weight:600;' }, r[0]),
-					E('strong', { 'style': 'color:var(--mt5700-text);font-weight:750;font-variant-numeric:tabular-nums;', 'id': r[2] || null },
-						controls.hasValue(r[1]) ? String(r[1]) : '…')
-				]));
+				var row = self.infoRow(r[0], r[1], r[2], !self._dataReady);
+				if (row)
+					paneRows.push(row);
 			});
 			if (!paneRows.length) {
 				paneRows.push(E('div', { 'style': 'padding:14px 0;font-size:12px;color:var(--mt5700-text-muted);text-align:center;' },
@@ -923,7 +955,7 @@ return view.extend({
 			self.pollRegistered = true;
 
 			/* 每 1s：读取物理网卡内核计数（network.device statistics） */
-			poll.add(L.bind(function() {
+			poll.add(function() {
 				var live = self._live;
 				if (!live || !live.root || !live.root.isConnected || !self._netdev)
 					return;
@@ -956,10 +988,10 @@ return view.extend({
 					}
 					self.lastCounters = { t: now, rx: rx, tx: tx };
 				}).catch(function() { /* 读不到计数时保持上次读数，不虚构 */ });
-			}, this), 1);
+			}.bind(this), 1);
 
 			/* 每 10s：采样 cell_info（rpcd 侧 10s 缓存，不击穿 AT 串口） */
-			poll.add(L.bind(function() {
+			poll.add(function() {
 				var live = self._live;
 				if (!live || !live.root || !live.root.isConnected || !self.section)
 					return;
@@ -1001,7 +1033,7 @@ return view.extend({
 						cell_id: String(find(cell || [], 'Cell ID') || find(cell || [], 'cell_id') || '').trim()
 					});
 				}).catch(function() { /* 采样失败保留既有曲线 */ });
-			}, this), 10);
+			}.bind(this), 10);
 		}
 
 		/* 邻区扫描：整个页面生命周期只扫一次（重度 AT 操作），结果缓存，
@@ -1010,7 +1042,7 @@ return view.extend({
 			buildNeighborTableInto(self._live.neighborBox, self._neighborData);
 		} else if (!self._neighborStarted) {
 			self._neighborStarted = true;
-			window.setTimeout(L.bind(function() {
+			window.setTimeout(function() {
 				controls.getNeighborCell(self.section).then(function(nb) {
 					self._neighborData = (nb && nb.neighborcell) || {};
 					var live = self._live;
@@ -1021,7 +1053,7 @@ return view.extend({
 					if (live && live.root && live.root.isConnected && live.neighborBox)
 						live.neighborBox.textContent = '邻区扫描失败（后端未响应），可刷新重试';
 				});
-			}, this), 1500);
+			}.bind(this), 1500);
 		}
 
 		/* 异步数据采集：首屏骨架已画完，这里才开始 collectData；
