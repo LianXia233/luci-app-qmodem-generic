@@ -4,7 +4,7 @@
 
 **QModem 通用美化版 LuCI WebUI · 现代化、全模组解耦的蜂窝网络控制中心**
 
-[![Version](https://img.shields.io/badge/Version-v3.0.0--r6-blue?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-v3.0.0--r7-blue?style=flat-square&logo=git&logoColor=white)](CHANGELOG.md)
 [![Build APK and IPK](https://img.shields.io/github/actions/workflow/status/LianXia233/luci-app-qmodem-generic/build.yml?branch=main&label=Build%20APK%20%26%20IPK&style=flat-square&logo=githubactions&logoColor=white)](https://github.com/LianXia233/luci-app-qmodem-generic/actions/workflows/build.yml)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20%7C%2024.10%20%7C%2025.x-00C49F?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
 [![Target Arch](https://img.shields.io/badge/Arch-all%20(Generic)-8b5cf6?style=flat-square)](#-运行环境与依赖)

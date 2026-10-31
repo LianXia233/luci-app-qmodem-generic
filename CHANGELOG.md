@@ -3,6 +3,13 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [3.0.0-7] - 2026-11-01
+
+- 修复（前端·概览页白屏）：`render()` 抛 `TypeError: L.bind is not a function` —— 1s 网卡计数轮询、10s 射频采样轮询与邻区扫描回调都用了旧版 LuCI 的 `L.bind()`，新版 `luci.js` 已不再导出该助手；改用原生 `Function.prototype.bind`，与其余七个视图的写法一致。
+- 修复（数据显示）：QoS 等级徽标只渲染 QCI，NR（5G）侧上报的 5QI 被丢弃。新增 `qosExplain()` / `qosLevel()`：QCI 与 5QI 并列展示、互不覆盖（`QCI 9 / 5QI 9`）；模组未上报时常填的 `0` 与空串一律视为未知，徽标整块隐藏，不再出现「QCI 0」这类假等级。
+- 重构：概览页「后端未上报的字段整行隐藏」原先内联在 `render()` 的行循环里，抽为视图方法 `infoRow()`，与 `network` / `system` 页的 `row()` 语义对齐；带轮询 id 的行仍在数据未就绪时以「…」占位、由 10s 轮询原地填充，行为不变。
+- 测试：修复 CI Static check → Frontend compatibility checks 连续失败（该步骤此前一次性跳过了 Build 与 Publish 两个 Job）。`node tests/run-frontend-tests.js` 现 **263 项全部通过**，[7.5] QCI/5QI 与签约速率、[7.6] 缺失字段隐藏、[8] 各视图渲染不抛异常三组用例转正。
+
 ## [3.0.0-6] - 2026-10-31
 
 - 新功能（概览页数据真实性）：全页数据接入上游 QModem 后端（ubus 对象 `qmodem`）与 netifd 实时计数，删除全部虚构展示，缺失字段一律显示 `--`：
