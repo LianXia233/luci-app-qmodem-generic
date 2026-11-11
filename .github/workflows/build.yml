@@ -35,9 +35,9 @@ jobs:
     name: Static check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -101,7 +101,7 @@ jobs:
       SDK_DIR: https://downloads.immortalwrt.org/releases/${{ matrix.version }}/targets/x86/64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -128,7 +128,7 @@ jobs:
 
       - name: Cache SDK Archive
         id: cache-sdk
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ steps.sdk-info.outputs.file }}
           key: sdk-archive-${{ env.SDK_TAG }}-${{ steps.sdk-info.outputs.hash }}
@@ -203,7 +203,7 @@ jobs:
           main_pkg=$(find output -maxdepth 1 -name "${PKG_DIR}*.${PACKAGE_FORMAT}" -print -quit)
           python3 scripts/build-offline-run.py "${main_pkg%.*}-${PACKAGE_FORMAT}-offline.run" output/*."$PACKAGE_FORMAT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         id: packages
         with:
           name: qmodem-generic-${{ matrix.format }}
@@ -240,9 +240,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: qmodem-generic-*
@@ -325,7 +325,7 @@ jobs:
           cat release-notes.md
 
       - name: Create / update release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
