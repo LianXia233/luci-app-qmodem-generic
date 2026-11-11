@@ -3,6 +3,17 @@
 本文件记录 `luci-app-qmodem-generic` 的版本变更。版本号格式为
 `v<PKG_VERSION>-<PKG_RELEASE>-build<运行号>`，与 GitHub Actions 自动发布的 Release 对应。
 
+## [未发布] - 2026-11-12
+
+- 变更（CI）：`.github/workflows/build.yml` 共 8 处 `uses:` 升级 ——
+  `actions/checkout@v4` → `v7`、`actions/setup-node@v4` → `v7`、
+  `actions/cache@v4` → `v6`、`actions/upload-artifact@v4` → `v7`、
+  `actions/download-artifact@v4` → `v8`、`softprops/action-gh-release@v2` → `v3`。
+- 说明：GitHub 已于 2026-09-23 从托管 runner 移除 Node 20 运行时，仍声明 `node20` 的 action 会被强制跑在 Node 24 上并打印 `Node.js 20 is deprecated` 告警，属于未验证状态；本次按各 action 的 `action.yml` 逐一核对 `runs.using` 后统一升级。
+- **仅改 CI 配置**：项目源码、`node-version` / `python-version` / `go-version` 等工具链版本、产物命名与 Release 流程均未改动。告警指的是 action 自身声明的运行时，不是项目构建所用的 Node 版本。
+  `PKG_VERSION` / `PKG_RELEASE` 与 Release 标签格式均未改动。
+- 验证：升级后全仓复扫 59 个工作流/Action 文件：`node20` / `node16` / `node12` 引用残留为 0，所有 YAML 均可解析。
+
 ## [3.0.0-7] - 2026-11-01
 
 - 修复（前端·概览页白屏）：`render()` 抛 `TypeError: L.bind is not a function` —— 1s 网卡计数轮询、10s 射频采样轮询与邻区扫描回调都用了旧版 LuCI 的 `L.bind()`，新版 `luci.js` 已不再导出该助手；改用原生 `Function.prototype.bind`，与其余七个视图的写法一致。
